@@ -193,7 +193,7 @@ export class WorktreeRegistry {
     }
   }
 
-  private async getWorktreeById(worktreeId: string): Promise<Worktree> {
+  async getWorktreeById(worktreeId: string): Promise<Worktree> {
     const snapshot = await this.getSnapshot()
     const worktree = snapshot.worktrees.find(
       (candidate) => candidate.worktreeId === worktreeId,

@@ -5,6 +5,7 @@ import {
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
+import { createSseStream } from '../sse'
 import { WorktreeRegistry } from './registry'
 import {
   AddRepositoryRequest,
@@ -20,10 +21,15 @@ import {
   type WorktreeEvent,
 } from './schemas'
 
-export function registerWorktreeRoutes(server: FastifyInstance): void {
-  const registry = new WorktreeRegistry(
-    server.log.child({ service: 'worktrees' }),
-  )
+type WorktreeRouteOptions = {
+  beforeDeleteWorktree?: (worktreeId: string) => Promise<void>
+}
+
+export function registerWorktreeRoutes(
+  server: FastifyInstance,
+  registry: WorktreeRegistry,
+  options: WorktreeRouteOptions = {},
+): void {
   const routes = server.withTypeProvider<ZodTypeProvider>()
 
   routes.route({
@@ -99,11 +105,16 @@ export function registerWorktreeRoutes(server: FastifyInstance): void {
         404: ErrorResponse,
       },
     },
-    handler: async (request) =>
-      registry.deleteWorktree(
+    handler: async (request) => {
+      const worktree = await registry.getWorktreeById(request.params.worktreeId)
+      if (worktree.path !== worktree.mainWorktreePath) {
+        await options.beforeDeleteWorktree?.(request.params.worktreeId)
+      }
+      return registry.deleteWorktree(
         request.params.worktreeId,
         request.body.deleteBranch,
-      ),
+      )
+    },
   })
 }
 
@@ -112,41 +123,15 @@ async function streamWorktreeEvents(
   reply: FastifyReply,
   registry: WorktreeRegistry,
 ): Promise<void> {
-  reply.hijack()
-
-  // Hijacking detaches the reply from Fastify's hook pipeline, so `@fastify/cors`
-  // never runs for this response. Reflect the request origin here (matching the
-  // plugin's `origin: true` behavior) or the browser rejects the cross-origin
-  // EventSource and it never leaves the CONNECTING state.
-  const headers: Record<string, string> = {
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
-    'content-type': 'text/event-stream; charset=utf-8',
-    'x-accel-buffering': 'no',
-  }
-  const { origin } = request.headers
-  if (origin) {
-    headers['access-control-allow-origin'] = origin
-    headers['vary'] = 'Origin'
-  }
-  reply.raw.writeHead(200, headers)
-
-  const sendEvent = (eventName: string, data: unknown): void => {
-    reply.raw.write(`event: ${eventName}\n`)
-    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
-  }
+  const stream = createSseStream(request, reply)
   const onWorktreeEvent = (event: WorktreeEvent): void => {
-    sendEvent(event.type, event)
+    stream.send(event.type, event)
   }
-  const keepAlive = setInterval(() => {
-    reply.raw.write(': keep-alive\n\n')
-  }, 30_000)
 
   registry.events.on('worktree-event', onWorktreeEvent)
-  reply.raw.on('close', () => {
-    clearInterval(keepAlive)
+  stream.onClose(() => {
     registry.events.off('worktree-event', onWorktreeEvent)
   })
 
-  sendEvent('snapshot', await registry.getSnapshot())
+  stream.send('snapshot', await registry.getSnapshot())
 }

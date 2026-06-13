@@ -17,6 +17,7 @@ import {
   addRepository,
   createWorktree,
   deleteWorktree,
+  openCode,
   removeRepository,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
@@ -126,6 +127,21 @@ export function App(): React.JSX.Element {
     [],
   )
 
+  const handleOpenCode = useCallback(
+    async (worktreeId: string): Promise<void> => {
+      setError(null)
+      logger.info({ worktreeId }, 'opening worktree editor')
+      markBusy(worktreeId, true)
+      const { error } = await openCode({ body: { worktreeId } })
+      if (error) {
+        logger.error({ worktreeId, err: error }, 'open editor failed')
+        setError(messageOf(error, 'Failed to open editor'))
+      }
+      markBusy(worktreeId, false)
+    },
+    [markBusy],
+  )
+
   const { worktrees, repositories } = snapshot
   const isEmpty = worktrees.length === 0 && !pendingCreate
 
@@ -166,6 +182,7 @@ export function App(): React.JSX.Element {
                       <WorktreeRow
                         worktree={worktree}
                         busy={busyIds.has(worktree.worktreeId)}
+                        onOpen={() => handleOpenCode(worktree.worktreeId)}
                         onDelete={(deleteBranch) =>
                           handleDelete(worktree.worktreeId, deleteBranch)
                         }

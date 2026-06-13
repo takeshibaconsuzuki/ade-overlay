@@ -11,6 +11,7 @@ import type { Worktree } from './worktrees'
 type WorktreeRowProps = {
   worktree: Worktree
   busy: boolean
+  onOpen: () => void
   onDelete: (deleteBranch: boolean) => void
   onRemoveRepository: () => void
 }
@@ -18,13 +19,38 @@ type WorktreeRowProps = {
 export function WorktreeRow({
   worktree,
   busy,
+  onOpen,
   onDelete,
   onRemoveRepository,
 }: WorktreeRowProps): React.JSX.Element {
   const isMain = worktree.path === worktree.mainWorktreePath
 
   return (
-    <Flex align="center" justify="between" gap="3" px="2" py="3">
+    <Flex
+      className="worktree-row"
+      role="button"
+      tabIndex={busy ? -1 : 0}
+      align="center"
+      justify="between"
+      gap="3"
+      px="2"
+      py="3"
+      aria-disabled={busy}
+      onClick={() => {
+        if (!busy) {
+          onOpen()
+        }
+      }}
+      onKeyDown={(event) => {
+        if (busy) {
+          return
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+    >
       <Flex direction="column" gap="1" minWidth="0">
         <Flex align="center" gap="2">
           <Text weight="medium" truncate>
@@ -61,11 +87,12 @@ export function WorktreeRow({
               color="gray"
               radius="full"
               aria-label="Worktree actions"
+              onClick={(event) => event.stopPropagation()}
             >
               <Text size="5">⋯</Text>
             </IconButton>
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content>
+          <DropdownMenu.Content onClick={(event) => event.stopPropagation()}>
             <DropdownMenu.Item
               color="red"
               disabled={isMain}

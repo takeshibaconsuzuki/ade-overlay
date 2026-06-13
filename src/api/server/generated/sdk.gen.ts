@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, IngestLogsData, IngestLogsResponses, ListWorktreesData, ListWorktreesResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, EditorCommandsData, EditorCommandsResponses, IngestLogsData, IngestLogsResponses, ListWorktreesData, ListWorktreesResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -49,6 +49,17 @@ export const createWorktree = <ThrowOnError extends boolean = false>(options: Op
 
 export const deleteWorktree = <ThrowOnError extends boolean = false>(options: Options<DeleteWorktreeData, ThrowOnError>): RequestResult<DeleteWorktreeResponses, DeleteWorktreeErrors, ThrowOnError> => (options.client ?? client).delete<DeleteWorktreeResponses, DeleteWorktreeErrors, ThrowOnError>({
     url: '/worktrees/{worktreeId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const editorCommands = <ThrowOnError extends boolean = false>(options?: Options<EditorCommandsData, ThrowOnError>): RequestResult<EditorCommandsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<EditorCommandsResponses, unknown, ThrowOnError>({ url: '/editorCommands', ...options });
+
+export const openCode = <ThrowOnError extends boolean = false>(options: Options<OpenCodeData, ThrowOnError>): RequestResult<OpenCodeResponses, OpenCodeErrors, ThrowOnError> => (options.client ?? client).post<OpenCodeResponses, OpenCodeErrors, ThrowOnError>({
+    url: '/openCode',
     ...options,
     headers: {
         'Content-Type': 'application/json',

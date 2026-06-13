@@ -204,6 +204,63 @@ export type DeleteWorktreeResponses = {
 
 export type DeleteWorktreeResponse = DeleteWorktreeResponses[keyof DeleteWorktreeResponses];
 
+export type EditorCommandsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/editorCommands';
+};
+
+export type EditorCommandsResponses = {
+    /**
+     * Server-sent editor switch commands.
+     */
+    200: string;
+};
+
+export type EditorCommandsResponse = EditorCommandsResponses[keyof EditorCommandsResponses];
+
+export type OpenCodeData = {
+    body: {
+        worktreeId: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/openCode';
+};
+
+export type OpenCodeErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type OpenCodeError = OpenCodeErrors[keyof OpenCodeErrors];
+
+export type OpenCodeResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        worktreeId: string;
+        url: string;
+        alreadyStarted: boolean;
+    };
+};
+
+export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
+
 export type IngestLogsData = {
     body: {
         records: Array<{

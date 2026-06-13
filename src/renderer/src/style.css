@@ -9,3 +9,17 @@ body,
 .radix-themes {
   min-height: 100vh;
 }
+
+.worktree-row {
+  cursor: pointer;
+  outline: none;
+}
+
+.worktree-row:hover,
+.worktree-row:focus-visible {
+  background: var(--gray-a3);
+}
+
+.worktree-row[aria-disabled='true'] {
+  cursor: default;
+}

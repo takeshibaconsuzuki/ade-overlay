@@ -1,7 +1,8 @@
+*.foo*
+*.tsbuildinfo
 .DS_Store
 .mypy_cache/
 .node.*/
+.openapi.generated.json
 node_modules/
 out/
-*.tsbuildinfo
-.openapi.generated.json

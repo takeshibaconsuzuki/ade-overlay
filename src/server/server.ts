@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import fastifyCors from '@fastify/cors'
 import fastifySwagger from '@fastify/swagger'
+import { type Socket } from 'node:net'
 import {
   hasZodFastifySchemaValidationErrors,
   isResponseSerializationError,
@@ -11,7 +12,10 @@ import {
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
 import { HttpError, getStatusCode } from './errors'
 import { logger } from './logger'
+import { registerEditorRoutes } from './editor/routes'
+import { EditorService } from './editor/service'
 import { registerLogRoutes } from './logs/routes'
+import { WorktreeRegistry } from './worktrees/registry'
 import { registerWorktreeRoutes } from './worktrees/routes'
 
 export type ServerOptions = {
@@ -20,7 +24,35 @@ export type ServerOptions = {
 }
 
 export function createServer() {
-  const server = Fastify({ loggerInstance: logger })
+  const serverBase = Fastify({ loggerInstance: logger })
+  const server = serverBase as typeof serverBase & {
+    destroyActiveConnections: () => void
+  }
+  const worktreeRegistry = new WorktreeRegistry(
+    server.log.child({ service: 'worktrees' }),
+  )
+  const editor = new EditorService(
+    worktreeRegistry,
+    server.log.child({ service: 'editor' }),
+  )
+  const activeSockets = new Set<Socket>()
+
+  server.server.on('connection', (socket) => {
+    activeSockets.add(socket)
+    socket.on('close', () => {
+      activeSockets.delete(socket)
+    })
+  })
+
+  server.destroyActiveConnections = () => {
+    for (const socket of activeSockets) {
+      socket.destroy()
+    }
+  }
+
+  server.addHook('onClose', async () => {
+    await editor.shutdown()
+  })
 
   server.setValidatorCompiler(validatorCompiler)
   server.setSerializerCompiler(serializerCompiler)
@@ -46,7 +78,13 @@ export function createServer() {
   // Register routes after the Swagger plugin has booted so its `onRoute` hook
   // (installed during plugin load) captures them into the OpenAPI document.
   server.register(async (instance) => {
-    registerWorktreeRoutes(instance)
+    registerWorktreeRoutes(instance, worktreeRegistry, {
+      beforeDeleteWorktree: (worktreeId) => editor.closeWorktree(worktreeId),
+    })
+    registerEditorRoutes(instance, {
+      registry: worktreeRegistry,
+      editor,
+    })
     registerLogRoutes(instance)
   })
 
