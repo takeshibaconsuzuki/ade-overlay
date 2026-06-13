@@ -5,7 +5,11 @@
   },
   "include": [
     "electron.vite.config.ts",
+    "openapi-ts.config.ts",
+    "scripts/**/*.ts",
+    "src/api/**/*.ts",
     "src/main/**/*.ts",
-    "src/preload/**/*.ts"
+    "src/preload/**/*.ts",
+    "src/server/**/*.ts"
   ]
 }

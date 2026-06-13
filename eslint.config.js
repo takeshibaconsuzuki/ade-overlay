@@ -6,15 +6,18 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'node_modules/**'],
+    ignores: ['out/**', 'node_modules/**', 'src/api/generated/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: [
       'electron.vite.config.ts',
+      'openapi-ts.config.ts',
+      'scripts/**/*.ts',
       'src/main/**/*.ts',
       'src/preload/**/*.ts',
+      'src/server/**/*.ts',
     ],
     languageOptions: {
       globals: globals.node,
