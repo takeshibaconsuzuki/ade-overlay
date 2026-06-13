@@ -1,4 +1,8 @@
-import { type FastifyInstance, type FastifyReply } from 'fastify'
+import {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
 import { WorktreeRegistry } from './registry'
@@ -17,7 +21,9 @@ import {
 } from './schemas'
 
 export function registerWorktreeRoutes(server: FastifyInstance): void {
-  const registry = new WorktreeRegistry()
+  const registry = new WorktreeRegistry(
+    server.log.child({ service: 'worktrees' }),
+  )
   const routes = server.withTypeProvider<ZodTypeProvider>()
 
   routes.route({
@@ -60,8 +66,8 @@ export function registerWorktreeRoutes(server: FastifyInstance): void {
           .describe('Server-sent worktree snapshot and change events.'),
       },
     },
-    handler: async (_request, reply) => {
-      await streamWorktreeEvents(reply, registry)
+    handler: async (request, reply) => {
+      await streamWorktreeEvents(request, reply, registry)
     },
   })
 
@@ -102,16 +108,28 @@ export function registerWorktreeRoutes(server: FastifyInstance): void {
 }
 
 async function streamWorktreeEvents(
+  request: FastifyRequest,
   reply: FastifyReply,
   registry: WorktreeRegistry,
 ): Promise<void> {
   reply.hijack()
-  reply.raw.writeHead(200, {
+
+  // Hijacking detaches the reply from Fastify's hook pipeline, so `@fastify/cors`
+  // never runs for this response. Reflect the request origin here (matching the
+  // plugin's `origin: true` behavior) or the browser rejects the cross-origin
+  // EventSource and it never leaves the CONNECTING state.
+  const headers: Record<string, string> = {
     'cache-control': 'no-cache',
     connection: 'keep-alive',
     'content-type': 'text/event-stream; charset=utf-8',
     'x-accel-buffering': 'no',
-  })
+  }
+  const { origin } = request.headers
+  if (origin) {
+    headers['access-control-allow-origin'] = origin
+    headers['vary'] = 'Origin'
+  }
+  reply.raw.writeHead(200, headers)
 
   const sendEvent = (eventName: string, data: unknown): void => {
     reply.raw.write(`event: ${eventName}\n`)

@@ -6,7 +6,7 @@ export function createWindow(): void {
     width: 900,
     height: 600,
     webPreferences: {
-      preload: join(import.meta.dirname, '../../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

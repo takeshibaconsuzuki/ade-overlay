@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { WORKTREE_EVENT_TYPE } from '../../api/server/events'
 import { WORKTREE_ID_LENGTH } from './ids'
 
 export const PathSchema = z.string().min(1)
@@ -55,22 +56,22 @@ const WorktreeSnapshotEvent = z.object({
 
 export const WorktreeEvent = z.discriminatedUnion('type', [
   z.object({
-    type: z.literal('repository-added'),
+    type: z.literal(WORKTREE_EVENT_TYPE.repositoryAdded),
     repository: Repository,
     snapshot: WorktreeSnapshot,
   }),
   z.object({
-    type: z.literal('repository-removed'),
+    type: z.literal(WORKTREE_EVENT_TYPE.repositoryRemoved),
     mainWorktreePath: z.string(),
     snapshot: WorktreeSnapshot,
   }),
   z.object({
-    type: z.literal('worktree-created'),
+    type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreated),
     worktree: Worktree,
     snapshot: WorktreeSnapshot,
   }),
   z.object({
-    type: z.literal('worktree-deleted'),
+    type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
     worktreeId: z.string(),
     branchDeleted: z.boolean(),
     snapshot: WorktreeSnapshot,

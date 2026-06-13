@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { type GitWorktree, listGitWorktrees, runGit } from './git'
 import { canonicalizePath, normalizePath } from '../paths'
@@ -16,10 +17,12 @@ export class WorktreeRegistry {
 
   private readonly repositories = new Map<string, Repository>()
 
+  constructor(private readonly log: Logger) {}
+
   async addRepository(
     repositoryPath: string,
   ): Promise<{ repository: Repository; snapshot: WorktreeSnapshot }> {
-    const worktrees = await listGitWorktrees(repositoryPath)
+    const worktrees = await listGitWorktrees(repositoryPath, this.log)
     const mainWorktree = worktrees.at(0)
 
     if (!mainWorktree) {
@@ -30,6 +33,7 @@ export class WorktreeRegistry {
     const repository = { mainWorktreePath }
 
     this.repositories.set(mainWorktreePath, repository)
+    this.log.info({ mainWorktreePath }, 'repository added')
 
     const snapshot = await this.getSnapshot()
     this.emit({
@@ -51,6 +55,7 @@ export class WorktreeRegistry {
     const snapshot = await this.getSnapshot()
 
     if (removed && repositoryKey) {
+      this.log.info({ mainWorktreePath: repositoryKey }, 'repository removed')
       this.emit({
         type: 'repository-removed',
         mainWorktreePath: repositoryKey,
@@ -71,20 +76,26 @@ export class WorktreeRegistry {
     worktree: Worktree
   }> {
     const repository = await this.getRepository(mainWorktreePath)
-    const targetPath = normalizePath(worktreePath)
     const args = ['worktree', 'add']
 
     if (newBranch) {
       args.push('-b', newBranch)
     }
 
-    args.push(targetPath, baseBranch)
-    await runGit(repository.mainWorktreePath, args)
+    args.push(normalizePath(worktreePath), baseBranch)
+    await runGit(repository.mainWorktreePath, args, this.log)
 
+    // Canonicalize as soon as the path exists on disk (realpath requires it),
+    // then key everything off the canonical path.
+    const targetPath = await canonicalizePath(worktreePath)
     const worktreeId = createWorktreeId(targetPath)
     const worktree = await this.getWorktreeById(worktreeId)
     const snapshot = await this.getSnapshot()
 
+    this.log.info(
+      { worktreeId, path: targetPath, branchName: worktree.branchName },
+      'worktree created',
+    )
     this.emit({
       type: 'worktree-created',
       worktree,
@@ -104,23 +115,24 @@ export class WorktreeRegistry {
       throw new HttpError(400, 'Cannot delete a tracked main worktree')
     }
 
-    await runGit(worktree.mainWorktreePath, [
-      'worktree',
-      'remove',
-      worktree.path,
-    ])
+    await runGit(
+      worktree.mainWorktreePath,
+      ['worktree', 'remove', worktree.path],
+      this.log,
+    )
 
     let branchDeleted = false
     if (deleteBranch && worktree.branchName) {
-      await runGit(worktree.mainWorktreePath, [
-        'branch',
-        '-D',
-        worktree.branchName,
-      ])
+      await runGit(
+        worktree.mainWorktreePath,
+        ['branch', '-D', worktree.branchName],
+        this.log,
+      )
       branchDeleted = true
     }
 
     const snapshot = await this.getSnapshot()
+    this.log.info({ worktreeId, branchDeleted }, 'worktree deleted')
     this.emit({
       type: 'worktree-deleted',
       worktreeId,
@@ -137,7 +149,7 @@ export class WorktreeRegistry {
     )
     const worktreeGroups = await Promise.all(
       repositories.map(async (repository) =>
-        (await listGitWorktrees(repository.mainWorktreePath)).map(
+        (await listGitWorktrees(repository.mainWorktreePath, this.log)).map(
           (worktree) => ({
             ...worktree,
             mainWorktreePath: repository.mainWorktreePath,

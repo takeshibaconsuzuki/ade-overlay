@@ -1,4 +1,5 @@
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify from 'fastify'
+import fastifyCors from '@fastify/cors'
 import fastifySwagger from '@fastify/swagger'
 import {
   hasZodFastifySchemaValidationErrors,
@@ -7,8 +8,10 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod'
-import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from './config'
+import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
 import { HttpError, getStatusCode } from './errors'
+import { logger } from './logger'
+import { registerLogRoutes } from './logs/routes'
 import { registerWorktreeRoutes } from './worktrees/routes'
 
 export type ServerOptions = {
@@ -16,11 +19,19 @@ export type ServerOptions = {
   port?: number
 }
 
-export function createServer(): FastifyInstance {
-  const server = Fastify({ logger: true })
+export function createServer() {
+  const server = Fastify({ loggerInstance: logger })
 
   server.setValidatorCompiler(validatorCompiler)
   server.setSerializerCompiler(serializerCompiler)
+  // The renderer is served from a different origin (Vite dev server or a
+  // `file://` page), so allow cross-origin access to this local API.
+  // `@fastify/cors` defaults to GET,HEAD,POST, which would block the DELETE
+  // routes during preflight — list every method the API uses.
+  server.register(fastifyCors, {
+    origin: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  })
   server.register(fastifySwagger, {
     openapi: {
       info: {
@@ -32,7 +43,12 @@ export function createServer(): FastifyInstance {
     transform: jsonSchemaTransform,
   })
 
-  registerWorktreeRoutes(server)
+  // Register routes after the Swagger plugin has booted so its `onRoute` hook
+  // (installed during plugin load) captures them into the OpenAPI document.
+  server.register(async (instance) => {
+    registerWorktreeRoutes(instance)
+    registerLogRoutes(instance)
+  })
 
   server.get(OPENAPI_PATH, async () => server.swagger())
 
@@ -76,7 +92,7 @@ export function createServer(): FastifyInstance {
 export async function startServer({
   host = SERVER_HOST,
   port = SERVER_PORT,
-}: ServerOptions = {}): Promise<FastifyInstance> {
+}: ServerOptions = {}): Promise<ReturnType<typeof createServer>> {
   const server = createServer()
   await server.listen({ host, port })
   return server

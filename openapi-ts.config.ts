@@ -1,9 +1,9 @@
 import { defineConfig } from '@hey-api/openapi-ts'
-import { OPENAPI_GENERATED_SPEC_PATH } from './src/server/config'
+import { OPENAPI_GENERATED_SPEC_PATH } from './src/api/server/config'
 
 export default defineConfig({
   input: OPENAPI_GENERATED_SPEC_PATH,
-  output: 'src/api/generated',
+  output: 'src/api/server/generated',
   plugins: [
     '@hey-api/typescript',
     {

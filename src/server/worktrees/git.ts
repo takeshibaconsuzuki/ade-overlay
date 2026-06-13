@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { normalizePath } from '../paths'
 
@@ -17,13 +18,13 @@ export type GitWorktree = {
 
 export async function listGitWorktrees(
   repositoryPath: string,
+  log?: Logger,
 ): Promise<GitWorktree[]> {
-  const output = await runGit(repositoryPath, [
-    'worktree',
-    'list',
-    '--porcelain',
-    '-z',
-  ])
+  const output = await runGit(
+    repositoryPath,
+    ['worktree', 'list', '--porcelain', '-z'],
+    log,
+  )
   const records: GitWorktree[] = []
   let current: Partial<GitWorktree> = {}
 
@@ -74,10 +75,16 @@ export async function listGitWorktrees(
   return records
 }
 
-export async function runGit(cwd: string, args: string[]): Promise<string> {
+export async function runGit(
+  cwd: string,
+  args: string[],
+  log?: Logger,
+): Promise<string> {
+  const directory = normalizePath(cwd)
+  log?.debug({ cwd: directory, args }, 'running git command')
   try {
     const { stdout } = await execFileAsync('git', args, {
-      cwd: normalizePath(cwd),
+      cwd: directory,
       maxBuffer: 10 * 1024 * 1024,
     })
 
@@ -85,6 +92,7 @@ export async function runGit(cwd: string, args: string[]): Promise<string> {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Git command failed'
+    log?.warn({ cwd: directory, args, message }, 'git command failed')
     throw new HttpError(400, message)
   }
 }
