@@ -1,8 +1,64 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, globalShortcut } from 'electron'
 import { join } from 'node:path'
 import { logger } from '../../server/logger'
 
 const log = logger.child({ process: 'main' })
+
+/** Global shortcut that flips the launcher between active and dormant. */
+const TOGGLE_ACCELERATOR = 'CommandOrControl+Shift+Space'
+
+/** Window opacity used while the launcher is dormant. */
+const DORMANT_OPACITY = 0.4
+
+/**
+ * The launcher's two interaction modes:
+ * - `active`: fully opaque and clickable.
+ * - `dormant`: translucent, with clicks passing through to whatever is behind.
+ */
+type LauncherState = 'active' | 'dormant'
+
+let launcherWindow: BrowserWindow | null = null
+let launcherState: LauncherState = 'active'
+
+/**
+ * Applies a launcher state to the window. `setIgnoreMouseEvents` only affects
+ * this window, so the rest of the desktop keeps receiving mouse events normally
+ * in either state.
+ */
+function applyLauncherState(
+  window: BrowserWindow,
+  state: LauncherState
+): void {
+  if (state === 'dormant') {
+    window.setOpacity(DORMANT_OPACITY)
+    window.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    window.setOpacity(1)
+    window.setIgnoreMouseEvents(false)
+    // Bring the launcher forward and give it keyboard focus so it is ready to
+    // use the moment it becomes active.
+    window.show()
+    window.focus()
+  }
+}
+
+/** Moves the launcher to an explicit state, doing nothing if already there. */
+function setLauncherState(state: LauncherState): void {
+  if (!launcherWindow || launcherWindow.isDestroyed()) {
+    return
+  }
+  if (launcherState === state) {
+    return
+  }
+  launcherState = state
+  applyLauncherState(launcherWindow, state)
+  log.info({ state }, 'launcher state changed')
+}
+
+/** Toggles the launcher between active and dormant. */
+function toggleLauncherState(): void {
+  setLauncherState(launcherState === 'active' ? 'dormant' : 'active')
+}
 
 /**
  * Loads the controller renderer (a single-page app) into a window, selecting
@@ -55,9 +111,28 @@ export function createWindow(): void {
   window.setAlwaysOnTop(true, 'screen-saver')
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
+  // Start active, and let CommandOrControl+Shift+Space flip the state from
+  // anywhere — even while dormant and click-through, since it is a global
+  // shortcut rather than a window-level one.
+  launcherWindow = window
+  launcherState = 'active'
+  applyLauncherState(window, launcherState)
+  if (!globalShortcut.register(TOGGLE_ACCELERATOR, toggleLauncherState)) {
+    log.warn(
+      { accelerator: TOGGLE_ACCELERATOR },
+      'failed to register launcher toggle shortcut'
+    )
+  }
+
+  // Losing focus drops the launcher to dormant so it gets out of the way; the
+  // global shortcut (or clicking once it is active again) brings it back.
+  window.on('blur', () => setLauncherState('dormant'))
+
   // The launcher is the app's root window; closing it quits the app even if the
   // worktrees window is still open.
   window.on('closed', () => {
+    globalShortcut.unregister(TOGGLE_ACCELERATOR)
+    launcherWindow = null
     log.info('launcher window closed')
     app.quit()
   })
@@ -82,6 +157,10 @@ export function openWorktreesWindow(): void {
     height: 600,
     title: 'Worktrees',
     webPreferences: webPreferences(),
+  })
+
+  window.on('blur', () => {
+    window.close()
   })
 
   window.on('closed', () => {
