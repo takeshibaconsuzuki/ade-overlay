@@ -25,10 +25,7 @@ let launcherState: LauncherState = 'active'
  * this window, so the rest of the desktop keeps receiving mouse events normally
  * in either state.
  */
-function applyLauncherState(
-  window: BrowserWindow,
-  state: LauncherState
-): void {
+function applyLauncherState(window: BrowserWindow, state: LauncherState): void {
   if (state === 'dormant') {
     window.setOpacity(DORMANT_OPACITY)
     window.setIgnoreMouseEvents(true, { forward: true })
@@ -97,7 +94,6 @@ export function createWindow(): void {
     minWidth: 220,
     minHeight: 140,
     resizable: true,
-    title: 'ADE',
     alwaysOnTop: true,
     // Drop the native titlebar on every platform; the renderer draws its own
     // titlebar (drag region + close button) so the chrome looks identical
@@ -120,7 +116,7 @@ export function createWindow(): void {
   if (!globalShortcut.register(TOGGLE_ACCELERATOR, toggleLauncherState)) {
     log.warn(
       { accelerator: TOGGLE_ACCELERATOR },
-      'failed to register launcher toggle shortcut'
+      'failed to register launcher toggle shortcut',
     )
   }
 
@@ -155,7 +151,6 @@ export function openWorktreesWindow(): void {
   const window = new BrowserWindow({
     width: 900,
     height: 600,
-    title: 'Worktrees',
     webPreferences: webPreferences(),
   })
 

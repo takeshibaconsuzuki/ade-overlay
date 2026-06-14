@@ -12,7 +12,7 @@ import { Titlebar } from '../components/Titlebar'
  * The launcher view shown in the small startup window. Its sole job is to open
  * the worktrees window via the privileged desktop bridge.
  */
-export function Launcher(): React.JSX.Element {
+export function Launcher({ title }: { title: string }): React.JSX.Element {
   const handleOpenWorktrees = useCallback(async (): Promise<void> => {
     if (!window.desktop) {
       return
@@ -41,12 +41,7 @@ export function Launcher(): React.JSX.Element {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (
-        event.repeat ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey
-      ) {
+      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
         return
       }
 
@@ -68,7 +63,7 @@ export function Launcher(): React.JSX.Element {
   // the rest of the surface stays free for normal pointer interaction.
   return (
     <Flex direction="column" height="100vh">
-      <Titlebar title="ADE" />
+      <Titlebar title={title} />
       <Flex align="center" justify="center" flexGrow="1" p="4">
         <Button size="3" onClick={handleOpenWorktrees}>
           Worktrees
