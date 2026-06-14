@@ -3,6 +3,7 @@ import {
   Button,
   Callout,
   Card,
+  Checkbox,
   Flex,
   Select,
   Spinner,
@@ -47,6 +48,7 @@ export function CreateWorktreeForm({
     branches: string[]
   }>({ repository: '', branches: [] })
   const [newBranch, setNewBranch] = useState('')
+  const [bootstrap, setBootstrap] = useState(false)
   const [generatedWorktreePath, setGeneratedWorktreePath] = useState('')
   const [manualWorktreePath, setManualWorktreePath] = useState<string | null>(
     null,
@@ -61,6 +63,12 @@ export function CreateWorktreeForm({
   const selectedRepository = repositoryIsTracked
     ? repository
     : repositories[0]?.mainWorktreePath || ''
+  const selectedRepositoryConfig = repositories.find(
+    (repo) => repo.mainWorktreePath === selectedRepository,
+  )
+  const hasBootstrapCommand = Boolean(
+    selectedRepositoryConfig?.bootstrapCommand,
+  )
   const trimmedBaseBranch = baseBranch.trim()
   const trimmedNewBranch = newBranch.trim()
   const templateBranch = trimmedNewBranch || trimmedBaseBranch
@@ -154,6 +162,7 @@ export function CreateWorktreeForm({
       baseBranch: baseBranch.trim(),
       newBranch: newBranch.trim() || undefined,
       worktreePath: worktreePath.trim(),
+      bootstrap: bootstrap && hasBootstrapCommand,
     })
     if (created) {
       setNewBranch('')
@@ -251,6 +260,19 @@ export function CreateWorktreeForm({
                   placeholder="~/worktrees/my-change"
                 />
               </Field>
+
+              <Text as="label" size="2">
+                <Flex align="center" gap="2">
+                  <Checkbox
+                    checked={bootstrap && hasBootstrapCommand}
+                    disabled={!hasBootstrapCommand}
+                    onCheckedChange={(checked) =>
+                      setBootstrap(checked === true)
+                    }
+                  />
+                  Bootstrap
+                </Flex>
+              </Text>
 
               <Flex justify="end">
                 <Button type="submit" disabled={!canSubmit}>

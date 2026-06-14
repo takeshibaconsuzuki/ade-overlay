@@ -46,11 +46,7 @@ export function WorktreeList({
 
   const handleSelect = useCallback(
     (worktree: Worktree) => {
-      // Only ready worktrees can be opened; creating/failed rows are inert.
-      if (
-        worktree.creationState === 'ready' &&
-        !busyIds.has(worktree.worktreeId)
-      ) {
+      if (worktree.isOpenable && !busyIds.has(worktree.worktreeId)) {
         onOpen(worktree.worktreeId)
       }
     },

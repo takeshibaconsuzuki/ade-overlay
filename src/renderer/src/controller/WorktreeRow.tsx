@@ -37,6 +37,9 @@ export function WorktreeRow({
   const isMain = worktree.path === worktree.mainWorktreePath
   const isFailed = worktree.creationState === 'failed'
   const isCreating = worktree.creationState === 'creating'
+  const isBootstrapping = worktree.creationState === 'bootstrapping'
+  const isCreationPending = isCreating || isBootstrapping
+  const showDestructiveActions = !isCreationPending
   const secondary =
     isFailed && worktree.creationError
       ? worktree.creationError
@@ -45,7 +48,7 @@ export function WorktreeRow({
   return (
     <Box
       className="worktree-row"
-      aria-disabled={busy || isCreating}
+      aria-disabled={busy || !worktree.isOpenable}
       {...itemProps}
     >
       {/* Leading status column. Its width is shared across all rows via the
@@ -73,6 +76,11 @@ export function WorktreeRow({
           {isCreating && (
             <Badge color="iris" variant="soft" radius="full">
               creating
+            </Badge>
+          )}
+          {isBootstrapping && (
+            <Badge color="iris" variant="soft" radius="full">
+              bootstrapping
             </Badge>
           )}
           {worktree.isDetached && (
@@ -115,31 +123,35 @@ export function WorktreeRow({
           </DropdownMenu.Trigger>
           <DropdownMenu.Content onClick={(event) => event.stopPropagation()}>
             {worktree.hasCreationLogs && (
+              <DropdownMenu.Item onSelect={() => onOpenCreationLogs()}>
+                Open creation logs
+              </DropdownMenu.Item>
+            )}
+            {showDestructiveActions && (
               <>
-                <DropdownMenu.Item onSelect={() => onOpenCreationLogs()}>
-                  Open creation logs
+                {worktree.hasCreationLogs && <DropdownMenu.Separator />}
+                {!isMain && (
+                  <DropdownMenu.Item
+                    color="red"
+                    onSelect={() => onDelete(false)}
+                  >
+                    Delete worktree
+                  </DropdownMenu.Item>
+                )}
+                {!isMain && worktree.branchName && (
+                  <DropdownMenu.Item
+                    color="red"
+                    onSelect={() => onDelete(true)}
+                  >
+                    Delete worktree and branch
+                  </DropdownMenu.Item>
+                )}
+                {!isMain && <DropdownMenu.Separator />}
+                <DropdownMenu.Item onSelect={() => onRemoveRepository()}>
+                  Remove repository
                 </DropdownMenu.Item>
-                <DropdownMenu.Separator />
               </>
             )}
-            <DropdownMenu.Item
-              color="red"
-              disabled={isMain}
-              onSelect={() => onDelete(false)}
-            >
-              Delete worktree
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              color="red"
-              disabled={isMain || !worktree.branchName}
-              onSelect={() => onDelete(true)}
-            >
-              Delete worktree and branch
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item onSelect={() => onRemoveRepository()}>
-              Remove repository
-            </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       )}
@@ -148,8 +160,8 @@ export function WorktreeRow({
 }
 
 /**
- * Leading state glyph: a spinner while busy or creating, a clickable error icon
- * when a creation failed, otherwise a dot for the VS Code session
+ * Leading state glyph: a spinner while busy or creation is pending, a clickable
+ * error icon when a creation failed, otherwise a dot for the VS Code session
  * (off/starting/on).
  */
 function LeadingIndicator({
@@ -163,7 +175,11 @@ function LeadingIndicator({
   sessionStatus: EditorSessionStatusValue
   onDismissCreationError: () => void
 }): React.JSX.Element {
-  if (busy || worktree.creationState === 'creating') {
+  if (
+    busy ||
+    worktree.creationState === 'creating' ||
+    worktree.creationState === 'bootstrapping'
+  ) {
     return <Spinner />
   }
 

@@ -117,7 +117,7 @@ export function registerEditorRoutes(
     },
     handler: async (request) => {
       const job = registry.getCreationJob(request.params.worktreeId)
-      if (!job || !job.terminated) {
+      if (!job) {
         throw new HttpError(
           404,
           `No creation logs for worktree: ${request.params.worktreeId}`,

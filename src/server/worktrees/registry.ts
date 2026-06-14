@@ -1,6 +1,8 @@
+import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createWriteStream } from 'node:fs'
+import { appendFile, mkdir, rm } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import Mustache from 'mustache'
 import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
@@ -35,10 +37,11 @@ type CreationJob = {
   mainWorktreePath: string
   newBranch?: string
   baseBranch: string
+  bootstrapCommand?: string
   // Canonical target path, computed up front so the job id matches the eventual
   // git-derived id (git reports realpath'd worktree paths).
   canonicalPath: string
-  state: 'creating' | 'succeeded' | 'failed'
+  state: 'creating' | 'bootstrapping' | 'succeeded' | 'failed'
   error?: string
   logPath: string
   terminated: boolean
@@ -82,6 +85,7 @@ export class WorktreeRegistry {
       this.repositories.set(mainWorktreePath, {
         mainWorktreePath,
         worktreePathTemplate: repository.worktreePathTemplate,
+        bootstrapCommand: repository.bootstrapCommand,
       })
     }
 
@@ -109,6 +113,7 @@ export class WorktreeRegistry {
     const repository: TrackedRepository = {
       mainWorktreePath,
       worktreePathTemplate: previousRepository?.worktreePathTemplate,
+      bootstrapCommand: previousRepository?.bootstrapCommand,
     }
 
     this.repositories.set(mainWorktreePath, repository)
@@ -194,6 +199,7 @@ export class WorktreeRegistry {
     newBranch,
     baseBranch,
     worktreePath,
+    bootstrap,
   }: CreateWorktreeRequest): Promise<{
     worktreeId: string
     worktree: Worktree
@@ -213,7 +219,7 @@ export class WorktreeRegistry {
     const worktreeId = createWorktreeId(canonicalPath)
 
     const activeJob = this.creationJobs.get(worktreeId)
-    if (activeJob && activeJob.state === 'creating') {
+    if (activeJob && !activeJob.terminated) {
       throw new HttpError(
         409,
         `A worktree is already being created at ${canonicalPath}`,
@@ -228,16 +234,24 @@ export class WorktreeRegistry {
       mainWorktreePath: repository.mainWorktreePath,
       newBranch,
       baseBranch,
+      bootstrapCommand: bootstrap ? repository.bootstrapCommand : undefined,
       canonicalPath,
       state: 'creating',
       logPath: creationLogPathFor(worktreeId),
       terminated: false,
     }
     this.creationJobs.set(worktreeId, job)
+    await initializeCreationLog(job, bootstrap)
 
     const snapshot = await this.getSnapshot()
     this.log.info(
-      { worktreeId, path: canonicalPath, baseBranch, newBranch },
+      {
+        worktreeId,
+        path: canonicalPath,
+        baseBranch,
+        newBranch,
+        bootstrap,
+      },
       'worktree creation queued',
     )
     this.emit({ type: 'worktree-creation-updated', worktreeId, snapshot })
@@ -266,6 +280,29 @@ export class WorktreeRegistry {
       await runGit(job.mainWorktreePath, args, this.log, {
         logFilePath: job.logPath,
       })
+
+      if (job.bootstrapCommand) {
+        const current = this.creationJobs.get(worktreeId)
+        if (!current) {
+          await this.bestEffortRemoveWorktree(job)
+          return
+        }
+
+        current.state = 'bootstrapping'
+        this.log.info({ worktreeId }, 'worktree bootstrap started')
+        this.emit({
+          type: 'worktree-creation-updated',
+          worktreeId,
+          snapshot: await this.getSnapshot(),
+        })
+
+        await runBootstrapCommand(
+          job.bootstrapCommand,
+          job.canonicalPath,
+          job.logPath,
+          this.log,
+        )
+      }
     } catch (error) {
       const current = this.creationJobs.get(worktreeId)
       if (!current) {
@@ -517,6 +554,20 @@ export class WorktreeRegistry {
         )
         continue
       }
+      if (job.state === 'bootstrapping') {
+        byId.set(
+          job.worktreeId,
+          gitRow
+            ? {
+                ...gitRow,
+                creationState: 'bootstrapping',
+                hasCreationLogs: true,
+                isOpenable: true,
+              }
+            : toJobWorktree(job, 'bootstrapping'),
+        )
+        continue
+      }
       if (job.state === 'creating') {
         if (!gitRow) {
           byId.set(job.worktreeId, toJobWorktree(job, 'creating'))
@@ -524,7 +575,18 @@ export class WorktreeRegistry {
         continue
       }
       // failed: there is no git row, surface the failure.
-      byId.set(job.worktreeId, toJobWorktree(job, 'failed'))
+      byId.set(
+        job.worktreeId,
+        gitRow
+          ? {
+              ...gitRow,
+              creationState: 'failed',
+              creationError: job.error,
+              hasCreationLogs: true,
+              isOpenable: true,
+            }
+          : toJobWorktree(job, 'failed'),
+      )
     }
 
     const worktrees = [...byId.values()].sort((left, right) =>
@@ -605,6 +667,7 @@ type TrackedRepository = Repository & {
 function toPublicRepository(repository: TrackedRepository): Repository {
   return {
     mainWorktreePath: repository.mainWorktreePath,
+    bootstrapCommand: repository.bootstrapCommand,
   }
 }
 
@@ -665,6 +728,7 @@ function toPublicWorktree(
     prunableReason: worktree.prunableReason,
     creationState: 'ready',
     hasCreationLogs: false,
+    isOpenable: true,
   }
 }
 
@@ -683,8 +747,82 @@ function toJobWorktree(
     isPrunable: false,
     creationState,
     creationError: creationState === 'failed' ? job.error : undefined,
-    hasCreationLogs: job.terminated,
+    hasCreationLogs: true,
+    isOpenable: false,
   }
+}
+
+async function initializeCreationLog(
+  job: CreationJob,
+  bootstrapRequested: boolean,
+): Promise<void> {
+  await mkdir(dirname(job.logPath), { recursive: true })
+  const lines = [
+    `worktree: ${job.canonicalPath}`,
+    `base branch: ${job.baseBranch}`,
+    job.newBranch && `new branch: ${job.newBranch}`,
+    bootstrapRequested &&
+      (job.bootstrapCommand
+        ? `bootstrap: ${job.bootstrapCommand}`
+        : 'bootstrap: requested, no command configured'),
+    '',
+  ].filter((line): line is string => Boolean(line))
+  await appendFile(job.logPath, lines.join('\n'), 'utf8')
+}
+
+async function runBootstrapCommand(
+  command: string,
+  cwd: string,
+  logFilePath: string,
+  log: Logger,
+): Promise<void> {
+  await mkdir(dirname(logFilePath), { recursive: true })
+  await appendFile(logFilePath, `\n$ ${command}\n`, 'utf8')
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      env: process.env,
+    })
+    const output = createWriteStream(logFilePath, { flags: 'a' })
+
+    child.stdout?.pipe(output, { end: false })
+    child.stderr?.pipe(output, { end: false })
+
+    child.on('error', (error) => {
+      output.end(() => {
+        reject(new HttpError(400, `Bootstrap command failed: ${error.message}`))
+      })
+    })
+
+    child.on('close', (code, signal) => {
+      const status =
+        code === 0
+          ? '\nbootstrap exited with code 0\n'
+          : signal
+            ? `\nbootstrap terminated by signal ${signal}\n`
+            : `\nbootstrap exited with code ${code ?? 'unknown'}\n`
+
+      output.end(status, () => {
+        if (code === 0) {
+          resolve()
+          return
+        }
+
+        reject(
+          new HttpError(
+            400,
+            signal
+              ? `Bootstrap command terminated by signal ${signal}`
+              : `Bootstrap command failed with exit code ${code ?? 'unknown'}`,
+          ),
+        )
+      })
+    })
+  })
+
+  log.info({ cwd }, 'bootstrap command completed')
 }
 
 function getBranchName(branch?: string): string | undefined {

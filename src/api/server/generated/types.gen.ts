@@ -22,6 +22,7 @@ export type RemoveRepositoryResponses = {
         snapshot: {
             repositories: Array<{
                 mainWorktreePath: string;
+                bootstrapCommand?: string;
             }>;
             worktrees: Array<{
                 worktreeId: string;
@@ -34,9 +35,10 @@ export type RemoveRepositoryResponses = {
                 isDetached: boolean;
                 isPrunable: boolean;
                 prunableReason?: string;
-                creationState: 'creating' | 'ready' | 'failed';
+                creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                isOpenable: boolean;
             }>;
         };
     };
@@ -72,10 +74,12 @@ export type AddRepositoryResponses = {
     200: {
         repository: {
             mainWorktreePath: string;
+            bootstrapCommand?: string;
         };
         snapshot: {
             repositories: Array<{
                 mainWorktreePath: string;
+                bootstrapCommand?: string;
             }>;
             worktrees: Array<{
                 worktreeId: string;
@@ -88,9 +92,10 @@ export type AddRepositoryResponses = {
                 isDetached: boolean;
                 isPrunable: boolean;
                 prunableReason?: string;
-                creationState: 'creating' | 'ready' | 'failed';
+                creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                isOpenable: boolean;
             }>;
         };
     };
@@ -120,6 +125,7 @@ export type CreateWorktreeData = {
         newBranch?: string;
         baseBranch: string;
         worktreePath: string;
+        bootstrap?: boolean;
     };
     path?: never;
     query?: never;
@@ -169,9 +175,10 @@ export type CreateWorktreeResponses = {
             isDetached: boolean;
             isPrunable: boolean;
             prunableReason?: string;
-            creationState: 'creating' | 'ready' | 'failed';
+            creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
             creationError?: string;
             hasCreationLogs: boolean;
+            isOpenable: boolean;
         };
     };
 };
@@ -207,6 +214,7 @@ export type DismissCreationErrorResponses = {
         snapshot: {
             repositories: Array<{
                 mainWorktreePath: string;
+                bootstrapCommand?: string;
             }>;
             worktrees: Array<{
                 worktreeId: string;
@@ -219,9 +227,10 @@ export type DismissCreationErrorResponses = {
                 isDetached: boolean;
                 isPrunable: boolean;
                 prunableReason?: string;
-                creationState: 'creating' | 'ready' | 'failed';
+                creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                isOpenable: boolean;
             }>;
         };
     };

@@ -17,6 +17,7 @@ export const CreateWorktreeRequest = z.object({
   newBranch: z.string().min(1).optional(),
   baseBranch: z.string().min(1),
   worktreePath: PathSchema,
+  bootstrap: z.boolean().default(false),
 })
 
 export const PreviewWorktreePathRequest = z.object({
@@ -43,9 +44,15 @@ export const WorktreeIdParams = z.object({
 
 export const Repository = z.object({
   mainWorktreePath: z.string(),
+  bootstrapCommand: z.string().optional(),
 })
 
-export const WorktreeCreationState = z.enum(['creating', 'ready', 'failed'])
+export const WorktreeCreationState = z.enum([
+  'creating',
+  'bootstrapping',
+  'ready',
+  'failed',
+])
 
 export const Worktree = z.object({
   worktreeId: z.string(),
@@ -63,6 +70,7 @@ export const Worktree = z.object({
   creationState: WorktreeCreationState.default('ready'),
   creationError: z.string().optional(),
   hasCreationLogs: z.boolean().default(false),
+  isOpenable: z.boolean().default(true),
 })
 
 export const WorktreeSnapshot = z.object({
