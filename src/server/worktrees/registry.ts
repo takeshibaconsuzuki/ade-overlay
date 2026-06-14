@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { createWriteStream } from 'node:fs'
 import { appendFile, mkdir, rm } from 'node:fs/promises'
+import { platform, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import Mustache from 'mustache'
 import { type Logger } from '../../api/server/logger'
@@ -780,10 +781,11 @@ async function runBootstrapCommand(
   await appendFile(logFilePath, `\n$ ${command}\n`, 'utf8')
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, {
+    const bootstrapShell = getBootstrapShell(command)
+    const child = spawn(bootstrapShell.file, bootstrapShell.args, {
       cwd,
-      shell: true,
       env: process.env,
+      shell: bootstrapShell.shell,
     })
     const output = createWriteStream(logFilePath, { flags: 'a' })
 
@@ -823,6 +825,48 @@ async function runBootstrapCommand(
   })
 
   log.info({ cwd }, 'bootstrap command completed')
+}
+
+type BootstrapShell = {
+  file: string
+  args: string[]
+  shell?: boolean
+}
+
+function getBootstrapShell(command: string): BootstrapShell {
+  if (platform() === 'win32') {
+    return {
+      file: command,
+      args: [],
+      shell: true,
+    }
+  }
+
+  const loginShell = getUserLoginShell()
+  if (!loginShell) {
+    return {
+      file: command,
+      args: [],
+      shell: true,
+    }
+  }
+
+  return {
+    file: loginShell,
+    args: ['-lic', command],
+  }
+}
+
+function getUserLoginShell(): string | undefined {
+  if (process.env.SHELL) {
+    return process.env.SHELL
+  }
+
+  try {
+    return userInfo().shell ?? undefined
+  } catch {
+    return undefined
+  }
 }
 
 function getBranchName(branch?: string): string | undefined {

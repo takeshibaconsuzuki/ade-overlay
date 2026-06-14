@@ -18,6 +18,7 @@ export function createWindow(): BrowserWindow {
   window = new BrowserWindow({
     width: 1280,
     height: 900,
+    show: false,
     title: 'ADE Editor',
     backgroundColor: '#111113',
     webPreferences: {
@@ -46,6 +47,8 @@ body{display:grid;place-items:center}
 </style>
 <body>Waiting for editor...</body>`),
   )
+  window.maximize()
+  window.show()
 
   connectEditorCommandStream()
   return window

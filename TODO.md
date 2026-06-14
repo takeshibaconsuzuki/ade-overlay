@@ -1,2 +1,1 @@
-- Start editor maximized
 - Synthetic data dir worktree
