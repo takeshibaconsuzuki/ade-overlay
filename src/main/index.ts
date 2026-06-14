@@ -4,7 +4,7 @@ import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { createWindow as createEditorWindow } from './editor'
 import { startServer } from '../server'
-import { logger } from '../server/logger'
+import { flushLogs, logger } from '../server/logger'
 
 const log = logger.child({ process: 'main' })
 let server: Awaited<ReturnType<typeof startServer>> | null = null
@@ -30,10 +30,6 @@ void main().catch((error: unknown) => {
   void fatalShutdown(error, 'main process startup failed')
 })
 
-app.on('window-all-closed', () => {
-  app.quit()
-})
-
 app.on('before-quit', (event) => {
   if (shutdownComplete) {
     return
@@ -45,10 +41,18 @@ app.on('before-quit', (event) => {
   }
 
   quitInProgress = true
-  void shutdown().finally(() => {
-    shutdownComplete = true
-    app.quit()
-  })
+  log.info('shutting down')
+  void shutdown()
+    .finally(() => {
+      shutdownComplete = true
+      log.info('shutdown complete')
+    })
+    // Drain shipped logs (editor process) before the process exits, so the
+    // shutdown trail is not lost in flight.
+    .finally(() => flushLogs())
+    .finally(() => {
+      app.quit()
+    })
 })
 
 async function main(): Promise<void> {
@@ -91,6 +95,7 @@ async function fatalShutdown(error: unknown, message: string): Promise<void> {
   } catch (shutdownError) {
     log.fatal({ err: shutdownError }, 'main process shutdown failed')
   } finally {
+    await flushLogs()
     app.exit(1)
   }
 }

@@ -264,6 +264,7 @@ export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
 export type IngestLogsData = {
     body: {
         records: Array<{
+            source?: string;
             level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
             time: number;
             msg?: string;

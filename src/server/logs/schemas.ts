@@ -2,6 +2,8 @@ import { z } from 'zod/v4'
 import { LOG_LEVELS } from '../../api/server/logger'
 
 export const LogRecord = z.object({
+  /** Origin of the record (e.g. `renderer`, `editor`); defaults to `renderer`. */
+  source: z.string().optional(),
   level: z.enum(LOG_LEVELS),
   time: z.number(),
   msg: z.string().optional(),

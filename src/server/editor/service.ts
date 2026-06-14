@@ -171,7 +171,10 @@ export class EditorService {
 
     const child = spawn(process.execPath, getEditorLaunchArgs(), {
       detached: true,
-      env: process.env,
+      // ADE_LOG_SOURCE makes the editor process ship its logs to POST /logs
+      // (see src/server/logger), so all Electron logging stays centralized in
+      // the server's stream rather than its own discarded stdout.
+      env: { ...process.env, ADE_LOG_SOURCE: 'editor' },
       stdio: 'ignore',
     })
     child.unref()

@@ -4,9 +4,14 @@ import { Theme } from '@radix-ui/themes'
 import '@radix-ui/themes/styles.css'
 import './style.css'
 import { App } from './controller/App'
+import { Launcher } from './launcher/Launcher'
 import { configureApiClient } from './client'
 
 configureApiClient()
+
+// The renderer is a single-page app loaded into multiple windows; the URL hash
+// selects which view to render (see src/main/controller).
+const view = window.location.hash.replace(/^#/, '')
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -16,7 +21,7 @@ createRoot(document.getElementById('root')!).render(
       grayColor="slate"
       radius="medium"
     >
-      <App />
+      {view === 'worktrees' ? <App /> : <Launcher />}
     </Theme>
   </React.StrictMode>,
 )

@@ -29,6 +29,7 @@ export function createWindow(): BrowserWindow {
   })
 
   window.on('closed', () => {
+    log.info('editor window closed')
     views.clear()
     activeWorktreeId = null
     window = null

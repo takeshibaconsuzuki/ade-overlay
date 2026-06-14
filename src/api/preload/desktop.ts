@@ -8,6 +8,8 @@
 export interface DesktopApi {
   /** Opens a native directory picker; resolves to the chosen path or null. */
   selectRepository(): Promise<string | null>
+  /** Opens the worktrees window (focusing it if already open). */
+  openWorktrees(): Promise<void>
 }
 
 export const DESKTOP_API_GLOBAL = 'desktop'

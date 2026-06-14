@@ -5,6 +5,7 @@ import {
   type OpenDialogOptions,
 } from 'electron'
 import { CONTROLLER_IPC_CHANNELS } from './ipc-channels'
+import { openWorktreesWindow } from './index'
 
 /**
  * Registers the controller role's main-process IPC handlers, exposed to its
@@ -26,5 +27,9 @@ export function registerControllerIpcHandlers(): void {
       return null
     }
     return result.filePaths[0]
+  })
+
+  ipcMain.handle(CONTROLLER_IPC_CHANNELS.openWorktrees, () => {
+    openWorktreesWindow()
   })
 }
