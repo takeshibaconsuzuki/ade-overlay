@@ -19,6 +19,7 @@ export function Titlebar({ title }: { title: string }): React.JSX.Element {
       justify="between"
       px="2"
       height="32px"
+      flexShrink="0"
       style={
         {
           WebkitAppRegion: 'drag',
