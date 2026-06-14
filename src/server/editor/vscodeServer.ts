@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { EDITOR_BASE_PATH } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
+import { getEditorDataDir } from '../dataDir'
 import { HttpError } from '../errors'
 import { getFreePort, waitForPort } from '../ports'
 import { type Worktree } from '../worktrees/schemas'
@@ -120,5 +120,5 @@ async function waitForVscodePort(
 }
 
 function getServerDataDir(worktreeId: string): string {
-  return join(homedir(), '.ade-overlay', 'editor', worktreeId, 'server-data')
+  return join(getEditorDataDir(), worktreeId, 'server-data')
 }

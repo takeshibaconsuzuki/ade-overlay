@@ -10,6 +10,7 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod'
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
+import { AppConfigStore } from './appConfig'
 import { HttpError, getStatusCode } from './errors'
 import { logger } from './logger'
 import { registerEditorRoutes } from './editor/routes'
@@ -28,8 +29,10 @@ export function createServer() {
   const server = serverBase as typeof serverBase & {
     destroyActiveConnections: () => void
   }
+  const appConfig = new AppConfigStore(server.log.child({ service: 'config' }))
   const worktreeRegistry = new WorktreeRegistry(
     server.log.child({ service: 'worktrees' }),
+    appConfig,
   )
   const editor = new EditorService(
     worktreeRegistry,
@@ -52,6 +55,9 @@ export function createServer() {
 
   server.addHook('onClose', async () => {
     await editor.shutdown()
+  })
+  server.addHook('onReady', async () => {
+    await worktreeRegistry.loadRepositories()
   })
 
   server.setValidatorCompiler(validatorCompiler)

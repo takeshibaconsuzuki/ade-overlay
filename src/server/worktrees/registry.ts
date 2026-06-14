@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { type Logger } from '../../api/server/logger'
+import { type AppConfigStore } from '../appConfig'
 import { HttpError } from '../errors'
 import { type GitWorktree, listGitWorktrees, runGit } from './git'
 import { canonicalizePath, normalizePath } from '../paths'
@@ -16,8 +17,34 @@ export class WorktreeRegistry {
   readonly events = new EventEmitter()
 
   private readonly repositories = new Map<string, Repository>()
+  private persistRepositoriesTail = Promise.resolve()
 
-  constructor(private readonly log: Logger) {}
+  constructor(
+    private readonly log: Logger,
+    private readonly appConfig?: AppConfigStore,
+  ) {}
+
+  async loadRepositories(): Promise<void> {
+    if (!this.appConfig) {
+      return
+    }
+
+    const config = await this.appConfig.read()
+    this.repositories.clear()
+
+    for (const repository of config.repositories) {
+      const mainWorktreePath = normalizePath(repository.mainWorktreePath)
+      this.repositories.set(mainWorktreePath, { mainWorktreePath })
+    }
+
+    this.log.info(
+      {
+        configPath: this.appConfig.configPath,
+        repositoryCount: this.repositories.size,
+      },
+      'repositories loaded',
+    )
+  }
 
   async addRepository(
     repositoryPath: string,
@@ -31,8 +58,21 @@ export class WorktreeRegistry {
 
     const mainWorktreePath = await canonicalizePath(mainWorktree.path)
     const repository = { mainWorktreePath }
+    const previousRepository = this.repositories.get(mainWorktreePath)
 
     this.repositories.set(mainWorktreePath, repository)
+    try {
+      await this.persistRepositories()
+    } catch (error) {
+      if (previousRepository) {
+        this.repositories.set(mainWorktreePath, previousRepository)
+      } else {
+        this.repositories.delete(mainWorktreePath)
+      }
+
+      throw error
+    }
+
     this.log.info({ mainWorktreePath }, 'repository added')
 
     const snapshot = await this.getSnapshot()
@@ -49,9 +89,25 @@ export class WorktreeRegistry {
     mainWorktreePath: string,
   ): Promise<{ removed: boolean; snapshot: WorktreeSnapshot }> {
     const repositoryKey = await this.findRepositoryKey(mainWorktreePath)
+    const repository = repositoryKey
+      ? this.repositories.get(repositoryKey)
+      : undefined
     const removed = repositoryKey
       ? this.repositories.delete(repositoryKey)
       : false
+
+    if (removed) {
+      try {
+        await this.persistRepositories()
+      } catch (error) {
+        if (repositoryKey && repository) {
+          this.repositories.set(repositoryKey, repository)
+        }
+
+        throw error
+      }
+    }
+
     const snapshot = await this.getSnapshot()
 
     if (removed && repositoryKey) {
@@ -148,14 +204,22 @@ export class WorktreeRegistry {
       left.mainWorktreePath.localeCompare(right.mainWorktreePath),
     )
     const worktreeGroups = await Promise.all(
-      repositories.map(async (repository) =>
-        (await listGitWorktrees(repository.mainWorktreePath, this.log)).map(
-          (worktree) => ({
+      repositories.map(async (repository) => {
+        try {
+          return (
+            await listGitWorktrees(repository.mainWorktreePath, this.log)
+          ).map((worktree) => ({
             ...worktree,
             mainWorktreePath: repository.mainWorktreePath,
-          }),
-        ),
-      ),
+          }))
+        } catch (error) {
+          this.log.warn(
+            { err: error, mainWorktreePath: repository.mainWorktreePath },
+            'failed to list repository worktrees',
+          )
+          return []
+        }
+      }),
     )
 
     const worktrees = worktreeGroups
@@ -208,6 +272,21 @@ export class WorktreeRegistry {
 
   private emit(event: WorktreeEvent): void {
     this.events.emit('worktree-event', event)
+  }
+
+  private async persistRepositories(): Promise<void> {
+    if (!this.appConfig) {
+      return
+    }
+
+    const appConfig = this.appConfig
+    const repositories = [...this.repositories.values()]
+    const write = this.persistRepositoriesTail.then(() =>
+      appConfig.writeRepositories(repositories),
+    )
+    this.persistRepositoriesTail = write.catch(() => undefined)
+
+    await write
   }
 }
 

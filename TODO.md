@@ -1,0 +1,8 @@
+- Worktree path template per repository in config.json
+- Search worktrees
+- Search base branches
+- Start editor maximized
+- Bootstrap command
+- Worktree creation notifications
+- Synthetic data dir worktree
+- Open bootstrap logs submenu

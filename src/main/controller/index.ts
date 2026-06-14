@@ -29,6 +29,7 @@ function applyLauncherState(window: BrowserWindow, state: LauncherState): void {
   if (state === 'dormant') {
     window.setOpacity(DORMANT_OPACITY)
     window.setIgnoreMouseEvents(true, { forward: true })
+    window.showInactive()
   } else {
     window.setOpacity(1)
     window.setIgnoreMouseEvents(false)
@@ -95,6 +96,7 @@ export function createWindow(): void {
     minHeight: 140,
     resizable: true,
     alwaysOnTop: true,
+    show: false,
     // Drop the native titlebar on every platform; the renderer draws its own
     // titlebar (drag region + close button) so the chrome looks identical
     // everywhere.
@@ -107,11 +109,9 @@ export function createWindow(): void {
   window.setAlwaysOnTop(true, 'screen-saver')
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
-  // Start active, and let CommandOrControl+Shift+Space flip the state from
-  // anywhere — even while dormant and click-through, since it is a global
-  // shortcut rather than a window-level one.
   launcherWindow = window
-  launcherState = 'active'
+  // Start dormant
+  launcherState = 'dormant'
   applyLauncherState(window, launcherState)
   if (!globalShortcut.register(TOGGLE_ACCELERATOR, toggleLauncherState)) {
     log.warn(
