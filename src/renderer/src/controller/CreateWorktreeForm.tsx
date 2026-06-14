@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Button,
   Callout,
@@ -9,7 +9,10 @@ import {
   Text,
   TextField,
 } from '@radix-ui/themes'
-import type { CreateWorktreeData } from '../../../api/server/generated'
+import {
+  previewWorktreePath,
+  type CreateWorktreeData,
+} from '../../../api/server/generated'
 import type { Repository } from './worktrees'
 
 type CreateValues = CreateWorktreeData['body']
@@ -29,17 +32,62 @@ export function CreateWorktreeForm({
   const [repository, setRepository] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
   const [newBranch, setNewBranch] = useState('')
-  const [worktreePath, setWorktreePath] = useState('')
+  const [generatedWorktreePath, setGeneratedWorktreePath] = useState('')
+  const [manualWorktreePath, setManualWorktreePath] = useState<string | null>(
+    null,
+  )
 
   const hasRepositories = repositories.length > 0
   // Fall back to the first repository until the user picks one explicitly.
   const selectedRepository =
     repository || repositories[0]?.mainWorktreePath || ''
+  const trimmedBaseBranch = baseBranch.trim()
+  const trimmedNewBranch = newBranch.trim()
+  const templateBranch = trimmedNewBranch || trimmedBaseBranch
+  const worktreePath = manualWorktreePath ?? generatedWorktreePath
   const canSubmit =
     !busy &&
     selectedRepository.trim() !== '' &&
     baseBranch.trim() !== '' &&
     worktreePath.trim() !== ''
+
+  useEffect(() => {
+    let canceled = false
+
+    async function updatePreview(): Promise<void> {
+      if (!selectedRepository || !trimmedBaseBranch || !templateBranch) {
+        if (!canceled) {
+          setGeneratedWorktreePath('')
+        }
+        return
+      }
+
+      const { data } = await previewWorktreePath({
+        body: {
+          mainWorktreePath: selectedRepository,
+          baseBranch: trimmedBaseBranch,
+          newBranch: trimmedNewBranch || undefined,
+        },
+      })
+
+      if (!canceled) {
+        setGeneratedWorktreePath(data?.worktreePath ?? '')
+      }
+    }
+
+    void updatePreview()
+
+    return () => {
+      canceled = true
+    }
+  }, [
+    baseBranch,
+    newBranch,
+    selectedRepository,
+    templateBranch,
+    trimmedBaseBranch,
+    trimmedNewBranch,
+  ])
 
   const handleSubmit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
@@ -54,7 +102,7 @@ export function CreateWorktreeForm({
     })
     if (created) {
       setNewBranch('')
-      setWorktreePath('')
+      setManualWorktreePath(null)
     }
   }
 
@@ -103,7 +151,13 @@ export function CreateWorktreeForm({
               <Field label="Base branch">
                 <TextField.Root
                   value={baseBranch}
-                  onChange={(event) => setBaseBranch(event.target.value)}
+                  onChange={(event) => {
+                    const nextBaseBranch = event.target.value
+                    setBaseBranch(nextBaseBranch)
+                    if (!nextBaseBranch.trim() && !newBranch.trim()) {
+                      setManualWorktreePath(null)
+                    }
+                  }}
                   placeholder="main"
                 />
               </Field>
@@ -111,7 +165,13 @@ export function CreateWorktreeForm({
               <Field label="New branch (optional)">
                 <TextField.Root
                   value={newBranch}
-                  onChange={(event) => setNewBranch(event.target.value)}
+                  onChange={(event) => {
+                    const nextNewBranch = event.target.value
+                    setNewBranch(nextNewBranch)
+                    if (!nextNewBranch.trim()) {
+                      setManualWorktreePath(null)
+                    }
+                  }}
                   placeholder="feature/my-change"
                 />
               </Field>
@@ -119,7 +179,12 @@ export function CreateWorktreeForm({
               <Field label="Worktree path">
                 <TextField.Root
                   value={worktreePath}
-                  onChange={(event) => setWorktreePath(event.target.value)}
+                  onChange={(event) => {
+                    const nextPath = event.target.value
+                    setManualWorktreePath(
+                      nextPath === generatedWorktreePath ? null : nextPath,
+                    )
+                  }}
                   placeholder="~/worktrees/my-change"
                 />
               </Field>

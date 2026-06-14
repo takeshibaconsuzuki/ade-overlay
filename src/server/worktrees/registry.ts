@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import Mustache from 'mustache'
 import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
 import { HttpError } from '../errors'
@@ -7,6 +8,7 @@ import { canonicalizePath, normalizePath } from '../paths'
 import { createWorktreeId } from './ids'
 import {
   type CreateWorktreeRequest,
+  type PreviewWorktreePathRequest,
   type Repository,
   type Worktree,
   type WorktreeEvent,
@@ -16,7 +18,7 @@ import {
 export class WorktreeRegistry {
   readonly events = new EventEmitter()
 
-  private readonly repositories = new Map<string, Repository>()
+  private readonly repositories = new Map<string, TrackedRepository>()
   private persistRepositoriesTail = Promise.resolve()
 
   constructor(
@@ -34,7 +36,10 @@ export class WorktreeRegistry {
 
     for (const repository of config.repositories) {
       const mainWorktreePath = normalizePath(repository.mainWorktreePath)
-      this.repositories.set(mainWorktreePath, { mainWorktreePath })
+      this.repositories.set(mainWorktreePath, {
+        mainWorktreePath,
+        worktreePathTemplate: repository.worktreePathTemplate,
+      })
     }
 
     this.log.info(
@@ -57,8 +62,11 @@ export class WorktreeRegistry {
     }
 
     const mainWorktreePath = await canonicalizePath(mainWorktree.path)
-    const repository = { mainWorktreePath }
     const previousRepository = this.repositories.get(mainWorktreePath)
+    const repository: TrackedRepository = {
+      mainWorktreePath,
+      worktreePathTemplate: previousRepository?.worktreePathTemplate,
+    }
 
     this.repositories.set(mainWorktreePath, repository)
     try {
@@ -75,14 +83,15 @@ export class WorktreeRegistry {
 
     this.log.info({ mainWorktreePath }, 'repository added')
 
+    const publicRepository = toPublicRepository(repository)
     const snapshot = await this.getSnapshot()
     this.emit({
       type: 'repository-added',
-      repository,
+      repository: publicRepository,
       snapshot,
     })
 
-    return { repository, snapshot }
+    return { repository: publicRepository, snapshot }
   }
 
   async removeRepository(
@@ -161,6 +170,27 @@ export class WorktreeRegistry {
     return { worktreeId, worktree }
   }
 
+  async previewWorktreePath({
+    mainWorktreePath,
+    newBranch,
+    baseBranch,
+  }: PreviewWorktreePathRequest): Promise<{ worktreePath: string }> {
+    const repository = await this.getRepository(mainWorktreePath)
+    const template = repository.worktreePathTemplate
+    if (!template) {
+      return { worktreePath: '' }
+    }
+
+    const branch = newBranch || baseBranch
+    return {
+      worktreePath: renderWorktreePathTemplate(template, {
+        main_worktree_path: repository.mainWorktreePath,
+        main_worktree_id: createWorktreeId(repository.mainWorktreePath),
+        branch,
+      }),
+    }
+  }
+
   async deleteWorktree(
     worktreeId: string,
     deleteBranch: boolean,
@@ -200,11 +230,12 @@ export class WorktreeRegistry {
   }
 
   async getSnapshot(): Promise<WorktreeSnapshot> {
-    const repositories = [...this.repositories.values()].sort((left, right) =>
-      left.mainWorktreePath.localeCompare(right.mainWorktreePath),
+    const trackedRepositories = [...this.repositories.values()].sort(
+      (left, right) =>
+        left.mainWorktreePath.localeCompare(right.mainWorktreePath),
     )
     const worktreeGroups = await Promise.all(
-      repositories.map(async (repository) => {
+      trackedRepositories.map(async (repository) => {
         try {
           return (
             await listGitWorktrees(repository.mainWorktreePath, this.log)
@@ -227,10 +258,14 @@ export class WorktreeRegistry {
       .map(toPublicWorktree)
       .sort((left, right) => left.path.localeCompare(right.path))
 
+    const repositories = trackedRepositories.map(toPublicRepository)
+
     return { repositories, worktrees }
   }
 
-  private async getRepository(mainWorktreePath: string): Promise<Repository> {
+  private async getRepository(
+    mainWorktreePath: string,
+  ): Promise<TrackedRepository> {
     const repositoryKey = await this.findRepositoryKey(mainWorktreePath)
 
     if (!repositoryKey) {
@@ -288,6 +323,57 @@ export class WorktreeRegistry {
 
     await write
   }
+}
+
+type TrackedRepository = Repository & {
+  worktreePathTemplate?: string
+}
+
+function toPublicRepository(repository: TrackedRepository): Repository {
+  return {
+    mainWorktreePath: repository.mainWorktreePath,
+  }
+}
+
+function renderWorktreePathTemplate(
+  template: string,
+  values: Record<string, string>,
+): string {
+  assertValidWorktreePathTemplate(template, values)
+  return Mustache.render(template, values, undefined, { escape: String })
+}
+
+function assertValidWorktreePathTemplate(
+  template: string,
+  values: Record<string, string>,
+): void {
+  const allowedVariables = new Set(Object.keys(values))
+  for (const variable of getTemplateVariables(Mustache.parse(template))) {
+    if (!allowedVariables.has(variable)) {
+      throw new HttpError(
+        400,
+        `Unsupported worktree path template variable: ${variable}`,
+      )
+    }
+  }
+}
+
+function getTemplateVariables(tokens: Mustache.TemplateSpans): string[] {
+  return tokens.flatMap((token) => {
+    const symbol = token[0]
+    if (symbol === 'text') {
+      return []
+    }
+
+    if (symbol === 'name' || symbol === '&') {
+      return [String(token[1])]
+    }
+
+    throw new HttpError(
+      400,
+      `Unsupported worktree path template syntax: ${symbol}`,
+    )
+  })
 }
 
 function toPublicWorktree(

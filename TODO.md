@@ -1,4 +1,3 @@
-- Worktree path template per repository in config.json
 - Search worktrees
 - Search base branches
 - Start editor maximized

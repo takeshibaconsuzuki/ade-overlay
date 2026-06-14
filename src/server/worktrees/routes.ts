@@ -16,6 +16,8 @@ import {
   DeleteWorktreeRequest,
   DeleteWorktreeResponse,
   ErrorResponse,
+  PreviewWorktreePathRequest,
+  PreviewWorktreePathResponse,
   RemoveRepositoryRequest,
   RemoveRepositoryResponse,
   type WorktreeEvent,
@@ -90,6 +92,21 @@ export function registerWorktreeRoutes(
       },
     },
     handler: async (request) => registry.createWorktree(request.body),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: '/worktrees/path-preview',
+    schema: {
+      operationId: 'previewWorktreePath',
+      body: PreviewWorktreePathRequest,
+      response: {
+        200: PreviewWorktreePathResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+      },
+    },
+    handler: async (request) => registry.previewWorktreePath(request.body),
   })
 
   routes.route({

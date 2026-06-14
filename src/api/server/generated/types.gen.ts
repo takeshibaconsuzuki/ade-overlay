@@ -162,6 +162,47 @@ export type CreateWorktreeResponses = {
 
 export type CreateWorktreeResponse = CreateWorktreeResponses[keyof CreateWorktreeResponses];
 
+export type PreviewWorktreePathData = {
+    body: {
+        mainWorktreePath: string;
+        newBranch?: string;
+        baseBranch: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/worktrees/path-preview';
+};
+
+export type PreviewWorktreePathErrors = {
+    /**
+     * Default Response
+     */
+    400: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+};
+
+export type PreviewWorktreePathError = PreviewWorktreePathErrors[keyof PreviewWorktreePathErrors];
+
+export type PreviewWorktreePathResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        worktreePath: string;
+    };
+};
+
+export type PreviewWorktreePathResponse = PreviewWorktreePathResponses[keyof PreviewWorktreePathResponses];
+
 export type DeleteWorktreeData = {
     body: {
         deleteBranch?: boolean;

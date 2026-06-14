@@ -19,6 +19,12 @@ export const CreateWorktreeRequest = z.object({
   worktreePath: PathSchema,
 })
 
+export const PreviewWorktreePathRequest = z.object({
+  mainWorktreePath: PathSchema,
+  newBranch: z.string().min(1).optional(),
+  baseBranch: z.string().min(1),
+})
+
 export const DeleteWorktreeParams = z.object({
   worktreeId: z.string().length(WORKTREE_ID_LENGTH),
 })
@@ -98,6 +104,10 @@ export const CreateWorktreeResponse = z.object({
   worktree: Worktree,
 })
 
+export const PreviewWorktreePathResponse = z.object({
+  worktreePath: z.string(),
+})
+
 export const DeleteWorktreeResponse = z.object({
   deleted: z.boolean(),
   branchDeleted: z.boolean(),
@@ -111,6 +121,9 @@ export const ErrorResponse = z.object({
 export type AddRepositoryRequest = z.infer<typeof AddRepositoryRequest>
 export type RemoveRepositoryRequest = z.infer<typeof RemoveRepositoryRequest>
 export type CreateWorktreeRequest = z.infer<typeof CreateWorktreeRequest>
+export type PreviewWorktreePathRequest = z.infer<
+  typeof PreviewWorktreePathRequest
+>
 export type DeleteWorktreeParams = z.infer<typeof DeleteWorktreeParams>
 export type DeleteWorktreeRequest = z.infer<typeof DeleteWorktreeRequest>
 export type Repository = z.infer<typeof Repository>

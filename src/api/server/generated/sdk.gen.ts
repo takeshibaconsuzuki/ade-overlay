@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, EditorCommandsData, EditorCommandsResponses, IngestLogsData, IngestLogsResponses, ListWorktreesData, ListWorktreesResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, EditorCommandsData, EditorCommandsResponses, IngestLogsData, IngestLogsResponses, ListWorktreesData, ListWorktreesResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -40,6 +40,15 @@ export const listWorktrees = <ThrowOnError extends boolean = false>(options?: Op
 
 export const createWorktree = <ThrowOnError extends boolean = false>(options: Options<CreateWorktreeData, ThrowOnError>): RequestResult<CreateWorktreeResponses, CreateWorktreeErrors, ThrowOnError> => (options.client ?? client).post<CreateWorktreeResponses, CreateWorktreeErrors, ThrowOnError>({
     url: '/worktrees',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const previewWorktreePath = <ThrowOnError extends boolean = false>(options: Options<PreviewWorktreePathData, ThrowOnError>): RequestResult<PreviewWorktreePathResponses, PreviewWorktreePathErrors, ThrowOnError> => (options.client ?? client).post<PreviewWorktreePathResponses, PreviewWorktreePathErrors, ThrowOnError>({
+    url: '/worktrees/path-preview',
     ...options,
     headers: {
         'Content-Type': 'application/json',
