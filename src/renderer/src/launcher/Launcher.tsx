@@ -3,9 +3,10 @@ import { Button, Flex } from '@radix-ui/themes'
 import { openCode } from '../../../api/server/generated'
 import { logger } from '../logger'
 import {
-  clearRecentWorktreeEditor,
-  getRecentWorktreeEditor,
-} from '../recentWorktreeEditor'
+  RECENT_WORKTREE_EDITOR_KEY,
+  deleteCacheItem,
+  getCacheItem,
+} from '../persistentCache'
 import { Titlebar } from '../components/Titlebar'
 
 /**
@@ -22,7 +23,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
   }, [])
 
   const handleOpenRecentEditor = useCallback(async (): Promise<void> => {
-    const worktreeId = getRecentWorktreeEditor()
+    const worktreeId = getCacheItem(RECENT_WORKTREE_EDITOR_KEY)
     if (!worktreeId) {
       return
     }
@@ -35,7 +36,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
 
     logger.error({ worktreeId, err: error }, 'open recent editor failed')
     if (response?.status === 404) {
-      clearRecentWorktreeEditor(worktreeId)
+      deleteCacheItem(RECENT_WORKTREE_EDITOR_KEY, worktreeId)
     }
   }, [])
 

@@ -13,6 +13,11 @@ import {
   previewWorktreePath,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
+import {
+  RECENT_WORKTREE_PROJECT_KEY,
+  getCacheItem,
+  setCacheItem,
+} from '../persistentCache'
 import type { Repository } from './worktrees'
 
 type CreateValues = CreateWorktreeData['body']
@@ -29,7 +34,9 @@ export function CreateWorktreeForm({
   onCreate,
 }: CreateWorktreeFormProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const [repository, setRepository] = useState('')
+  const [repository, setRepository] = useState(
+    () => getCacheItem(RECENT_WORKTREE_PROJECT_KEY) ?? '',
+  )
   const [baseBranch, setBaseBranch] = useState('')
   const [newBranch, setNewBranch] = useState('')
   const [generatedWorktreePath, setGeneratedWorktreePath] = useState('')
@@ -38,9 +45,14 @@ export function CreateWorktreeForm({
   )
 
   const hasRepositories = repositories.length > 0
-  // Fall back to the first repository until the user picks one explicitly.
-  const selectedRepository =
-    repository || repositories[0]?.mainWorktreePath || ''
+  const repositoryIsTracked = repositories.some(
+    (repo) => repo.mainWorktreePath === repository,
+  )
+  // Fall back to the first repository until the user picks one explicitly, or
+  // if the remembered repository is no longer tracked.
+  const selectedRepository = repositoryIsTracked
+    ? repository
+    : repositories[0]?.mainWorktreePath || ''
   const trimmedBaseBranch = baseBranch.trim()
   const trimmedNewBranch = newBranch.trim()
   const templateBranch = trimmedNewBranch || trimmedBaseBranch
@@ -128,7 +140,10 @@ export function CreateWorktreeForm({
               <Field label="Repository">
                 <Select.Root
                   value={selectedRepository}
-                  onValueChange={setRepository}
+                  onValueChange={(nextRepository) => {
+                    setRepository(nextRepository)
+                    setCacheItem(RECENT_WORKTREE_PROJECT_KEY, nextRepository)
+                  }}
                   disabled={!hasRepositories}
                 >
                   <Select.Trigger
