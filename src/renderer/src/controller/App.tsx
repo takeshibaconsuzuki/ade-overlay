@@ -12,11 +12,14 @@ import {
   addRepository,
   createWorktree,
   deleteWorktree,
+  dismissCreationError,
   openCode,
+  openCreationLogs,
   removeRepository,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
 import { useWorktreeStream } from './worktrees'
+import { useEditorSessionStream } from './editorSessions'
 import { logger } from '../logger'
 import { RECENT_WORKTREE_EDITOR_KEY, setCacheItem } from '../persistentCache'
 import { WorktreeList } from './WorktreeList'
@@ -26,9 +29,10 @@ type CreateValues = CreateWorktreeData['body']
 
 export function App(): React.JSX.Element {
   const { snapshot, connected } = useWorktreeStream()
+  const sessionStatuses = useEditorSessionStream()
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set())
   const [addingRepository, setAddingRepository] = useState(false)
-  const [pendingCreate, setPendingCreate] = useState<CreateValues | null>(null)
+  const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const markBusy = useCallback((worktreeId: string, busy: boolean): void => {
@@ -109,16 +113,49 @@ export function App(): React.JSX.Element {
     async (values: CreateValues): Promise<boolean> => {
       setError(null)
       logger.info({ values }, 'creating worktree')
-      setPendingCreate(values)
-      const { error } = await createWorktree({ body: values })
-      setPendingCreate(null)
-      if (error) {
-        logger.error({ values, err: error }, 'create worktree failed')
-        setError(messageOf(error, 'Failed to create worktree'))
-        return false
+      // `creating` only guards the (fast) enqueue round-trip so the button
+      // can't double-submit; the actual creation progress is shown by the
+      // optimistic row from the worktree stream. Always clear it before
+      // returning.
+      setCreating(true)
+      try {
+        const { error } = await createWorktree({ body: values })
+        if (error) {
+          logger.error({ values, err: error }, 'create worktree failed')
+          setError(messageOf(error, 'Failed to create worktree'))
+          return false
+        }
+        logger.info({ worktreePath: values.worktreePath }, 'queued worktree')
+        return true
+      } finally {
+        setCreating(false)
       }
-      logger.info({ worktreePath: values.worktreePath }, 'created worktree')
-      return true
+    },
+    [],
+  )
+
+  const handleOpenCreationLogs = useCallback(
+    async (worktreeId: string): Promise<void> => {
+      setError(null)
+      logger.info({ worktreeId }, 'opening creation logs')
+      const { error } = await openCreationLogs({ path: { worktreeId } })
+      if (error) {
+        logger.error({ worktreeId, err: error }, 'open creation logs failed')
+        setError(messageOf(error, 'Failed to open creation logs'))
+      }
+    },
+    [],
+  )
+
+  const handleDismissCreationError = useCallback(
+    async (worktreeId: string): Promise<void> => {
+      setError(null)
+      logger.info({ worktreeId }, 'dismissing creation error')
+      const { error } = await dismissCreationError({ path: { worktreeId } })
+      if (error) {
+        logger.error({ worktreeId, err: error }, 'dismiss creation failed')
+        setError(messageOf(error, 'Failed to dismiss error'))
+      }
     },
     [],
   )
@@ -167,15 +204,17 @@ export function App(): React.JSX.Element {
         <WorktreeList
           worktrees={worktrees}
           busyIds={busyIds}
-          pendingCreate={pendingCreate}
+          sessionStatuses={sessionStatuses}
           onOpen={handleOpenCode}
           onDelete={handleDelete}
           onRemoveRepository={handleRemoveRepository}
+          onOpenCreationLogs={handleOpenCreationLogs}
+          onDismissCreationError={handleDismissCreationError}
         />
 
         <CreateWorktreeForm
           repositories={repositories}
-          busy={pendingCreate !== null}
+          busy={creating}
           onCreate={handleCreate}
         />
       </Flex>

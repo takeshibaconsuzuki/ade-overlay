@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events'
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import Mustache from 'mustache'
 import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
+import { getCreationLogsDir } from '../dataDir'
 import { HttpError } from '../errors'
 import {
   type GitWorktree,
@@ -9,21 +12,47 @@ import {
   listGitWorktrees,
   runGit,
 } from './git'
-import { canonicalizePath, normalizePath } from '../paths'
+import { canonicalizePath, normalizePath, precanonicalizePath } from '../paths'
 import { createWorktreeId } from './ids'
 import {
   type CreateWorktreeRequest,
   type PreviewWorktreePathRequest,
   type Repository,
   type Worktree,
+  type WorktreeCreationState,
   type WorktreeEvent,
   type WorktreeSnapshot,
 } from './schemas'
+
+/**
+ * Transient state for an async `git worktree add` job. Lives only in the
+ * (singleton) registry — it survives a controller-window reopen but is wiped on
+ * a full app restart. Never serialized to the wire; the registry projects it
+ * into snapshot rows instead.
+ */
+type CreationJob = {
+  worktreeId: string
+  mainWorktreePath: string
+  newBranch?: string
+  baseBranch: string
+  // Canonical target path, computed up front so the job id matches the eventual
+  // git-derived id (git reports realpath'd worktree paths).
+  canonicalPath: string
+  state: 'creating' | 'succeeded' | 'failed'
+  error?: string
+  logPath: string
+  terminated: boolean
+}
+
+function creationLogPathFor(worktreeId: string): string {
+  return join(getCreationLogsDir(), `${worktreeId}.log`)
+}
 
 export class WorktreeRegistry {
   readonly events = new EventEmitter()
 
   private readonly repositories = new Map<string, TrackedRepository>()
+  private readonly creationJobs = new Map<string, CreationJob>()
   private persistRepositoriesTail = Promise.resolve()
 
   constructor(
@@ -32,6 +61,15 @@ export class WorktreeRegistry {
   ) {}
 
   async loadRepositories(): Promise<void> {
+    // Creation jobs (and their logs) are ephemeral across a full restart; clear
+    // any logs left over from a previous run so the directory never accumulates
+    // orphaned files.
+    await rm(getCreationLogsDir(), { recursive: true, force: true }).catch(
+      (error: unknown) => {
+        this.log.warn({ err: error }, 'failed to clear creation logs')
+      },
+    )
+
     if (!this.appConfig) {
       return
     }
@@ -120,6 +158,15 @@ export class WorktreeRegistry {
 
         throw error
       }
+
+      // Drop any transient creation jobs (and logs) for the untracked repo so
+      // their rows don't linger after the repository is gone.
+      for (const [worktreeId, job] of this.creationJobs) {
+        if (job.mainWorktreePath === repositoryKey) {
+          this.creationJobs.delete(worktreeId)
+          await this.removeCreationLog(job)
+        }
+      }
     }
 
     const snapshot = await this.getSnapshot()
@@ -136,7 +183,13 @@ export class WorktreeRegistry {
     return { removed, snapshot }
   }
 
-  async createWorktree({
+  /**
+   * Queue a worktree creation and return immediately with the (stable)
+   * pre-minted id and an optimistic `creating` row. The actual `git worktree
+   * add` runs in the background via {@link runCreateJob}; clients learn the
+   * outcome through the worktree event stream.
+   */
+  async enqueueCreateWorktree({
     mainWorktreePath,
     newBranch,
     baseBranch,
@@ -146,33 +199,181 @@ export class WorktreeRegistry {
     worktree: Worktree
   }> {
     const repository = await this.getRepository(mainWorktreePath)
-    const args = ['worktree', 'add']
 
-    if (newBranch) {
-      args.push('-b', newBranch)
+    let canonicalPath: string
+    try {
+      canonicalPath = await precanonicalizePath(worktreePath)
+    } catch {
+      throw new HttpError(
+        400,
+        `Worktree path parent directory does not exist: ${worktreePath}`,
+      )
     }
 
-    args.push(normalizePath(worktreePath), baseBranch)
-    await runGit(repository.mainWorktreePath, args, this.log)
+    const worktreeId = createWorktreeId(canonicalPath)
 
-    // Canonicalize as soon as the path exists on disk (realpath requires it),
-    // then key everything off the canonical path.
-    const targetPath = await canonicalizePath(worktreePath)
-    const worktreeId = createWorktreeId(targetPath)
-    const worktree = await this.getWorktreeById(worktreeId)
+    const activeJob = this.creationJobs.get(worktreeId)
+    if (activeJob && activeJob.state === 'creating') {
+      throw new HttpError(
+        409,
+        `A worktree is already being created at ${canonicalPath}`,
+      )
+    }
+    if (await this.gitWorktreeExists(repository.mainWorktreePath, worktreeId)) {
+      throw new HttpError(409, `Worktree already exists at ${canonicalPath}`)
+    }
+
+    const job: CreationJob = {
+      worktreeId,
+      mainWorktreePath: repository.mainWorktreePath,
+      newBranch,
+      baseBranch,
+      canonicalPath,
+      state: 'creating',
+      logPath: creationLogPathFor(worktreeId),
+      terminated: false,
+    }
+    this.creationJobs.set(worktreeId, job)
+
     const snapshot = await this.getSnapshot()
-
     this.log.info(
-      { worktreeId, path: targetPath, branchName: worktree.branchName },
-      'worktree created',
+      { worktreeId, path: canonicalPath, baseBranch, newBranch },
+      'worktree creation queued',
     )
-    this.emit({
-      type: 'worktree-created',
-      worktree,
-      snapshot,
-    })
+    this.emit({ type: 'worktree-creation-updated', worktreeId, snapshot })
 
+    void this.runCreateJob(worktreeId)
+
+    const worktree = snapshot.worktrees.find(
+      (candidate) => candidate.worktreeId === worktreeId,
+    )!
     return { worktreeId, worktree }
+  }
+
+  private async runCreateJob(worktreeId: string): Promise<void> {
+    const job = this.creationJobs.get(worktreeId)
+    if (!job) {
+      return
+    }
+
+    const args = ['worktree', 'add']
+    if (job.newBranch) {
+      args.push('-b', job.newBranch)
+    }
+    args.push(job.canonicalPath, job.baseBranch)
+
+    try {
+      await runGit(job.mainWorktreePath, args, this.log, {
+        logFilePath: job.logPath,
+      })
+    } catch (error) {
+      const current = this.creationJobs.get(worktreeId)
+      if (!current) {
+        return
+      }
+      current.state = 'failed'
+      current.terminated = true
+      current.error = oneLineError(error)
+      this.log.warn({ worktreeId, err: error }, 'worktree creation failed')
+      this.emit({
+        type: 'worktree-creation-updated',
+        worktreeId,
+        snapshot: await this.getSnapshot(),
+      })
+      return
+    }
+
+    const current = this.creationJobs.get(worktreeId)
+    if (!current) {
+      // The job was deleted while git was running; undo the orphaned worktree.
+      await this.bestEffortRemoveWorktree(job)
+      return
+    }
+
+    current.state = 'succeeded'
+    current.terminated = true
+    this.log.info({ worktreeId, path: job.canonicalPath }, 'worktree created')
+    const snapshot = await this.getSnapshot()
+    const worktree = snapshot.worktrees.find(
+      (candidate) => candidate.worktreeId === worktreeId,
+    )
+    if (worktree) {
+      this.emit({ type: 'worktree-created', worktree, snapshot })
+    } else {
+      this.emit({ type: 'worktree-creation-updated', worktreeId, snapshot })
+    }
+  }
+
+  async dismissCreationError(
+    worktreeId: string,
+  ): Promise<{ snapshot: WorktreeSnapshot }> {
+    const job = this.creationJobs.get(worktreeId)
+    if (!job) {
+      return { snapshot: await this.getSnapshot() }
+    }
+
+    if (await this.gitWorktreeExists(job.mainWorktreePath, worktreeId)) {
+      // The worktree exists on disk (e.g. a future post-create step failed);
+      // clear the error and present a normal, openable row.
+      job.state = 'succeeded'
+      job.error = undefined
+    } else {
+      // A `git worktree add` failure leaves nothing on disk; drop the row.
+      this.creationJobs.delete(worktreeId)
+      await this.removeCreationLog(job)
+    }
+
+    const snapshot = await this.getSnapshot()
+    this.emit({ type: 'worktree-creation-updated', worktreeId, snapshot })
+    return { snapshot }
+  }
+
+  getCreationJob(worktreeId: string): CreationJob | undefined {
+    return this.creationJobs.get(worktreeId)
+  }
+
+  async resolveMainWorktreeId(mainWorktreePath: string): Promise<string> {
+    const repository = await this.getRepository(mainWorktreePath)
+    return createWorktreeId(repository.mainWorktreePath)
+  }
+
+  private async gitWorktreeExists(
+    mainWorktreePath: string,
+    worktreeId: string,
+  ): Promise<boolean> {
+    try {
+      const worktrees = await listGitWorktrees(mainWorktreePath, this.log)
+      return worktrees.some(
+        (worktree) => createWorktreeId(worktree.path) === worktreeId,
+      )
+    } catch {
+      return false
+    }
+  }
+
+  private async bestEffortRemoveWorktree(job: CreationJob): Promise<void> {
+    try {
+      await runGit(
+        job.mainWorktreePath,
+        ['worktree', 'remove', '--force', job.canonicalPath],
+        this.log,
+      )
+    } catch (error) {
+      this.log.warn(
+        { err: error, worktreeId: job.worktreeId },
+        'failed to clean up orphaned worktree',
+      )
+    }
+    await this.removeCreationLog(job)
+  }
+
+  private async removeCreationLog(job: CreationJob): Promise<void> {
+    await rm(job.logPath, { force: true }).catch((error: unknown) => {
+      this.log.warn(
+        { err: error, worktreeId: job.worktreeId },
+        'failed to remove creation log',
+      )
+    })
   }
 
   async previewWorktreePath({
@@ -211,6 +412,27 @@ export class WorktreeRegistry {
     worktreeId: string,
     deleteBranch: boolean,
   ): Promise<{ deleted: boolean; branchDeleted: boolean }> {
+    const job = this.creationJobs.get(worktreeId)
+
+    // A pending/failed job with no real worktree on disk: drop the transient
+    // row instead of asking git to remove a path it doesn't track.
+    if (
+      job &&
+      !(await this.gitWorktreeExists(job.mainWorktreePath, worktreeId))
+    ) {
+      this.creationJobs.delete(worktreeId)
+      await this.removeCreationLog(job)
+      const snapshot = await this.getSnapshot()
+      this.log.info({ worktreeId }, 'pending worktree removed')
+      this.emit({
+        type: 'worktree-deleted',
+        worktreeId,
+        branchDeleted: false,
+        snapshot,
+      })
+      return { deleted: true, branchDeleted: false }
+    }
+
     const worktree = await this.getWorktreeById(worktreeId)
 
     if (worktree.path === worktree.mainWorktreePath) {
@@ -231,6 +453,11 @@ export class WorktreeRegistry {
         this.log,
       )
       branchDeleted = true
+    }
+
+    if (job) {
+      this.creationJobs.delete(worktreeId)
+      await this.removeCreationLog(job)
     }
 
     const snapshot = await this.getSnapshot()
@@ -269,10 +496,40 @@ export class WorktreeRegistry {
       }),
     )
 
-    const worktrees = worktreeGroups
-      .flat()
-      .map(toPublicWorktree)
-      .sort((left, right) => left.path.localeCompare(right.path))
+    // Real git worktrees, keyed by id so creation jobs can merge in place.
+    const byId = new Map<string, Worktree>(
+      worktreeGroups
+        .flat()
+        .map(toPublicWorktree)
+        .map((worktree) => [worktree.worktreeId, worktree]),
+    )
+
+    for (const job of this.creationJobs.values()) {
+      const gitRow = byId.get(job.worktreeId)
+      if (job.state === 'succeeded') {
+        // The git row shares this id; flag it ready and keep logs available. If
+        // git hasn't surfaced it yet, fall back to the synthetic creating row.
+        byId.set(
+          job.worktreeId,
+          gitRow
+            ? { ...gitRow, creationState: 'ready', hasCreationLogs: true }
+            : toJobWorktree(job, 'creating'),
+        )
+        continue
+      }
+      if (job.state === 'creating') {
+        if (!gitRow) {
+          byId.set(job.worktreeId, toJobWorktree(job, 'creating'))
+        }
+        continue
+      }
+      // failed: there is no git row, surface the failure.
+      byId.set(job.worktreeId, toJobWorktree(job, 'failed'))
+    }
+
+    const worktrees = [...byId.values()].sort((left, right) =>
+      left.path.localeCompare(right.path),
+    )
 
     const repositories = trackedRepositories.map(toPublicRepository)
 
@@ -406,6 +663,27 @@ function toPublicWorktree(
     isDetached: worktree.isDetached,
     isPrunable: worktree.isPrunable,
     prunableReason: worktree.prunableReason,
+    creationState: 'ready',
+    hasCreationLogs: false,
+  }
+}
+
+/** Project a transient creation job into a synthetic worktree row. */
+function toJobWorktree(
+  job: CreationJob,
+  creationState: WorktreeCreationState,
+): Worktree {
+  return {
+    worktreeId: job.worktreeId,
+    path: job.canonicalPath,
+    mainWorktreePath: job.mainWorktreePath,
+    branchName: job.newBranch ?? job.baseBranch,
+    isBare: false,
+    isDetached: false,
+    isPrunable: false,
+    creationState,
+    creationError: creationState === 'failed' ? job.error : undefined,
+    hasCreationLogs: job.terminated,
   }
 }
 
@@ -413,4 +691,21 @@ function getBranchName(branch?: string): string | undefined {
   return branch?.startsWith('refs/heads/')
     ? branch.slice('refs/heads/'.length)
     : undefined
+}
+
+/**
+ * Reduce a git error to a single useful line for the row. Prefers a `fatal:` /
+ * `error:` line, then the last non-empty line; the full output lives in the log.
+ */
+function oneLineError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const lines = message
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const highlighted = lines.find((line) => /^(fatal|error):/i.test(line))
+  return (highlighted ?? lines.at(-1) ?? 'Worktree creation failed').slice(
+    0,
+    300,
+  )
 }

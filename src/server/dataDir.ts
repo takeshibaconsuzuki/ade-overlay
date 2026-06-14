@@ -10,3 +10,7 @@ export function getAppDataDir(): string {
 export function getEditorDataDir(): string {
   return join(getAppDataDir(), 'editor')
 }
+
+export function getCreationLogsDir(): string {
+  return join(getAppDataDir(), 'creation-logs')
+}

@@ -34,6 +34,9 @@ export type RemoveRepositoryResponses = {
                 isDetached: boolean;
                 isPrunable: boolean;
                 prunableReason?: string;
+                creationState: 'creating' | 'ready' | 'failed';
+                creationError?: string;
+                hasCreationLogs: boolean;
             }>;
         };
     };
@@ -85,6 +88,9 @@ export type AddRepositoryResponses = {
                 isDetached: boolean;
                 isPrunable: boolean;
                 prunableReason?: string;
+                creationState: 'creating' | 'ready' | 'failed';
+                creationError?: string;
+                hasCreationLogs: boolean;
             }>;
         };
     };
@@ -135,6 +141,13 @@ export type CreateWorktreeErrors = {
         error: string;
         message: string;
     };
+    /**
+     * Default Response
+     */
+    409: {
+        error: string;
+        message: string;
+    };
 };
 
 export type CreateWorktreeError = CreateWorktreeErrors[keyof CreateWorktreeErrors];
@@ -156,11 +169,65 @@ export type CreateWorktreeResponses = {
             isDetached: boolean;
             isPrunable: boolean;
             prunableReason?: string;
+            creationState: 'creating' | 'ready' | 'failed';
+            creationError?: string;
+            hasCreationLogs: boolean;
         };
     };
 };
 
 export type CreateWorktreeResponse = CreateWorktreeResponses[keyof CreateWorktreeResponses];
+
+export type DismissCreationErrorData = {
+    body?: never;
+    path: {
+        worktreeId: string;
+    };
+    query?: never;
+    url: '/worktrees/{worktreeId}/dismiss-creation';
+};
+
+export type DismissCreationErrorErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+};
+
+export type DismissCreationErrorError = DismissCreationErrorErrors[keyof DismissCreationErrorErrors];
+
+export type DismissCreationErrorResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        snapshot: {
+            repositories: Array<{
+                mainWorktreePath: string;
+            }>;
+            worktrees: Array<{
+                worktreeId: string;
+                path: string;
+                mainWorktreePath: string;
+                head?: string;
+                branch?: string;
+                branchName?: string;
+                isBare: boolean;
+                isDetached: boolean;
+                isPrunable: boolean;
+                prunableReason?: string;
+                creationState: 'creating' | 'ready' | 'failed';
+                creationError?: string;
+                hasCreationLogs: boolean;
+            }>;
+        };
+    };
+};
+
+export type DismissCreationErrorResponse = DismissCreationErrorResponses[keyof DismissCreationErrorResponses];
 
 export type ListBranchesData = {
     body: {
@@ -300,6 +367,22 @@ export type EditorCommandsResponses = {
 
 export type EditorCommandsResponse = EditorCommandsResponses[keyof EditorCommandsResponses];
 
+export type EditorSessionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/editorSessions';
+};
+
+export type EditorSessionsResponses = {
+    /**
+     * Server-sent editor session status events.
+     */
+    200: string;
+};
+
+export type EditorSessionsResponse = EditorSessionsResponses[keyof EditorSessionsResponses];
+
 export type OpenCodeData = {
     body: {
         worktreeId: string;
@@ -340,6 +423,45 @@ export type OpenCodeResponses = {
 };
 
 export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
+
+export type OpenCreationLogsData = {
+    body?: never;
+    path: {
+        worktreeId: string;
+    };
+    query?: never;
+    url: '/worktrees/{worktreeId}/creation-logs/open';
+};
+
+export type OpenCreationLogsErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type OpenCreationLogsError = OpenCreationLogsErrors[keyof OpenCreationLogsErrors];
+
+export type OpenCreationLogsResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        ok: true;
+    };
+};
+
+export type OpenCreationLogsResponse = OpenCreationLogsResponses[keyof OpenCreationLogsResponses];
 
 export type IngestLogsData = {
     body: {

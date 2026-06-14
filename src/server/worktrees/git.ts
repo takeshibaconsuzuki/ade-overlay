@@ -1,10 +1,21 @@
 import { execFile } from 'node:child_process'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { promisify } from 'node:util'
 import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { normalizePath } from '../paths'
 
 const execFileAsync = promisify(execFile)
+
+type RunGitOptions = {
+  /**
+   * When set, capture the command, its stdout and stderr to this file (appended)
+   * on both success and failure. Used to surface creation logs for worktrees
+   * that may never exist on disk.
+   */
+  logFilePath?: string
+}
 
 export type GitWorktree = {
   path: string
@@ -100,20 +111,60 @@ export async function runGit(
   cwd: string,
   args: string[],
   log?: Logger,
+  options: RunGitOptions = {},
 ): Promise<string> {
   const directory = normalizePath(cwd)
   log?.debug({ cwd: directory, args }, 'running git command')
   try {
-    const { stdout } = await execFileAsync('git', args, {
+    const { stdout, stderr } = await execFileAsync('git', args, {
       cwd: directory,
       maxBuffer: 10 * 1024 * 1024,
     })
 
+    await captureGitLog(options.logFilePath, args, stdout, stderr, log)
     return stdout
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Git command failed'
+    const { stdout, stderr } = asExecOutput(error)
+    await captureGitLog(options.logFilePath, args, stdout, stderr, log, message)
     log?.warn({ cwd: directory, args, message }, 'git command failed')
     throw new HttpError(400, message)
+  }
+}
+
+function asExecOutput(error: unknown): { stdout: string; stderr: string } {
+  const record = error as { stdout?: unknown; stderr?: unknown }
+  return {
+    stdout: typeof record?.stdout === 'string' ? record.stdout : '',
+    stderr: typeof record?.stderr === 'string' ? record.stderr : '',
+  }
+}
+
+async function captureGitLog(
+  logFilePath: string | undefined,
+  args: string[],
+  stdout: string,
+  stderr: string,
+  log?: Logger,
+  errorMessage?: string,
+): Promise<void> {
+  if (!logFilePath) {
+    return
+  }
+
+  const sections = [
+    `$ git ${args.join(' ')}`,
+    stdout.trim() && stdout,
+    stderr.trim() && stderr,
+    errorMessage && `error: ${errorMessage}`,
+    '',
+  ].filter((section): section is string => Boolean(section))
+
+  try {
+    await mkdir(dirname(logFilePath), { recursive: true })
+    await appendFile(logFilePath, `${sections.join('\n')}\n`, 'utf8')
+  } catch (error) {
+    log?.warn({ err: error, logFilePath }, 'failed to write creation log')
   }
 }

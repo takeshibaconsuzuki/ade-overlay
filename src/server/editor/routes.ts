@@ -12,19 +12,23 @@ import {
   EDITOR_BASE_PATH,
   EDITOR_BOOTSTRAP_PATH,
   EDITOR_COMMAND_ACK_PATH,
+  EDITOR_SESSION_STATUS_EVENT,
   type EditorCommand,
+  type EditorSessionStatus,
 } from '../../api/server/editor'
 import { SERVER_PORT } from '../../api/server/config'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { EditorService } from './service'
+import { WorktreeIdParams } from '../worktrees/schemas'
 import {
   EditorCommandAckRequest,
   EditorCommandAckResponse,
   ErrorResponse,
   OpenCodeRequest,
   OpenCodeResponse,
+  OpenCreationLogsResponse,
 } from './schemas'
 
 type EditorRouteOptions = {
@@ -34,7 +38,7 @@ type EditorRouteOptions = {
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { editor }: EditorRouteOptions,
+  { registry, editor }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
@@ -54,6 +58,37 @@ export function registerEditorRoutes(
   })
 
   routes.route({
+    method: 'GET',
+    url: '/editorSessions',
+    schema: {
+      operationId: 'editorSessions',
+      response: {
+        200: z.string().describe('Server-sent editor session status events.'),
+      },
+    },
+    handler: async (request, reply) => {
+      streamEditorSessions(request, reply, editor)
+    },
+  })
+
+  routes.route({
+    method: 'GET',
+    url: '/editorExtensionCommands',
+    schema: {
+      hide: true,
+      querystring: z.object({ worktreeId: z.string() }),
+    },
+    handler: async (request, reply) => {
+      streamEditorExtensionCommands(
+        request,
+        reply,
+        editor,
+        request.query.worktreeId,
+      )
+    },
+  })
+
+  routes.route({
     method: 'POST',
     url: '/openCode',
     schema: {
@@ -66,6 +101,34 @@ export function registerEditorRoutes(
       },
     },
     handler: async (request) => editor.openCode(request.body.worktreeId),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: '/worktrees/:worktreeId/creation-logs/open',
+    schema: {
+      operationId: 'openCreationLogs',
+      params: WorktreeIdParams,
+      response: {
+        200: OpenCreationLogsResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    handler: async (request) => {
+      const job = registry.getCreationJob(request.params.worktreeId)
+      if (!job || !job.terminated) {
+        throw new HttpError(
+          404,
+          `No creation logs for worktree: ${request.params.worktreeId}`,
+        )
+      }
+      const mainWorktreeId = await registry.resolveMainWorktreeId(
+        job.mainWorktreePath,
+      )
+      await editor.openFile(mainWorktreeId, job.logPath)
+      return { ok: true as const }
+    },
   })
 
   routes.route({
@@ -277,6 +340,52 @@ function streamEditorCommands(
   if (lastCommand) {
     stream.send(lastCommand.type, lastCommand)
   }
+}
+
+function streamEditorExtensionCommands(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  editor: EditorService,
+  worktreeId: string,
+): void {
+  const stream = createSseStream(request, reply)
+
+  const onCommand = (command: EditorCommand): void => {
+    if (command.type === 'open-file' && command.worktreeId === worktreeId) {
+      stream.send('open-file', { filePath: command.filePath })
+    }
+  }
+
+  editor.commands.on('command', onCommand)
+  stream.onClose(() => {
+    editor.commands.off('command', onCommand)
+  })
+
+  // Replay the last requested file so a freshly booted session (whose extension
+  // connects after the command was emitted) still opens it.
+  const lastFilePath = editor.getLastOpenFile(worktreeId)
+  if (lastFilePath) {
+    stream.send('open-file', { filePath: lastFilePath })
+  }
+}
+
+function streamEditorSessions(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  editor: EditorService,
+): void {
+  const stream = createSseStream(request, reply)
+
+  const onStatus = (status: EditorSessionStatus): void => {
+    stream.send(EDITOR_SESSION_STATUS_EVENT, status)
+  }
+
+  editor.sessionStatusEvents.on(EDITOR_SESSION_STATUS_EVENT, onStatus)
+  stream.onClose(() => {
+    editor.sessionStatusEvents.off(EDITOR_SESSION_STATUS_EVENT, onStatus)
+  })
+
+  stream.send('snapshot', editor.getSessionStatuses())
 }
 
 export function editorHostFor(worktreeId: string): string {

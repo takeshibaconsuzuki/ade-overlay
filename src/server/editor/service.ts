@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events'
 import {
   EDITOR_BOOTSTRAP_PATH,
   type EditorCommand,
+  type EditorSessionStatus,
+  type EditorSessionStatusValue,
   type EditorSwitchCommand,
 } from '../../api/server/editor'
 import { SERVER_PORT } from '../../api/server/config'
@@ -25,12 +27,17 @@ type EditorSession = {
 
 export class EditorService {
   readonly commands = new EventEmitter()
+  readonly sessionStatusEvents = new EventEmitter()
 
   private readonly sessions = new Map<string, EditorSession>()
   private readonly pendingSessions = new Map<string, Promise<EditorSession>>()
+  private readonly sessionStatuses = new Map<string, EditorSessionStatusValue>()
   private editorProcess: ChildProcess | null = null
   private editorClientCount = 0
   private lastCommand: EditorCommand | null = null
+  // Last file requested per worktree, replayed when the helper extension
+  // (re)connects so a cold session start never misses the open.
+  private readonly lastOpenFile = new Map<string, string>()
   private readonly pendingCommandAcks = new Map<string, () => void>()
   private shuttingDown = false
 
@@ -86,6 +93,48 @@ export class EditorService {
     return { worktreeId, url: session.url, alreadyStarted }
   }
 
+  async openFile(worktreeId: string, filePath: string): Promise<void> {
+    if (this.shuttingDown) {
+      throw new HttpError(503, 'Editor service is shutting down')
+    }
+    this.lastOpenFile.set(worktreeId, filePath)
+    const session = await this.ensureSession(worktreeId)
+    this.ensureEditorApp()
+    this.emitCommand({
+      type: 'open-file',
+      worktreeId,
+      url: session.url,
+      filePath,
+    })
+    this.log.info({ worktreeId, filePath }, 'editor open-file emitted')
+  }
+
+  getLastOpenFile(worktreeId: string): string | undefined {
+    return this.lastOpenFile.get(worktreeId)
+  }
+
+  getSessionStatuses(): EditorSessionStatus[] {
+    return [...this.sessionStatuses.entries()]
+      .filter(([, status]) => status !== 'off')
+      .map(([worktreeId, status]) => ({ worktreeId, status }))
+  }
+
+  private setSessionStatus(
+    worktreeId: string,
+    status: EditorSessionStatusValue,
+  ): void {
+    if (this.sessionStatuses.get(worktreeId) === status) {
+      return
+    }
+    if (status === 'off') {
+      this.sessionStatuses.delete(worktreeId)
+    } else {
+      this.sessionStatuses.set(worktreeId, status)
+    }
+    const event: EditorSessionStatus = { worktreeId, status }
+    this.sessionStatusEvents.emit('session-status', event)
+  }
+
   async getProxyPort(worktreeId: string): Promise<number> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
@@ -135,8 +184,16 @@ export class EditorService {
   }
 
   private async startSession(worktreeId: string): Promise<EditorSession> {
-    const worktree = await this.registry.getWorktreeById(worktreeId)
-    const vscode = await startVscodeServer(worktree, this.log)
+    this.setSessionStatus(worktreeId, 'starting')
+    let worktree
+    let vscode
+    try {
+      worktree = await this.registry.getWorktreeById(worktreeId)
+      vscode = await startVscodeServer(worktree, this.log)
+    } catch (error) {
+      this.setSessionStatus(worktreeId, 'off')
+      throw error
+    }
     const child = vscode.process
     const session: EditorSession = {
       worktreeId,
@@ -148,6 +205,7 @@ export class EditorService {
     child.on('exit', (code, signal) => {
       if (this.sessions.get(worktreeId)?.process === child) {
         this.sessions.delete(worktreeId)
+        this.setSessionStatus(worktreeId, 'off')
       }
       this.log.info({ worktreeId, code, signal }, 'vscode serve-web exited')
     })
@@ -155,9 +213,11 @@ export class EditorService {
     this.sessions.set(worktreeId, session)
     if (this.shuttingDown) {
       await killChildProcessTree(child, this.log, 'vscode serve-web')
+      this.setSessionStatus(worktreeId, 'off')
       throw new HttpError(503, 'Editor service is shutting down')
     }
 
+    this.setSessionStatus(worktreeId, 'on')
     return session
   }
 
@@ -244,6 +304,7 @@ export class EditorService {
 
     const existing = this.sessions.get(worktreeId)
     this.sessions.delete(worktreeId)
+    this.setSessionStatus(worktreeId, 'off')
     if (existing) {
       await killChildProcessTree(
         existing.process,
@@ -281,6 +342,7 @@ export class EditorService {
     this.shuttingDown = true
     this.registry.events.off('worktree-event', this.onWorktreeEvent)
     this.commands.removeAllListeners()
+    this.sessionStatusEvents.removeAllListeners()
     for (const resolve of this.pendingCommandAcks.values()) {
       resolve()
     }

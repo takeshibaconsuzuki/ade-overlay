@@ -2,11 +2,13 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { EDITOR_BASE_PATH } from '../../api/server/editor'
+import { SERVER_ORIGIN } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
 import { getEditorDataDir } from '../dataDir'
 import { HttpError } from '../errors'
 import { getFreePort, waitForPort } from '../ports'
 import { type Worktree } from '../worktrees/schemas'
+import { writeAdeHelperExtension } from './adeHelperExtension'
 import { symlinkLocalExtensions } from './userData'
 
 export type VscodeServerSession = {
@@ -21,7 +23,9 @@ export async function startVscodeServer(
   const port = await getFreePort()
   const serverDataDir = getServerDataDir(worktree.worktreeId)
   await mkdir(serverDataDir, { recursive: true })
-  await symlinkLocalExtensions(join(serverDataDir, 'extensions'), log)
+  const extensionsDir = join(serverDataDir, 'extensions')
+  await symlinkLocalExtensions(extensionsDir, log)
+  await writeAdeHelperExtension(extensionsDir, log)
 
   const child = spawnCodeServeWeb(worktree, port, serverDataDir)
   const spawnError = waitForSpawnError(child)
@@ -90,6 +94,13 @@ function spawnCodeServeWeb(
       cwd: worktree.path,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // The injected ADE helper extension reads these to open files (e.g.
+      // creation logs) pushed from the server over its back-channel.
+      env: {
+        ...process.env,
+        ADE_SERVER_ORIGIN: SERVER_ORIGIN,
+        ADE_WORKTREE_ID: worktree.worktreeId,
+      },
     },
   )
 }

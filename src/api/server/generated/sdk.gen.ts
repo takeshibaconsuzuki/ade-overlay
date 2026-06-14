@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, EditorCommandsData, EditorCommandsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -47,6 +47,8 @@ export const createWorktree = <ThrowOnError extends boolean = false>(options: Op
     }
 });
 
+export const dismissCreationError = <ThrowOnError extends boolean = false>(options: Options<DismissCreationErrorData, ThrowOnError>): RequestResult<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError> => (options.client ?? client).post<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/dismiss-creation', ...options });
+
 export const listBranches = <ThrowOnError extends boolean = false>(options: Options<ListBranchesData, ThrowOnError>): RequestResult<ListBranchesResponses, ListBranchesErrors, ThrowOnError> => (options.client ?? client).post<ListBranchesResponses, ListBranchesErrors, ThrowOnError>({
     url: '/repositories/branches',
     ...options,
@@ -76,6 +78,8 @@ export const deleteWorktree = <ThrowOnError extends boolean = false>(options: Op
 
 export const editorCommands = <ThrowOnError extends boolean = false>(options?: Options<EditorCommandsData, ThrowOnError>): RequestResult<EditorCommandsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<EditorCommandsResponses, unknown, ThrowOnError>({ url: '/editorCommands', ...options });
 
+export const editorSessions = <ThrowOnError extends boolean = false>(options?: Options<EditorSessionsData, ThrowOnError>): RequestResult<EditorSessionsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<EditorSessionsResponses, unknown, ThrowOnError>({ url: '/editorSessions', ...options });
+
 export const openCode = <ThrowOnError extends boolean = false>(options: Options<OpenCodeData, ThrowOnError>): RequestResult<OpenCodeResponses, OpenCodeErrors, ThrowOnError> => (options.client ?? client).post<OpenCodeResponses, OpenCodeErrors, ThrowOnError>({
     url: '/openCode',
     ...options,
@@ -84,6 +88,8 @@ export const openCode = <ThrowOnError extends boolean = false>(options: Options<
         ...options.headers
     }
 });
+
+export const openCreationLogs = <ThrowOnError extends boolean = false>(options: Options<OpenCreationLogsData, ThrowOnError>): RequestResult<OpenCreationLogsResponses, OpenCreationLogsErrors, ThrowOnError> => (options.client ?? client).post<OpenCreationLogsResponses, OpenCreationLogsErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/creation-logs/open', ...options });
 
 export const ingestLogs = <ThrowOnError extends boolean = false>(options: Options<IngestLogsData, ThrowOnError>): RequestResult<IngestLogsResponses, unknown, ThrowOnError> => (options.client ?? client).post<IngestLogsResponses, unknown, ThrowOnError>({
     url: '/logs',

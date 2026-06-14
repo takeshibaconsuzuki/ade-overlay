@@ -37,9 +37,15 @@ export const DeleteWorktreeRequest = z.object({
   deleteBranch: z.boolean().default(false),
 })
 
+export const WorktreeIdParams = z.object({
+  worktreeId: z.string().length(WORKTREE_ID_LENGTH),
+})
+
 export const Repository = z.object({
   mainWorktreePath: z.string(),
 })
+
+export const WorktreeCreationState = z.enum(['creating', 'ready', 'failed'])
 
 export const Worktree = z.object({
   worktreeId: z.string(),
@@ -52,6 +58,11 @@ export const Worktree = z.object({
   isDetached: z.boolean(),
   isPrunable: z.boolean(),
   prunableReason: z.string().optional(),
+  // Async-creation status. `ready` worktrees exist in git; `creating`/`failed`
+  // rows are transient registry jobs that may not exist on disk yet.
+  creationState: WorktreeCreationState.default('ready'),
+  creationError: z.string().optional(),
+  hasCreationLogs: z.boolean().default(false),
 })
 
 export const WorktreeSnapshot = z.object({
@@ -78,6 +89,11 @@ export const WorktreeEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreated),
     worktree: Worktree,
+    snapshot: WorktreeSnapshot,
+  }),
+  z.object({
+    type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreationUpdated),
+    worktreeId: z.string(),
     snapshot: WorktreeSnapshot,
   }),
   z.object({
@@ -121,6 +137,10 @@ export const DeleteWorktreeResponse = z.object({
   branchDeleted: z.boolean(),
 })
 
+export const DismissCreationErrorResponse = z.object({
+  snapshot: WorktreeSnapshot,
+})
+
 export const ErrorResponse = z.object({
   error: z.string(),
   message: z.string(),
@@ -135,8 +155,10 @@ export type PreviewWorktreePathRequest = z.infer<
 export type ListBranchesRequest = z.infer<typeof ListBranchesRequest>
 export type DeleteWorktreeParams = z.infer<typeof DeleteWorktreeParams>
 export type DeleteWorktreeRequest = z.infer<typeof DeleteWorktreeRequest>
+export type WorktreeIdParams = z.infer<typeof WorktreeIdParams>
 export type Repository = z.infer<typeof Repository>
 export type Worktree = z.infer<typeof Worktree>
+export type WorktreeCreationState = z.infer<typeof WorktreeCreationState>
 export type WorktreeSnapshot = z.infer<typeof WorktreeSnapshot>
 export type WorktreeEvent = z.infer<typeof WorktreeEvent>
 export type WorktreeStreamEvent = z.infer<typeof WorktreeStreamEvent>

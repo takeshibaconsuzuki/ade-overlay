@@ -113,6 +113,16 @@ function handleEditorCommand(command: EditorCommand): void {
     switchWorktree(command)
     return
   }
+  if (command.type === 'open-file') {
+    // Bring the worktree's editor to the front; the injected ADE helper
+    // extension opens the file via its back-channel to the server.
+    switchWorktree({
+      type: 'switch',
+      worktreeId: command.worktreeId,
+      url: command.url,
+    })
+    return
+  }
   if (command.type === 'close') {
     void closeWorktreeView(command.worktreeId)
       .then(() => postEditorCommandAck(command.commandId))

@@ -15,6 +15,7 @@ import {
   DeleteWorktreeParams,
   DeleteWorktreeRequest,
   DeleteWorktreeResponse,
+  DismissCreationErrorResponse,
   ErrorResponse,
   ListBranchesRequest,
   ListBranchesResponse,
@@ -22,6 +23,7 @@ import {
   PreviewWorktreePathResponse,
   RemoveRepositoryRequest,
   RemoveRepositoryResponse,
+  WorktreeIdParams,
   type WorktreeEvent,
 } from './schemas'
 
@@ -91,9 +93,25 @@ export function registerWorktreeRoutes(
         200: CreateWorktreeResponse,
         400: ErrorResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
       },
     },
-    handler: async (request) => registry.createWorktree(request.body),
+    handler: async (request) => registry.enqueueCreateWorktree(request.body),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: '/worktrees/:worktreeId/dismiss-creation',
+    schema: {
+      operationId: 'dismissCreationError',
+      params: WorktreeIdParams,
+      response: {
+        200: DismissCreationErrorResponse,
+        404: ErrorResponse,
+      },
+    },
+    handler: async (request) =>
+      registry.dismissCreationError(request.params.worktreeId),
   })
 
   routes.route({

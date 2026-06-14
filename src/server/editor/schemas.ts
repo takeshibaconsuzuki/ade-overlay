@@ -20,6 +20,10 @@ export const EditorCommandAckResponse = z.object({
   ok: z.literal(true),
 })
 
+export const OpenCreationLogsResponse = z.object({
+  ok: z.literal(true),
+})
+
 export { ErrorResponse }
 
 export type EditorCommandAckRequest = z.infer<typeof EditorCommandAckRequest>

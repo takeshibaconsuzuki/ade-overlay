@@ -1,29 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Badge,
   Box,
   Card,
   Flex,
   ScrollArea,
   Separator,
-  Spinner,
   Text,
   TextField,
 } from '@radix-ui/themes'
-import type { CreateWorktreeData } from '../../../api/server/generated'
+import type { EditorSessionStatusMap } from './editorSessions'
 import { useSearchableList } from '../components/useSearchableList'
 import type { Worktree } from './worktrees'
 import { WorktreeRow, worktreeLabel } from './WorktreeRow'
 
-type CreateValues = CreateWorktreeData['body']
-
 type WorktreeListProps = {
   worktrees: Worktree[]
   busyIds: ReadonlySet<string>
-  pendingCreate: CreateValues | null
+  sessionStatuses: EditorSessionStatusMap
   onOpen: (worktreeId: string) => void
   onDelete: (worktreeId: string, deleteBranch: boolean) => void
   onRemoveRepository: (worktreeId: string, mainWorktreePath: string) => void
+  onOpenCreationLogs: (worktreeId: string) => void
+  onDismissCreationError: (worktreeId: string) => void
 }
 
 const getWorktreeText = (worktree: Worktree): string => worktreeLabel(worktree)
@@ -31,10 +29,12 @@ const getWorktreeText = (worktree: Worktree): string => worktreeLabel(worktree)
 export function WorktreeList({
   worktrees,
   busyIds,
-  pendingCreate,
+  sessionStatuses,
   onOpen,
   onDelete,
   onRemoveRepository,
+  onOpenCreationLogs,
+  onDismissCreationError,
 }: WorktreeListProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -46,7 +46,11 @@ export function WorktreeList({
 
   const handleSelect = useCallback(
     (worktree: Worktree) => {
-      if (!busyIds.has(worktree.worktreeId)) {
+      // Only ready worktrees can be opened; creating/failed rows are inert.
+      if (
+        worktree.creationState === 'ready' &&
+        !busyIds.has(worktree.worktreeId)
+      ) {
         onOpen(worktree.worktreeId)
       }
     },
@@ -83,39 +87,42 @@ export function WorktreeList({
           className="scroll-clip-x"
           style={{ height: 360 }}
         >
-          <Box role="listbox">
-            {!hasWorktrees && !pendingCreate ? (
+          <Box role="listbox" className="worktree-list">
+            {!hasWorktrees ? (
               <EmptyState text="No worktrees yet." />
-            ) : noMatches && !pendingCreate ? (
+            ) : noMatches ? (
               <EmptyState text="No worktrees match your search." />
             ) : (
-              <>
-                {filtered.map((worktree, index) => (
-                  <Box key={worktree.worktreeId}>
-                    {index > 0 && <Separator size="4" />}
-                    <WorktreeRow
-                      worktree={worktree}
-                      busy={busyIds.has(worktree.worktreeId)}
-                      itemProps={getItemProps(index)}
-                      onDelete={(deleteBranch) =>
-                        onDelete(worktree.worktreeId, deleteBranch)
-                      }
-                      onRemoveRepository={() =>
-                        onRemoveRepository(
-                          worktree.worktreeId,
-                          worktree.mainWorktreePath,
-                        )
-                      }
-                    />
-                  </Box>
-                ))}
-                {pendingCreate && (
-                  <Box>
-                    {filtered.length > 0 && <Separator size="4" />}
-                    <PendingCreateRow values={pendingCreate} />
-                  </Box>
-                )}
-              </>
+              filtered.map((worktree, index) => (
+                <Fragment key={worktree.worktreeId}>
+                  {index > 0 && (
+                    <Separator className="worktree-separator" size="4" />
+                  )}
+                  <WorktreeRow
+                    worktree={worktree}
+                    busy={busyIds.has(worktree.worktreeId)}
+                    sessionStatus={
+                      sessionStatuses.get(worktree.worktreeId) ?? 'off'
+                    }
+                    itemProps={getItemProps(index)}
+                    onDelete={(deleteBranch) =>
+                      onDelete(worktree.worktreeId, deleteBranch)
+                    }
+                    onRemoveRepository={() =>
+                      onRemoveRepository(
+                        worktree.worktreeId,
+                        worktree.mainWorktreePath,
+                      )
+                    }
+                    onOpenCreationLogs={() =>
+                      onOpenCreationLogs(worktree.worktreeId)
+                    }
+                    onDismissCreationError={() =>
+                      onDismissCreationError(worktree.worktreeId)
+                    }
+                  />
+                </Fragment>
+              ))
             )}
           </Box>
         </ScrollArea>
@@ -126,33 +133,8 @@ export function WorktreeList({
 
 function EmptyState({ text }: { text: string }): React.JSX.Element {
   return (
-    <Flex align="center" justify="center" p="6">
+    <Flex className="worktree-empty" align="center" justify="center" p="6">
       <Text color="gray">{text}</Text>
-    </Flex>
-  )
-}
-
-function PendingCreateRow({
-  values,
-}: {
-  values: CreateValues
-}): React.JSX.Element {
-  return (
-    <Flex align="center" justify="between" gap="3" px="2" py="3">
-      <Flex direction="column" gap="1" minWidth="0">
-        <Flex align="center" gap="2">
-          <Text weight="medium" truncate>
-            {values.newBranch || values.baseBranch}
-          </Text>
-          <Badge color="iris" variant="soft" radius="full">
-            creating
-          </Badge>
-        </Flex>
-        <Text size="1" color="gray" truncate title={values.worktreePath}>
-          {values.worktreePath}
-        </Text>
-      </Flex>
-      <Spinner />
     </Flex>
   )
 }
