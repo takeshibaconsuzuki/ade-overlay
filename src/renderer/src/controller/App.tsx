@@ -23,6 +23,7 @@ import {
 } from '../../../api/server/generated'
 import { useWorktreeStream } from './worktrees'
 import { logger } from '../logger'
+import { rememberRecentWorktreeEditor } from '../recentWorktreeEditor'
 import { WorktreeRow } from './WorktreeRow'
 import { CreateWorktreeForm } from './CreateWorktreeForm'
 
@@ -136,6 +137,8 @@ export function App(): React.JSX.Element {
       if (error) {
         logger.error({ worktreeId, err: error }, 'open editor failed')
         setError(messageOf(error, 'Failed to open editor'))
+      } else {
+        rememberRecentWorktreeEditor(worktreeId)
       }
       markBusy(worktreeId, false)
     },

@@ -1,6 +1,11 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { Button, Flex } from '@radix-ui/themes'
+import { openCode } from '../../../api/server/generated'
 import { logger } from '../logger'
+import {
+  clearRecentWorktreeEditor,
+  getRecentWorktreeEditor,
+} from '../recentWorktreeEditor'
 import { Titlebar } from '../components/Titlebar'
 
 /**
@@ -15,6 +20,49 @@ export function Launcher(): React.JSX.Element {
     logger.info('opening worktrees window')
     await window.desktop.openWorktrees()
   }, [])
+
+  const handleOpenRecentEditor = useCallback(async (): Promise<void> => {
+    const worktreeId = getRecentWorktreeEditor()
+    if (!worktreeId) {
+      return
+    }
+
+    logger.info({ worktreeId }, 'opening recent worktree editor')
+    const { error, response } = await openCode({ body: { worktreeId } })
+    if (!error) {
+      return
+    }
+
+    logger.error({ worktreeId, err: error }, 'open recent editor failed')
+    if (response?.status === 404) {
+      clearRecentWorktreeEditor(worktreeId)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.repeat ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === 's') {
+        event.preventDefault()
+        void handleOpenWorktrees()
+      } else if (key === 'w') {
+        event.preventDefault()
+        void handleOpenRecentEditor()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleOpenRecentEditor, handleOpenWorktrees])
 
   // The window is frameless; the custom titlebar is the only drag handle, so
   // the rest of the surface stays free for normal pointer interaction.
