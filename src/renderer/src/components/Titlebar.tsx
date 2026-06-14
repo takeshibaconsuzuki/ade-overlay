@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { Flex, IconButton, Text } from '@radix-ui/themes'
+import { X } from 'lucide-react'
 
 /**
  * A custom titlebar for frameless windows. The bar itself is the drag handle
@@ -38,7 +39,7 @@ export function Titlebar({ title }: { title: string }): React.JSX.Element {
         onClick={handleClose}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        ✕
+        <X size={14} />
       </IconButton>
     </Flex>
   )

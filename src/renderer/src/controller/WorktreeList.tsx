@@ -26,8 +26,7 @@ type WorktreeListProps = {
   onRemoveRepository: (worktreeId: string, mainWorktreePath: string) => void
 }
 
-const getWorktreeText = (worktree: Worktree): string =>
-  `${worktreeLabel(worktree)} ${worktree.path}`
+const getWorktreeText = (worktree: Worktree): string => worktreeLabel(worktree)
 
 export function WorktreeList({
   worktrees,
@@ -74,9 +73,17 @@ export function WorktreeList({
         onKeyDown={onKeyDown}
       />
 
-      <Card>
-        <ScrollArea type="auto" scrollbars="vertical" style={{ height: 360 }}>
-          <Box px="1" role="listbox">
+      {/* Padding lives on the Card (outside the scroll clip) so the gap around
+          rows stays uniform on every side — including where a highlighted row
+          meets the scroll boundary. The inner list carries no padding. */}
+      <Card style={{ padding: 'var(--space-2)' }}>
+        <ScrollArea
+          type="scroll"
+          scrollbars="vertical"
+          className="scroll-clip-x"
+          style={{ height: 360 }}
+        >
+          <Box role="listbox">
             {!hasWorktrees && !pendingCreate ? (
               <EmptyState text="No worktrees yet." />
             ) : noMatches && !pendingCreate ? (

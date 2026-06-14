@@ -1,5 +1,3 @@
-- Search worktrees
-- Search base branches
 - Start editor maximized
 - Bootstrap command
 - Worktree creation notifications

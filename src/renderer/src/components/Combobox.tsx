@@ -163,6 +163,7 @@ export function Combobox({
               <ScrollArea
                 type="auto"
                 scrollbars="vertical"
+                className="scroll-clip-x"
                 style={{ maxHeight: position.maxHeight }}
               >
                 <Box role="listbox">

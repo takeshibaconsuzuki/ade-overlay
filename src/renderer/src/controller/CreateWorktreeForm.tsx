@@ -9,6 +9,7 @@ import {
   Text,
   TextField,
 } from '@radix-ui/themes'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   listBranches,
   previewWorktreePath,
@@ -162,8 +163,12 @@ export function CreateWorktreeForm({
 
   return (
     <Flex direction="column" gap="2">
-      <Button variant="soft" onClick={() => setOpen((value) => !value)}>
-        <Text>{open ? '▾' : '▸'}</Text>
+      <Button
+        variant="soft"
+        onClick={() => setOpen((value) => !value)}
+        style={{ justifyContent: 'flex-start' }}
+      >
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         Create worktree
       </Button>
 

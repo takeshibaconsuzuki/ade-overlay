@@ -6,7 +6,10 @@ body {
 html,
 body,
 #root,
-.radix-themes {
+/* Scope the rule to the app's root theme. Radix Themes wraps every portalled
+   popup (Select/DropdownMenu content, etc.) in its own `.radix-themes`
+   element. */
+#root > .radix-themes {
   min-height: 100vh;
 }
 
@@ -23,6 +26,16 @@ body,
 
 .worktree-row[aria-disabled='true'] {
   cursor: default;
+}
+
+/* Radix ScrollArea's content wrapper sizes to its widest child, so a long
+   un-truncated row would push the wrapper past the viewport. With overflow-x
+   clipped, right-aligned controls (the row actions menu) then land in the
+   hidden strip. Pin the wrapper to the viewport width so rows truncate instead.
+   This app never scrolls horizontally, so clamping x is always correct here. */
+.scroll-clip-x [data-radix-scroll-area-viewport] > * {
+  width: 100% !important;
+  min-width: 0 !important;
 }
 
 .searchable-option {
