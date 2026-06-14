@@ -50,6 +50,13 @@ export class EditorService {
   constructor(
     private readonly registry: WorktreeRegistry,
     private readonly log: Logger,
+    // Invoked when a worktree's editor session starts, so agentic coding
+    // systems are wired up even for worktrees created before this existed (or
+    // added as pre-existing repositories that never ran creation).
+    private readonly configureWorktree?: (worktree: {
+      worktreeId: string
+      path: string
+    }) => Promise<void>,
   ) {
     this.registry.events.on('worktree-event', this.onWorktreeEvent)
   }
@@ -189,6 +196,7 @@ export class EditorService {
     let vscode
     try {
       worktree = await this.registry.getWorktreeById(worktreeId)
+      await this.configureWorktreeChat(worktree)
       vscode = await startVscodeServer(worktree, this.log)
     } catch (error) {
       this.setSessionStatus(worktreeId, 'off')
@@ -219,6 +227,24 @@ export class EditorService {
 
     this.setSessionStatus(worktreeId, 'on')
     return session
+  }
+
+  private async configureWorktreeChat(worktree: {
+    worktreeId: string
+    path: string
+  }): Promise<void> {
+    if (!this.configureWorktree) {
+      return
+    }
+    try {
+      await this.configureWorktree(worktree)
+    } catch (error) {
+      // Non-fatal: a chat-integration failure must not block opening the editor.
+      this.log.warn(
+        { worktreeId: worktree.worktreeId, err: error },
+        'failed to configure worktree chat integration',
+      )
+    }
   }
 
   private ensureEditorApp(): void {

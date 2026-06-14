@@ -8,12 +8,16 @@ import {
   getCacheItem,
 } from '../persistentCache'
 import { Titlebar } from '../components/Titlebar'
+import { useChatStream } from './chats'
+import { LiveChats } from './LiveChats'
 
 /**
  * The launcher view shown in the small startup window. Its sole job is to open
  * the worktrees window via the privileged desktop bridge.
  */
 export function Launcher({ title }: { title: string }): React.JSX.Element {
+  const { chats } = useChatStream()
+
   const handleOpenWorktrees = useCallback(async (): Promise<void> => {
     if (!window.desktop) {
       return
@@ -65,10 +69,11 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
   return (
     <Flex direction="column" height="100vh">
       <Titlebar title={title} />
-      <Flex align="center" justify="center" flexGrow="1" p="4">
-        <Button size="3" onClick={handleOpenWorktrees}>
+      <Flex direction="column" flexGrow="1" gap="4" p="4" minHeight="0">
+        <Button size="3" onClick={handleOpenWorktrees} style={{ width: '100%' }}>
           Worktrees
         </Button>
+        <LiveChats chats={chats} />
       </Flex>
     </Flex>
   )

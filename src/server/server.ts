@@ -11,6 +11,9 @@ import {
 } from 'fastify-type-provider-zod'
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
 import { AppConfigStore } from './appConfig'
+import { ChatRegistry } from './chats/registry'
+import { ClaudeChatProvider } from './chats/providers/claude'
+import { registerChatRoutes } from './chats/routes'
 import { HttpError, getStatusCode } from './errors'
 import { logger } from './logger'
 import { registerEditorRoutes } from './editor/routes'
@@ -30,13 +33,23 @@ export function createServer() {
     destroyActiveConnections: () => void
   }
   const appConfig = new AppConfigStore(server.log.child({ service: 'config' }))
+  const chatRegistry = new ChatRegistry(
+    server.log.child({ service: 'chats' }),
+    [
+      new ClaudeChatProvider(
+        server.log.child({ service: 'chats', provider: 'claude' }),
+      ),
+    ],
+  )
   const worktreeRegistry = new WorktreeRegistry(
     server.log.child({ service: 'worktrees' }),
     appConfig,
+    (worktree) => chatRegistry.configureWorktree(worktree),
   )
   const editor = new EditorService(
     worktreeRegistry,
     server.log.child({ service: 'editor' }),
+    (worktree) => chatRegistry.configureWorktree(worktree),
   )
   const activeSockets = new Set<Socket>()
 
@@ -91,6 +104,7 @@ export function createServer() {
       registry: worktreeRegistry,
       editor,
     })
+    registerChatRoutes(instance, chatRegistry)
     registerLogRoutes(instance)
   })
 

@@ -472,6 +472,22 @@ export type OpenCreationLogsResponses = {
 
 export type OpenCreationLogsResponse = OpenCreationLogsResponses[keyof OpenCreationLogsResponses];
 
+export type ListChatsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chats';
+};
+
+export type ListChatsResponses = {
+    /**
+     * Server-sent live chat snapshot and events.
+     */
+    200: string;
+};
+
+export type ListChatsResponse = ListChatsResponses[keyof ListChatsResponses];
+
 export type IngestLogsData = {
     body: {
         records: Array<{

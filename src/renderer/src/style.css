@@ -40,6 +40,25 @@ body,
   grid-column: 1 / -1;
 }
 
+/* Chats reuse the worktree status|text subgrid so every row's text lines up
+   whether its leading glyph is an 8px dot or a wider spinner. Row rhythm comes
+   from the grid gap; the surrounding frame padding lives on the Card. */
+.chat-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  row-gap: var(--space-2);
+}
+
+.chat-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  /* Match the column gap to the frame padding so the gutter on each side of
+     the status glyph reads as equal (left edge -> icon == icon -> text). */
+  column-gap: var(--space-2);
+}
+
 /* Highlight is driven by data-active (set on hover via onMouseMove and on
    keyboard navigation) so the mouse and keyboard never highlight two rows. */
 .worktree-row[data-active='true'] {

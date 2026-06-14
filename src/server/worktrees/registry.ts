@@ -62,6 +62,12 @@ export class WorktreeRegistry {
   constructor(
     private readonly log: Logger,
     private readonly appConfig?: AppConfigStore,
+    // Invoked once a worktree exists on disk, before bootstrap, so agentic
+    // coding systems are wired up to call back into the server.
+    private readonly configureWorktree?: (worktree: {
+      worktreeId: string
+      path: string
+    }) => Promise<void>,
   ) {}
 
   async loadRepositories(): Promise<void> {
@@ -281,6 +287,21 @@ export class WorktreeRegistry {
       await runGit(job.mainWorktreePath, args, this.log, {
         logFilePath: job.logPath,
       })
+
+      if (this.configureWorktree) {
+        try {
+          await this.configureWorktree({
+            worktreeId: job.worktreeId,
+            path: job.canonicalPath,
+          })
+        } catch (error) {
+          // Non-fatal: a chat-integration failure should not fail the worktree.
+          this.log.warn(
+            { worktreeId, err: error },
+            'failed to configure worktree chat integration',
+          )
+        }
+      }
 
       if (job.bootstrapCommand) {
         const current = this.creationJobs.get(worktreeId)

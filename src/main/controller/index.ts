@@ -90,10 +90,10 @@ function webPreferences(): Electron.WebPreferences {
  */
 export function createWindow(): void {
   const window = new BrowserWindow({
-    width: 280,
-    height: 160,
-    minWidth: 220,
-    minHeight: 140,
+    width: 360,
+    height: 440,
+    minWidth: 280,
+    minHeight: 220,
     resizable: true,
     alwaysOnTop: true,
     show: false,
