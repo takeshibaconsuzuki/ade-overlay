@@ -16,6 +16,8 @@ import {
   DeleteWorktreeRequest,
   DeleteWorktreeResponse,
   ErrorResponse,
+  ListBranchesRequest,
+  ListBranchesResponse,
   PreviewWorktreePathRequest,
   PreviewWorktreePathResponse,
   RemoveRepositoryRequest,
@@ -92,6 +94,22 @@ export function registerWorktreeRoutes(
       },
     },
     handler: async (request) => registry.createWorktree(request.body),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: '/repositories/branches',
+    schema: {
+      operationId: 'listBranches',
+      body: ListBranchesRequest,
+      response: {
+        200: ListBranchesResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+      },
+    },
+    handler: async (request) =>
+      registry.listBranches(request.body.mainWorktreePath),
   })
 
   routes.route({

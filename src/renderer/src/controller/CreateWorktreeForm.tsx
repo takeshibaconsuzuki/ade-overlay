@@ -10,6 +10,7 @@ import {
   TextField,
 } from '@radix-ui/themes'
 import {
+  listBranches,
   previewWorktreePath,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
@@ -18,6 +19,8 @@ import {
   getCacheItem,
   setCacheItem,
 } from '../persistentCache'
+import { Combobox } from '../components/Combobox'
+import { logger } from '../logger'
 import type { Repository } from './worktrees'
 
 type CreateValues = CreateWorktreeData['body']
@@ -38,6 +41,10 @@ export function CreateWorktreeForm({
     () => getCacheItem(RECENT_WORKTREE_PROJECT_KEY) ?? '',
   )
   const [baseBranch, setBaseBranch] = useState('')
+  const [branchData, setBranchData] = useState<{
+    repository: string
+    branches: string[]
+  }>({ repository: '', branches: [] })
   const [newBranch, setNewBranch] = useState('')
   const [generatedWorktreePath, setGeneratedWorktreePath] = useState('')
   const [manualWorktreePath, setManualWorktreePath] = useState<string | null>(
@@ -100,6 +107,41 @@ export function CreateWorktreeForm({
     trimmedBaseBranch,
     trimmedNewBranch,
   ])
+
+  useEffect(() => {
+    if (!open || !selectedRepository) {
+      return
+    }
+
+    let canceled = false
+
+    void listBranches({ body: { mainWorktreePath: selectedRepository } }).then(
+      ({ data, error }) => {
+        if (canceled) {
+          return
+        }
+        if (error) {
+          logger.warn(
+            { selectedRepository, err: error },
+            'list branches failed',
+          )
+        }
+        setBranchData({
+          repository: selectedRepository,
+          branches: error ? [] : (data?.branches ?? []),
+        })
+      },
+    )
+
+    return () => {
+      canceled = true
+    }
+  }, [open, selectedRepository])
+
+  // Only surface branches that belong to the currently selected repository so a
+  // stale list never appears while a fresh fetch is in flight.
+  const branches =
+    branchData.repository === selectedRepository ? branchData.branches : []
 
   const handleSubmit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
@@ -164,16 +206,17 @@ export function CreateWorktreeForm({
               </Field>
 
               <Field label="Base branch">
-                <TextField.Root
+                <Combobox
                   value={baseBranch}
-                  onChange={(event) => {
-                    const nextBaseBranch = event.target.value
+                  onChange={(nextBaseBranch) => {
                     setBaseBranch(nextBaseBranch)
                     if (!nextBaseBranch.trim() && !newBranch.trim()) {
                       setManualWorktreePath(null)
                     }
                   }}
+                  options={branches}
                   placeholder="main"
+                  disabled={!hasRepositories}
                 />
               </Field>
 

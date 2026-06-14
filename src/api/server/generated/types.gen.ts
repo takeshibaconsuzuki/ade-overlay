@@ -162,6 +162,45 @@ export type CreateWorktreeResponses = {
 
 export type CreateWorktreeResponse = CreateWorktreeResponses[keyof CreateWorktreeResponses];
 
+export type ListBranchesData = {
+    body: {
+        mainWorktreePath: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/repositories/branches';
+};
+
+export type ListBranchesErrors = {
+    /**
+     * Default Response
+     */
+    400: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+};
+
+export type ListBranchesError = ListBranchesErrors[keyof ListBranchesErrors];
+
+export type ListBranchesResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        branches: Array<string>;
+    };
+};
+
+export type ListBranchesResponse = ListBranchesResponses[keyof ListBranchesResponses];
+
 export type PreviewWorktreePathData = {
     body: {
         mainWorktreePath: string;

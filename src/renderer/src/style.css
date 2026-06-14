@@ -15,11 +15,21 @@ body,
   outline: none;
 }
 
-.worktree-row:hover,
-.worktree-row:focus-visible {
+/* Highlight is driven by data-active (set on hover via onMouseMove and on
+   keyboard navigation) so the mouse and keyboard never highlight two rows. */
+.worktree-row[data-active='true'] {
   background: var(--gray-a3);
 }
 
 .worktree-row[aria-disabled='true'] {
   cursor: default;
+}
+
+.searchable-option {
+  cursor: pointer;
+  border-radius: var(--radius-2);
+}
+
+.searchable-option[data-active='true'] {
+  background: var(--accent-a3);
 }

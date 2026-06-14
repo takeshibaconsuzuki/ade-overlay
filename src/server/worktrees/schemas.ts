@@ -25,6 +25,10 @@ export const PreviewWorktreePathRequest = z.object({
   baseBranch: z.string().min(1),
 })
 
+export const ListBranchesRequest = z.object({
+  mainWorktreePath: PathSchema,
+})
+
 export const DeleteWorktreeParams = z.object({
   worktreeId: z.string().length(WORKTREE_ID_LENGTH),
 })
@@ -108,6 +112,10 @@ export const PreviewWorktreePathResponse = z.object({
   worktreePath: z.string(),
 })
 
+export const ListBranchesResponse = z.object({
+  branches: z.array(z.string()),
+})
+
 export const DeleteWorktreeResponse = z.object({
   deleted: z.boolean(),
   branchDeleted: z.boolean(),
@@ -124,6 +132,7 @@ export type CreateWorktreeRequest = z.infer<typeof CreateWorktreeRequest>
 export type PreviewWorktreePathRequest = z.infer<
   typeof PreviewWorktreePathRequest
 >
+export type ListBranchesRequest = z.infer<typeof ListBranchesRequest>
 export type DeleteWorktreeParams = z.infer<typeof DeleteWorktreeParams>
 export type DeleteWorktreeRequest = z.infer<typeof DeleteWorktreeRequest>
 export type Repository = z.infer<typeof Repository>

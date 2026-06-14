@@ -75,6 +75,27 @@ export async function listGitWorktrees(
   return records
 }
 
+export async function listGitBranches(
+  repositoryPath: string,
+  log?: Logger,
+): Promise<string[]> {
+  const output = await runGit(
+    repositoryPath,
+    [
+      'for-each-ref',
+      '--format=%(refname:short)',
+      '--sort=-committerdate',
+      'refs/heads',
+    ],
+    log,
+  )
+
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
 export async function runGit(
   cwd: string,
   args: string[],

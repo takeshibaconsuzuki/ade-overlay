@@ -1,17 +1,12 @@
 import { useCallback, useState } from 'react'
 import {
   Badge,
-  Box,
   Button,
   Callout,
-  Card,
   Container,
   Flex,
   Heading,
-  ScrollArea,
-  Separator,
   Spinner,
-  Text,
 } from '@radix-ui/themes'
 import {
   addRepository,
@@ -24,7 +19,7 @@ import {
 import { useWorktreeStream } from './worktrees'
 import { logger } from '../logger'
 import { RECENT_WORKTREE_EDITOR_KEY, setCacheItem } from '../persistentCache'
-import { WorktreeRow } from './WorktreeRow'
+import { WorktreeList } from './WorktreeList'
 import { CreateWorktreeForm } from './CreateWorktreeForm'
 
 type CreateValues = CreateWorktreeData['body']
@@ -146,7 +141,6 @@ export function App(): React.JSX.Element {
   )
 
   const { worktrees, repositories } = snapshot
-  const isEmpty = worktrees.length === 0 && !pendingCreate
 
   return (
     <Container size="2" p="5">
@@ -170,45 +164,14 @@ export function App(): React.JSX.Element {
           </Callout.Root>
         )}
 
-        <Card>
-          <ScrollArea type="auto" scrollbars="vertical" style={{ height: 360 }}>
-            <Box px="1">
-              {isEmpty ? (
-                <Flex align="center" justify="center" p="6">
-                  <Text color="gray">No worktrees yet.</Text>
-                </Flex>
-              ) : (
-                <>
-                  {worktrees.map((worktree, index) => (
-                    <Box key={worktree.worktreeId}>
-                      {index > 0 && <Separator size="4" />}
-                      <WorktreeRow
-                        worktree={worktree}
-                        busy={busyIds.has(worktree.worktreeId)}
-                        onOpen={() => handleOpenCode(worktree.worktreeId)}
-                        onDelete={(deleteBranch) =>
-                          handleDelete(worktree.worktreeId, deleteBranch)
-                        }
-                        onRemoveRepository={() =>
-                          handleRemoveRepository(
-                            worktree.worktreeId,
-                            worktree.mainWorktreePath,
-                          )
-                        }
-                      />
-                    </Box>
-                  ))}
-                  {pendingCreate && (
-                    <Box>
-                      {worktrees.length > 0 && <Separator size="4" />}
-                      <PendingCreateRow values={pendingCreate} />
-                    </Box>
-                  )}
-                </>
-              )}
-            </Box>
-          </ScrollArea>
-        </Card>
+        <WorktreeList
+          worktrees={worktrees}
+          busyIds={busyIds}
+          pendingCreate={pendingCreate}
+          onOpen={handleOpenCode}
+          onDelete={handleDelete}
+          onRemoveRepository={handleRemoveRepository}
+        />
 
         <CreateWorktreeForm
           repositories={repositories}
@@ -217,31 +180,6 @@ export function App(): React.JSX.Element {
         />
       </Flex>
     </Container>
-  )
-}
-
-function PendingCreateRow({
-  values,
-}: {
-  values: CreateValues
-}): React.JSX.Element {
-  return (
-    <Flex align="center" justify="between" gap="3" px="2" py="3">
-      <Flex direction="column" gap="1" minWidth="0">
-        <Flex align="center" gap="2">
-          <Text weight="medium" truncate>
-            {values.newBranch || values.baseBranch}
-          </Text>
-          <Badge color="iris" variant="soft" radius="full">
-            creating
-          </Badge>
-        </Flex>
-        <Text size="1" color="gray" truncate title={values.worktreePath}>
-          {values.worktreePath}
-        </Text>
-      </Flex>
-      <Spinner />
-    </Flex>
   )
 }
 

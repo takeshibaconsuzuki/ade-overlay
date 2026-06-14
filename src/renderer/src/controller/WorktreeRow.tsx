@@ -7,11 +7,12 @@ import {
   Text,
 } from '@radix-ui/themes'
 import type { Worktree } from './worktrees'
+import type { SearchableItemProps } from '../components/useSearchableList'
 
 type WorktreeRowProps = {
   worktree: Worktree
   busy: boolean
-  onOpen: () => void
+  itemProps: SearchableItemProps
   onDelete: (deleteBranch: boolean) => void
   onRemoveRepository: () => void
 }
@@ -19,7 +20,7 @@ type WorktreeRowProps = {
 export function WorktreeRow({
   worktree,
   busy,
-  onOpen,
+  itemProps,
   onDelete,
   onRemoveRepository,
 }: WorktreeRowProps): React.JSX.Element {
@@ -28,28 +29,13 @@ export function WorktreeRow({
   return (
     <Flex
       className="worktree-row"
-      role="button"
-      tabIndex={busy ? -1 : 0}
       align="center"
       justify="between"
       gap="3"
       px="2"
       py="3"
       aria-disabled={busy}
-      onClick={() => {
-        if (!busy) {
-          onOpen()
-        }
-      }}
-      onKeyDown={(event) => {
-        if (busy) {
-          return
-        }
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onOpen()
-        }
-      }}
+      {...itemProps}
     >
       <Flex direction="column" gap="1" minWidth="0">
         <Flex align="center" gap="2">
@@ -118,7 +104,7 @@ export function WorktreeRow({
   )
 }
 
-function worktreeLabel(worktree: Worktree): string {
+export function worktreeLabel(worktree: Worktree): string {
   if (worktree.branchName) {
     return worktree.branchName
   }

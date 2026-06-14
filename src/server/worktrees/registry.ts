@@ -3,7 +3,12 @@ import Mustache from 'mustache'
 import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
 import { HttpError } from '../errors'
-import { type GitWorktree, listGitWorktrees, runGit } from './git'
+import {
+  type GitWorktree,
+  listGitBranches,
+  listGitWorktrees,
+  runGit,
+} from './git'
 import { canonicalizePath, normalizePath } from '../paths'
 import { createWorktreeId } from './ids'
 import {
@@ -189,6 +194,17 @@ export class WorktreeRegistry {
         branch,
       }),
     }
+  }
+
+  async listBranches(
+    mainWorktreePath: string,
+  ): Promise<{ branches: string[] }> {
+    const repository = await this.getRepository(mainWorktreePath)
+    const branches = await listGitBranches(
+      repository.mainWorktreePath,
+      this.log,
+    )
+    return { branches }
   }
 
   async deleteWorktree(
