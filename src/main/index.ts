@@ -2,12 +2,14 @@ import { app } from 'electron'
 import { Command } from 'commander'
 import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
+import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
 import { createWindow as createEditorWindow } from './editor'
 import { startServer } from '../server'
 import { flushLogs, logger } from '../server/logger'
 
 const log = logger.child({ process: 'main' })
 let server: Awaited<ReturnType<typeof startServer>> | null = null
+let stopWorktreeCreationNotifications: (() => void) | null = null
 let quitInProgress = false
 let shutdownComplete = false
 
@@ -66,6 +68,8 @@ async function main(): Promise<void> {
     default:
       server = await startServer()
       await app.whenReady()
+      stopWorktreeCreationNotifications =
+        registerWorktreeCreationNotifications(log)
       registerControllerIpcHandlers()
       createControllerWindow()
       log.info('controller window created')
@@ -77,6 +81,9 @@ async function shutdown(): Promise<void> {
   if (!server) {
     return
   }
+
+  stopWorktreeCreationNotifications?.()
+  stopWorktreeCreationNotifications = null
 
   const serverToClose = server
   server = null

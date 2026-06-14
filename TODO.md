@@ -1,3 +1,2 @@
 - Start editor maximized
-- Worktree creation notifications
 - Synthetic data dir worktree
