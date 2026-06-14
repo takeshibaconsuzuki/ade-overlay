@@ -32,4 +32,8 @@ export function registerControllerIpcHandlers(): void {
   ipcMain.handle(CONTROLLER_IPC_CHANNELS.openWorktrees, () => {
     openWorktreesWindow()
   })
+
+  ipcMain.handle(CONTROLLER_IPC_CHANNELS.closeWindow, (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close()
+  })
 }

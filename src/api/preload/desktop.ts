@@ -10,6 +10,8 @@ export interface DesktopApi {
   selectRepository(): Promise<string | null>
   /** Opens the worktrees window (focusing it if already open). */
   openWorktrees(): Promise<void>
+  /** Closes the window that invokes this (used by the custom titlebar). */
+  closeWindow(): Promise<void>
 }
 
 export const DESKTOP_API_GLOBAL = 'desktop'

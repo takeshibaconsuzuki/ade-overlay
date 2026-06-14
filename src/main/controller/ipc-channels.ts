@@ -8,4 +8,5 @@
 export const CONTROLLER_IPC_CHANNELS = {
   selectRepository: 'controller:select-repository',
   openWorktrees: 'controller:open-worktrees',
+  closeWindow: 'controller:close-window',
 } as const

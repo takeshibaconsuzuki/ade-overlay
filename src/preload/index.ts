@@ -13,6 +13,9 @@ const desktop: DesktopApi = {
   /** Opens the worktrees window (focusing it if already open). */
   openWorktrees: (): Promise<void> =>
     ipcRenderer.invoke(CONTROLLER_IPC_CHANNELS.openWorktrees),
+  /** Closes the window that invokes this (used by the custom titlebar). */
+  closeWindow: (): Promise<void> =>
+    ipcRenderer.invoke(CONTROLLER_IPC_CHANNELS.closeWindow),
 }
 
 contextBridge.exposeInMainWorld(DESKTOP_API_GLOBAL, desktop)

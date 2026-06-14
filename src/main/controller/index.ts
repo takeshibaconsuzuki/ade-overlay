@@ -38,10 +38,22 @@ export function createWindow(): void {
   const window = new BrowserWindow({
     width: 280,
     height: 160,
-    resizable: false,
+    minWidth: 220,
+    minHeight: 140,
+    resizable: true,
     title: 'ADE',
+    alwaysOnTop: true,
+    // Drop the native titlebar on every platform; the renderer draws its own
+    // titlebar (drag region + close button) so the chrome looks identical
+    // everywhere.
+    frame: false,
     webPreferences: webPreferences(),
   })
+
+  // Keep the launcher above everything, including other always-on-top windows
+  // and full-screen apps, and make it follow the user across every space.
+  window.setAlwaysOnTop(true, 'screen-saver')
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   // The launcher is the app's root window; closing it quits the app even if the
   // worktrees window is still open.
