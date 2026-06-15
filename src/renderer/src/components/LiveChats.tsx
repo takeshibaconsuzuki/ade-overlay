@@ -53,7 +53,7 @@ function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
 
   return (
     <HBox p="2">
-      <HBox width="32px" justify="center">
+      <HBox width="32px" flexShrink="0" justify="center">
         <ChatStatusDot status={chat.status} />
       </HBox>
       <VBox className={styles.text} flexGrow="1" gap="1">

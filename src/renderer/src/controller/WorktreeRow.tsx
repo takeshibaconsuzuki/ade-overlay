@@ -54,7 +54,7 @@ export function WorktreeRow({
       {...itemProps}
       p="2"
     >
-      <HBox width="32px" justify="center">
+      <HBox width="32px" justify="center" flexShrink="0">
         <LeadingIndicator
           worktree={worktree}
           busy={busy}
