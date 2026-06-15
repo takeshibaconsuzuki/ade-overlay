@@ -40,7 +40,7 @@ export function LiveChats({
       <ScrollArea type="auto" scrollbars="vertical" className={styles.scroll}>
         <VBox gap="0">
           {live.map((chat) => (
-            <ChatRow key={chat.chatId} chat={chat} />
+            <ChatRow key={`${chat.providerId}:${chat.chatId}`} chat={chat} />
           ))}
         </VBox>
       </ScrollArea>
@@ -49,12 +49,7 @@ export function LiveChats({
 }
 
 function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
-  // The title is the chat's identity line; the description (latest prompt) is
-  // secondary. Show it only when it adds something over the title.
-  const secondary =
-    chat.description && chat.description !== chat.title
-      ? chat.description
-      : undefined
+  const secondary = chat.description || undefined
 
   return (
     <HBox p="2">

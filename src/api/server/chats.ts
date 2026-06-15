@@ -38,6 +38,7 @@ export const CHAT_EVENT_TYPES: readonly ChatEventType[] =
 /** Stable identifiers for each supported agentic coding system. */
 export const CHAT_PROVIDER = {
   claude: 'claude',
+  codex: 'codex',
 } as const
 
 export type ChatProviderId = (typeof CHAT_PROVIDER)[keyof typeof CHAT_PROVIDER]

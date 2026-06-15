@@ -79,7 +79,8 @@ export class ChatRegistry {
       return
     }
 
-    const previous = this.chats.get(update.chatId)
+    const chatKey = `${providerId}:${update.chatId}`
+    const previous = this.chats.get(chatKey)
     const chat: Chat = {
       chatId: update.chatId,
       providerId,
@@ -90,7 +91,7 @@ export class ChatRegistry {
       worktreeId: update.worktreeId ?? previous?.worktreeId,
       updatedAt: Date.now(),
     }
-    this.chats.set(chat.chatId, chat)
+    this.chats.set(chatKey, chat)
 
     this.log.info(
       { chatId: chat.chatId, providerId, status: chat.status },
@@ -102,9 +103,9 @@ export class ChatRegistry {
       snapshot: this.getSnapshot(),
     })
 
-    if (!this.detailsResolved.has(chat.chatId)) {
-      this.detailsResolved.add(chat.chatId)
-      this.scheduleDetails(provider, chat.chatId, payload)
+    if (!this.detailsResolved.has(chatKey)) {
+      this.detailsResolved.add(chatKey)
+      this.scheduleDetails(provider, chatKey, payload)
     }
   }
 
@@ -116,14 +117,14 @@ export class ChatRegistry {
    */
   private scheduleDetails(
     provider: ChatProvider,
-    chatId: string,
+    chatKey: string,
     payload: Record<string, unknown>,
   ): void {
     const timer = setTimeout(() => {
       void provider
         .resolveDetails(payload)
         .then((details) => {
-          const chat = this.chats.get(chatId)
+          const chat = this.chats.get(chatKey)
           if (!chat) {
             return
           }
@@ -134,7 +135,7 @@ export class ChatRegistry {
             return
           }
           const next = { ...chat, title, description }
-          this.chats.set(chatId, next)
+          this.chats.set(chatKey, next)
           this.emit({
             type: CHAT_EVENT_TYPE.chatUpdated,
             chat: next,
@@ -143,7 +144,7 @@ export class ChatRegistry {
         })
         .catch((error: unknown) => {
           this.log.warn(
-            { err: error, chatId },
+            { err: error, chatId: chatKey },
             'failed to resolve chat details',
           )
         })
