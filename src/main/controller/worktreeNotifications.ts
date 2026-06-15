@@ -1,3 +1,5 @@
+import { request, type ClientRequest } from 'node:http'
+import { basename } from 'node:path'
 import {
   BrowserWindow,
   dialog,
@@ -5,12 +7,10 @@ import {
   type MessageBoxOptions,
   type NotificationConstructorOptions,
 } from 'electron'
-import { request, type ClientRequest } from 'node:http'
-import { basename } from 'node:path'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { WORKTREE_EVENT_TYPE } from '../../api/server/events'
-import { type Logger } from '../../api/server/logger'
 import { type RemoveRepositoryResponses } from '../../api/server/generated'
+import { type Logger } from '../../api/server/logger'
 
 type WorktreeSnapshot = RemoveRepositoryResponses[200]['snapshot']
 type Worktree = WorktreeSnapshot['worktrees'][number]

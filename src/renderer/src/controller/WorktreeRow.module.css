@@ -1,0 +1,17 @@
+.row[data-active='true'] {
+  background-color: var(--accent-a4);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotOn {
+  background-color: var(--grass-9);
+}
+
+.dotOff {
+  background-color: var(--gray-7);
+}

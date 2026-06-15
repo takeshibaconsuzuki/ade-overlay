@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { writeFile, rm } from 'node:fs/promises'
-import { createServer } from '../src/server/server'
+import { rm, writeFile } from 'node:fs/promises'
 import { OPENAPI_GENERATED_SPEC_PATH } from '../src/api/server/config'
+import { createServer } from '../src/server/server'
 
 const server = createServer()
 

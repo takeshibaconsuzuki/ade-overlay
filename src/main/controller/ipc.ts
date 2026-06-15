@@ -4,8 +4,8 @@ import {
   ipcMain,
   type OpenDialogOptions,
 } from 'electron'
-import { CONTROLLER_IPC_CHANNELS } from './ipc-channels'
 import { openWorktreesWindow } from './index'
+import { CONTROLLER_IPC_CHANNELS } from './ipc-channels'
 
 /**
  * Registers the controller role's main-process IPC handlers, exposed to its

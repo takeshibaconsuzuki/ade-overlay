@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BOOTSTRAP_PATH,
   type EditorCommand,
@@ -8,7 +9,6 @@ import {
   type EditorSessionStatusValue,
   type EditorSwitchCommand,
 } from '../../api/server/editor'
-import { SERVER_PORT } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'

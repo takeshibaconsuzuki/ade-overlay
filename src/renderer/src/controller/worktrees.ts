@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { RemoveRepositoryResponses } from '../../../api/server/generated'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { WORKTREE_EVENT_TYPES } from '../../../api/server/events'
+import type { RemoveRepositoryResponses } from '../../../api/server/generated'
 import { logger } from '../logger'
 
 export type WorktreeSnapshot = RemoveRepositoryResponses[200]['snapshot']

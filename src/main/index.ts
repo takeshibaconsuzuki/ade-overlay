@@ -1,11 +1,11 @@
-import { app } from 'electron'
 import { Command } from 'commander'
+import { app } from 'electron'
+import { startServer } from '../server'
+import { flushLogs, logger } from '../server/logger'
 import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
 import { createWindow as createEditorWindow } from './editor'
-import { startServer } from '../server'
-import { flushLogs, logger } from '../server/logger'
 
 const log = logger.child({ process: 'main' })
 let server: Awaited<ReturnType<typeof startServer>> | null = null

@@ -1,15 +1,17 @@
+import { Button } from '@radix-ui/themes'
 import { useCallback, useEffect } from 'react'
-import { Button, Flex } from '@radix-ui/themes'
 import { openCode } from '../../../api/server/generated'
+import { VBox } from '../components/Box'
+import { LiveChats } from '../components/LiveChats'
+import { Titlebar } from '../components/Titlebar'
+import { useChatStream } from '../hooks/useChatStream'
 import { logger } from '../logger'
 import {
-  RECENT_WORKTREE_EDITOR_KEY,
   deleteCacheItem,
   getCacheItem,
+  RECENT_WORKTREE_EDITOR_KEY,
 } from '../persistentCache'
-import { Titlebar } from '../components/Titlebar'
-import { useChatStream } from './chats'
-import { LiveChats } from './LiveChats'
+import styles from './Launcher.module.css'
 
 /**
  * The launcher view shown in the small startup window. Its sole job is to open
@@ -64,17 +66,19 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleOpenRecentEditor, handleOpenWorktrees])
 
-  // The window is frameless; the custom titlebar is the only drag handle, so
-  // the rest of the surface stays free for normal pointer interaction.
   return (
-    <Flex direction="column" height="100vh">
+    <VBox gap="0" height="100%">
       <Titlebar title={title} />
-      <Flex direction="column" flexGrow="1" gap="4" p="4" minHeight="0">
-        <Button size="3" onClick={handleOpenWorktrees} style={{ width: '100%' }}>
-          Worktrees
-        </Button>
-        <LiveChats chats={chats} />
-      </Flex>
-    </Flex>
+      <VBox
+        className={styles.windowContent}
+        flexGrow="1"
+        minHeight="0"
+        justify="start"
+        p="2"
+      >
+        <Button onClick={handleOpenWorktrees}>Worktrees</Button>
+        <LiveChats chats={chats} className={styles.liveChats} />
+      </VBox>
+    </VBox>
   )
 }

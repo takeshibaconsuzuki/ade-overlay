@@ -1,5 +1,5 @@
-import { app, BrowserWindow, globalShortcut } from 'electron'
 import { join } from 'node:path'
+import { app, BrowserWindow, globalShortcut } from 'electron'
 import { logger } from '../../server/logger'
 
 const log = logger.child({ process: 'main' })
@@ -92,8 +92,6 @@ export function createWindow(): void {
   const window = new BrowserWindow({
     width: 360,
     height: 440,
-    minWidth: 280,
-    minHeight: 220,
     resizable: true,
     alwaysOnTop: true,
     show: false,

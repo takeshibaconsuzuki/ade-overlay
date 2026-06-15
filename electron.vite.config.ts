@@ -1,7 +1,7 @@
-import { defineConfig } from 'electron-vite'
-import react from '@vitejs/plugin-react'
 import { copyFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'electron-vite'
 
 const projectRoot = import.meta.dirname
 const bootstrapTemplateSource = resolve(

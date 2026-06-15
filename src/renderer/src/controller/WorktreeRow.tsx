@@ -2,7 +2,6 @@ import {
   Badge,
   Box,
   DropdownMenu,
-  Flex,
   IconButton,
   Spinner,
   Text,
@@ -10,8 +9,10 @@ import {
 } from '@radix-ui/themes'
 import { CircleAlert, Ellipsis } from 'lucide-react'
 import type { EditorSessionStatusValue } from '../../../api/server/editor'
+import { HBox, VBox } from '../components/Box'
+import type { SearchableItemProps } from '../hooks/useSearchableList'
+import styles from './WorktreeRow.module.css'
 import type { Worktree } from './worktrees'
-import type { SearchableItemProps } from '../components/useSearchableList'
 
 type WorktreeRowProps = {
   worktree: Worktree
@@ -46,79 +47,41 @@ export function WorktreeRow({
       : worktreeBranch(worktree)
 
   return (
-    <Box
-      className="worktree-row"
+    <HBox
       aria-disabled={busy || !worktree.isOpenable}
+      className={styles.row}
       {...itemProps}
+      p="2"
     >
-      {/* Leading status column. Its width is shared across all rows via the
-          list's subgrid, so it collapses to the widest glyph and every row's
-          text stays aligned. */}
-      <Flex align="center" justify="center">
+      <HBox width="32px" justify="center">
         <LeadingIndicator
           worktree={worktree}
           busy={busy}
           sessionStatus={sessionStatus}
           onDismissCreationError={onDismissCreationError}
         />
-      </Flex>
+      </HBox>
 
-      <Flex direction="column" gap="1" minWidth="0">
-        <Flex align="center" gap="2">
-          <Text weight="medium" truncate title={worktree.path}>
-            {worktreeName(worktree)}
-          </Text>
-          {isMain && (
-            <Badge color="iris" variant="soft" radius="full">
-              main
-            </Badge>
-          )}
-          {isCreating && (
-            <Badge color="iris" variant="soft" radius="full">
-              creating
-            </Badge>
-          )}
-          {isBootstrapping && (
-            <Badge color="iris" variant="soft" radius="full">
-              bootstrapping
-            </Badge>
-          )}
-          {worktree.isDetached && (
-            <Badge color="amber" variant="soft" radius="full">
-              detached
-            </Badge>
-          )}
-          {worktree.isPrunable && (
-            <Badge color="tomato" variant="soft" radius="full">
-              prunable
-            </Badge>
-          )}
-        </Flex>
-        <Text
-          size="1"
-          color={isFailed ? 'tomato' : 'gray'}
-          truncate
-          title={secondary}
-        >
-          {secondary}
-        </Text>
-      </Flex>
+      <VBox flexGrow="1">
+        <HBox justify="start">
+          <Text title={worktree.path}>{worktreeName(worktree)}</Text>
+          {isMain && <Badge>main</Badge>}
+          {isCreating && <Badge>creating</Badge>}
+          {isBootstrapping && <Badge>bootstrapping</Badge>}
+          {worktree.isDetached && <Badge>detached</Badge>}
+          {worktree.isPrunable && <Badge>prunable</Badge>}
+        </HBox>
+        <Text title={secondary}>{secondary}</Text>
+      </VBox>
 
       {!busy && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton
-              variant="ghost"
-              color="gray"
-              radius="full"
               aria-label="Worktree actions"
               onClick={(event) => event.stopPropagation()}
-              // Ghost buttons ship a negative margin for optical inline
-              // alignment; cancel it so the button honors the row padding
-              // and sits symmetrically with the left-aligned text.
-              style={{ margin: 0 }}
             >
-              <Ellipsis size={18} />
+              <Ellipsis />
             </IconButton>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content onClick={(event) => event.stopPropagation()}>
@@ -131,18 +94,12 @@ export function WorktreeRow({
               <>
                 {worktree.hasCreationLogs && <DropdownMenu.Separator />}
                 {!isMain && (
-                  <DropdownMenu.Item
-                    color="red"
-                    onSelect={() => onDelete(false)}
-                  >
+                  <DropdownMenu.Item onSelect={() => onDelete(false)}>
                     Delete worktree
                   </DropdownMenu.Item>
                 )}
                 {!isMain && worktree.branchName && (
-                  <DropdownMenu.Item
-                    color="red"
-                    onSelect={() => onDelete(true)}
-                  >
+                  <DropdownMenu.Item onSelect={() => onDelete(true)}>
                     Delete worktree and branch
                   </DropdownMenu.Item>
                 )}
@@ -155,14 +112,13 @@ export function WorktreeRow({
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       )}
-    </Box>
+    </HBox>
   )
 }
 
 /**
  * Leading state glyph: a spinner while busy or creation is pending, a clickable
- * error icon when a creation failed, otherwise a dot for the VS Code session
- * (off/starting/on).
+ * error icon when a creation failed, otherwise a session status marker.
  */
 function LeadingIndicator({
   worktree,
@@ -187,17 +143,13 @@ function LeadingIndicator({
     return (
       <Tooltip content="Creation failed — click to dismiss">
         <IconButton
-          variant="ghost"
-          color="tomato"
-          radius="full"
           aria-label="Dismiss creation error"
           onClick={(event) => {
             event.stopPropagation()
             onDismissCreationError()
           }}
-          style={{ margin: 0 }}
         >
-          <CircleAlert size={18} />
+          <CircleAlert />
         </IconButton>
       </Tooltip>
     )
@@ -208,11 +160,11 @@ function LeadingIndicator({
 
 const SESSION_DOT: Record<
   EditorSessionStatusValue,
-  { color: string; label: string }
+  { className: string; label: string }
 > = {
-  off: { color: 'var(--gray-7)', label: 'Editor stopped' },
-  starting: { color: 'var(--amber-9)', label: 'Editor starting' },
-  on: { color: 'var(--grass-9)', label: 'Editor running' },
+  off: { className: styles.dotOff, label: 'Editor stopped' },
+  starting: { className: styles.dotOff, label: 'Editor starting' },
+  on: { className: styles.dotOn, label: 'Editor running' },
 }
 
 function SessionDot({
@@ -228,15 +180,10 @@ function SessionDot({
     )
   }
 
-  const { color, label } = SESSION_DOT[status]
+  const { className, label } = SESSION_DOT[status]
   return (
     <Tooltip content={label}>
-      <Box
-        aria-label={label}
-        width="8px"
-        height="8px"
-        style={{ borderRadius: '50%', backgroundColor: color }}
-      />
+      <Box aria-label={label} className={`${styles.dot} ${className}`} />
     </Tooltip>
   )
 }

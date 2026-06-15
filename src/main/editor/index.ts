@@ -1,10 +1,10 @@
-import { BrowserWindow, WebContentsView } from 'electron'
 import { request } from 'node:http'
+import { BrowserWindow, WebContentsView } from 'electron'
+import { SERVER_ORIGIN } from '../../api/server/config'
 import {
   EDITOR_COMMAND_ACK_PATH,
   type EditorCommand,
 } from '../../api/server/editor'
-import { SERVER_ORIGIN } from '../../api/server/config'
 import { logger } from '../../server/logger'
 
 const log = logger.child({ process: 'editor' })

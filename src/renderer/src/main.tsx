@@ -1,11 +1,11 @@
+import { Theme } from '@radix-ui/themes'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { Theme } from '@radix-ui/themes'
 import '@radix-ui/themes/styles.css'
-import './style.css'
+import { configureApiClient } from './client'
 import { App } from './controller/App'
 import { Launcher } from './launcher/Launcher'
-import { configureApiClient } from './client'
+import './style.css'
 
 configureApiClient()
 
@@ -22,13 +22,6 @@ document.title = title
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Theme
-      appearance="dark"
-      accentColor="iris"
-      grayColor="slate"
-      radius="medium"
-    >
-      {view === 'worktrees' ? <App /> : <Launcher title={title} />}
-    </Theme>
+    <Theme>{view === 'worktrees' ? <App /> : <Launcher title={title} />}</Theme>
   </React.StrictMode>,
 )

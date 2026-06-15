@@ -1,0 +1,7 @@
+.item {
+  user-select: none;
+}
+
+.item[data-active='true'] {
+  background-color: var(--accent-a4);
+}

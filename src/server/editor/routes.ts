@@ -8,6 +8,7 @@ import {
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
+import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BASE_PATH,
   EDITOR_BOOTSTRAP_PATH,
@@ -16,11 +17,9 @@ import {
   type EditorCommand,
   type EditorSessionStatus,
 } from '../../api/server/editor'
-import { SERVER_PORT } from '../../api/server/config'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
 import { type WorktreeRegistry } from '../worktrees/registry'
-import { EditorService } from './service'
 import { WorktreeIdParams } from '../worktrees/schemas'
 import {
   EditorCommandAckRequest,
@@ -30,6 +29,7 @@ import {
   OpenCodeResponse,
   OpenCreationLogsResponse,
 } from './schemas'
+import { EditorService } from './service'
 
 type EditorRouteOptions = {
   registry: WorktreeRegistry

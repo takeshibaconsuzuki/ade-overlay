@@ -1,0 +1,45 @@
+/* Lay the card out as a column whose scroll area fills it, so the chat list
+ * scrolls when a consumer constrains the card's height. The card's own size in
+ * its parent (grow to fill, fixed, or content) is left to the consumer. */
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.scroll {
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Radix's ScrollArea sizes its viewport content to `width: fit-content`, so a
+ * long nowrap line grows the content wider than the viewport and pushes the
+ * ellipsis off-screen (the row looks clipped, never truncated). Pin the content
+ * to the viewport width so descendants truncate at the visible edge. */
+.scroll :global(.rt-ScrollAreaViewport) > * {
+  width: 100%;
+}
+
+/* Allow the title/description column to shrink inside the flex row so the
+ * truncated `Text` can render its ellipsis instead of forcing the row wider. */
+.text {
+  min-width: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotBusy {
+  background-color: var(--amber-9);
+}
+
+.dotIdle {
+  background-color: var(--grass-9);
+}
+
+.dotDormant {
+  background-color: var(--gray-7);
+}

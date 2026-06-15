@@ -1,183 +1,19 @@
-/* Minimal reset; all visual styling comes from Radix Themes. */
+/* Let views fill the window so flex children can claim the remaining height. */
+html,
+body,
+#root,
+#root > .radix-themes {
+  height: 100%;
+}
+
 body {
   margin: 0;
 }
 
-html,
-body {
-  min-height: 100vh;
-}
-
-/* The worktrees view is a single column that fills the window: the list
-   scrollbox flexes to fill the leftover space — shrinking as the window
-   shrinks or the create form grows — down to a fixed floor, with the create
-   button pinned at the bottom. The root theme element is the page scroll
-   container, so once the scrollbox hits its floor and the rest no longer fits,
-   the whole page scrolls.
-
-   For the scrollbox to *shrink*, a definite (capping) height has to reach it:
-   `min-height: 100vh` is only a floor and lets containers grow to their
-   content instead, so the box never shrinks. Instead `#root` is a hard
-   `100vh`, and every link in the chain fills its parent (`flex: 1 1 0`) with
-   `min-height: 0` so it caps at the parent's height rather than growing to its
-   content. Overflow then bubbles back up to `#root`, which scrolls. */
-#root {
-  height: 100vh;
-  overflow-y: auto;
-}
-
-/* Scope the flex chain to the app's root theme. Radix Themes wraps every
-   portalled popup (Select/DropdownMenu content, etc.) in its own
-   `.radix-themes` element; this selector matches only the root one. */
-#root,
-#root > .radix-themes {
-  display: flex;
-  flex-direction: column;
-}
-
-#root > .radix-themes {
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-/* `.rt-Container` is `flex-shrink: 0`, so override the whole flex shorthand to
-   let it cap; its inner wrapper isn't a flex column, so teach it to be one. */
-.app-container.rt-Container {
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-.app-container > .rt-ContainerInner {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-.app-main {
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-/* Bottom padding for the page, applied to the last child (the create form)
-   rather than the Container or `#root`. The Container collapses in the cap
-   chain and a flex scroll container's own `padding-bottom` is *not* part of its
-   scrollable overflow in Chromium — so both lose the gap once the page scrolls.
-   Padding on a real, content-sized box (the form) does extend the scrollable
-   region, so the gap below the form survives the scroll. Matches the top/side
-   padding on `Container` (`pt`/`px` = space-5). */
-.app-main > :last-child {
-  padding-bottom: var(--space-5);
-}
-
-/* The floor lives here on the frame, not on the scrollbox. The frame is the
-   capped column's direct child and the create form's sibling, so it's the one
-   element that must neither grow to its content nor collapse under it:
-   - An explicit `min-height` (not `auto`) caps it independently of the
-     scrollbox's tall content. `auto` would resolve to the full rendered list
-     height (the ScrollArea root is `height: 100%`, which sizes to content
-     during min-content), pinning the floor to ~the whole list so it never
-     shrinks.
-   - Because it's a fixed floor (not 0), the frame never collapses under the
-     form below it; once it hits the floor, the overflow bubbles to `#root` and
-     the page scrolls.
-   The value is the scrollbox's usable minimum plus the search field, gap, and
-   card padding above it. */
-.worktree-list-frame {
-  flex: 1 1 auto;
-  min-height: 300px;
-}
-
-/* Keep the search field at its natural height — without this it's a flex item
-   in the list frame and gets shrunk as the frame tightens. */
-.worktree-search {
-  flex: none;
-}
-
-/* The card and scrollbox shrink freely inside the frame's allotted space. */
-.worktree-list-card {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.worktree-list-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* The list is a 3-column grid (status | text | actions). Rows opt into the same
-   tracks via `subgrid`, so the status column collapses to the widest glyph
-   across every row and all row text stays aligned — no hardcoded icon width. */
-.worktree-list {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-}
-
-.worktree-row {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
-  align-items: center;
-  /* Match the column gap to the horizontal padding so the gutter on each side
-     of the status glyph is equal (left edge -> icon == icon -> text). */
-  column-gap: var(--space-2);
-  padding: var(--space-3) var(--space-2);
-  cursor: pointer;
-  outline: none;
-}
-
-/* Span the full grid width rather than sitting in the first column. */
-.worktree-separator,
-.worktree-empty {
-  grid-column: 1 / -1;
-}
-
-/* Chats reuse the worktree status|text subgrid so every row's text lines up
-   whether its leading glyph is an 8px dot or a wider spinner. Row rhythm comes
-   from the grid gap; the surrounding frame padding lives on the Card. */
-.chat-list {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  row-gap: var(--space-2);
-}
-
-.chat-row {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
-  align-items: center;
-  /* Match the column gap to the frame padding so the gutter on each side of
-     the status glyph reads as equal (left edge -> icon == icon -> text). */
-  column-gap: var(--space-2);
-}
-
-/* Highlight is driven by data-active (set on hover via onMouseMove and on
-   keyboard navigation) so the mouse and keyboard never highlight two rows. */
-.worktree-row[data-active='true'] {
-  background: var(--gray-a3);
-}
-
-.worktree-row[aria-disabled='true'] {
-  cursor: default;
-}
-
-/* Radix ScrollArea's content wrapper sizes to its widest child, so a long
-   un-truncated row would push the wrapper past the viewport. With overflow-x
-   clipped, right-aligned controls (the row actions menu) then land in the
-   hidden strip. Pin the wrapper to the viewport width so rows truncate instead.
-   This app never scrolls horizontally, so clamping x is always correct here. */
-.scroll-clip-x [data-radix-scroll-area-viewport] > * {
-  width: 100% !important;
-  min-width: 0 !important;
-}
-
-.searchable-option {
-  cursor: pointer;
-  border-radius: var(--radius-2);
-}
-
-.searchable-option[data-active='true'] {
-  background: var(--accent-a3);
+/* Inputs keep their natural size inside flex layouts — a short window should
+ * squeeze the scrollable content, never compress the fields themselves. */
+.rt-TextFieldRoot,
+.rt-TextAreaRoot,
+.rt-SelectTrigger {
+  flex-shrink: 0;
 }

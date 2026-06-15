@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
   CHAT_EVENT_TYPES,
   CHAT_STREAM_PATH,
   type ChatStatus,
 } from '../../../api/server/chats'
+import { SERVER_ORIGIN } from '../../../api/server/config'
 import { logger } from '../logger'
 
 export type Chat = {

@@ -1,6 +1,6 @@
 import pino from 'pino'
-import { ingestLogs, type IngestLogsData } from '../../api/server/generated'
 import { SERVER_ORIGIN } from '../../api/server/config'
+import { ingestLogs, type IngestLogsData } from '../../api/server/generated'
 import { type Logger, type LogLevel } from '../../api/server/logger'
 
 /**

@@ -9,13 +9,13 @@ import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
 import { getCreationLogsDir } from '../dataDir'
 import { HttpError } from '../errors'
+import { canonicalizePath, normalizePath, precanonicalizePath } from '../paths'
 import {
-  type GitWorktree,
   listGitBranches,
   listGitWorktrees,
   runGit,
+  type GitWorktree,
 } from './git'
-import { canonicalizePath, normalizePath, precanonicalizePath } from '../paths'
 import { createWorktreeId } from './ids'
 import {
   type CreateWorktreeRequest,

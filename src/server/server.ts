@@ -1,7 +1,7 @@
-import Fastify from 'fastify'
+import { type Socket } from 'node:net'
 import fastifyCors from '@fastify/cors'
 import fastifySwagger from '@fastify/swagger'
-import { type Socket } from 'node:net'
+import Fastify from 'fastify'
 import {
   hasZodFastifySchemaValidationErrors,
   isResponseSerializationError,
@@ -11,13 +11,13 @@ import {
 } from 'fastify-type-provider-zod'
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
 import { AppConfigStore } from './appConfig'
-import { ChatRegistry } from './chats/registry'
 import { ClaudeChatProvider } from './chats/providers/claude'
+import { ChatRegistry } from './chats/registry'
 import { registerChatRoutes } from './chats/routes'
-import { HttpError, getStatusCode } from './errors'
-import { logger } from './logger'
 import { registerEditorRoutes } from './editor/routes'
 import { EditorService } from './editor/service'
+import { getStatusCode, HttpError } from './errors'
+import { logger } from './logger'
 import { registerLogRoutes } from './logs/routes'
 import { WorktreeRegistry } from './worktrees/registry'
 import { registerWorktreeRoutes } from './worktrees/routes'

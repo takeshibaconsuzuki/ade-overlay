@@ -1,9 +1,10 @@
+import { dirname, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import js from '@eslint/js'
 import prettier from 'eslint-config-prettier'
 import reactHooks from 'eslint-plugin-react-hooks'
+import unusedImports from 'eslint-plugin-unused-imports'
 import globals from 'globals'
-import { dirname, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import tseslint from 'typescript-eslint'
 
 const projectRoot = dirname(fileURLToPath(import.meta.url))
@@ -124,6 +125,27 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Strip unused imports automatically on `--fix`. The plugin owns unused
+    // detection so it replaces the stock `no-unused-vars` rule (which can flag
+    // the same bindings but cannot remove dead imports).
+    plugins: {
+      'unused-imports': unusedImports,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-vars': [
+        'warn',
+        {
+          vars: 'all',
+          varsIgnorePattern: '^_',
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
   {
     files: [
       'electron.vite.config.ts',

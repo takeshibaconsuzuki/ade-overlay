@@ -9,11 +9,11 @@ import { CHAT_HOOKS_PATH, CHAT_STREAM_PATH } from '../../api/server/chats'
 import { createSseStream } from '../sse'
 import { type ChatRegistry } from './registry'
 import {
-  type ChatEvent,
   ChatHookParams,
   ChatHookPayload,
   ChatHookQuery,
   ChatHookResponse,
+  type ChatEvent,
 } from './schemas'
 
 export function registerChatRoutes(

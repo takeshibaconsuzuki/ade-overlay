@@ -1,47 +1,28 @@
-import { useCallback } from 'react'
-import { Flex, IconButton, Text } from '@radix-ui/themes'
+import { IconButton, Text } from '@radix-ui/themes'
 import { X } from 'lucide-react'
+import { useCallback } from 'react'
+import { HBox } from './Box'
 
 /**
- * A custom titlebar for frameless windows. The bar itself is the drag handle
- * (`-webkit-app-region: drag`, which is Chromium-level and works on every
- * platform); the close button opts out so it stays clickable. Closing routes
- * through the privileged desktop bridge to close the host window.
+ * A simple titlebar surface with a close action routed through the privileged
+ * desktop bridge.
  */
 export function Titlebar({ title }: { title: string }): React.JSX.Element {
   const handleClose = useCallback(async (): Promise<void> => {
     await window.desktop?.closeWindow()
   }, [])
 
+  const dragStyle = { WebkitAppRegion: 'drag' }
+  const noDragStyle = { WebkitAppRegion: 'no-drag' }
+
   return (
-    <Flex
-      align="center"
-      justify="between"
-      px="2"
-      height="32px"
-      flexShrink="0"
-      style={
-        {
-          WebkitAppRegion: 'drag',
-          backgroundColor: 'var(--accent-9)',
-          color: 'var(--accent-contrast)',
-        } as React.CSSProperties
-      }
-    >
-      <Text size="1" weight="medium">
-        {title}
-      </Text>
-      <IconButton
-        size="1"
-        variant="ghost"
-        color="gray"
-        highContrast
-        aria-label="Close window"
-        onClick={handleClose}
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
-        <X size={14} />
-      </IconButton>
-    </Flex>
+    <HBox style={dragStyle} p="2">
+      <Text>{title}</Text>
+      <HBox style={noDragStyle}>
+        <IconButton aria-label="Close window" onClick={handleClose}>
+          <X />
+        </IconButton>
+      </HBox>
+    </HBox>
   )
 }

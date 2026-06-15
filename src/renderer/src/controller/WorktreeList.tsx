@@ -1,17 +1,11 @@
+import { Card, ScrollArea, Separator, Text, TextField } from '@radix-ui/themes'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Box,
-  Card,
-  Flex,
-  ScrollArea,
-  Separator,
-  Text,
-  TextField,
-} from '@radix-ui/themes'
+import { HBox, VBox } from '../components/Box'
+import { useSearchableList } from '../hooks/useSearchableList'
 import type { EditorSessionStatusMap } from './editorSessions'
-import { useSearchableList } from '../components/useSearchableList'
+import styles from './WorktreeList.module.css'
+import { worktreeLabel, WorktreeRow } from './WorktreeRow'
 import type { Worktree } from './worktrees'
-import { WorktreeRow, worktreeLabel } from './WorktreeRow'
 
 type WorktreeListProps = {
   worktrees: Worktree[]
@@ -64,26 +58,22 @@ export function WorktreeList({
   const noMatches = hasWorktrees && filtered.length === 0
 
   return (
-    <Flex direction="column" gap="2" className="worktree-list-frame">
+    <VBox className={styles.list} justify="start">
       <TextField.Root
         ref={searchRef}
-        className="worktree-search"
         value={query}
         placeholder="Search worktrees…"
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={onKeyDown}
       />
 
-      {/* Padding lives on the Card (outside the scroll clip) so the gap around
-          rows stays uniform on every side — including where a highlighted row
-          meets the scroll boundary. The inner list carries no padding. */}
-      <Card className="worktree-list-card" style={{ padding: 'var(--space-2)' }}>
+      <Card className={styles.card}>
         <ScrollArea
+          className={styles.scroll}
           type="scroll"
           scrollbars="vertical"
-          className="scroll-clip-x worktree-list-scroll"
         >
-          <Box role="listbox" className="worktree-list">
+          <VBox role="listbox" gap="0">
             {!hasWorktrees ? (
               <EmptyState text="No worktrees yet." />
             ) : noMatches ? (
@@ -91,9 +81,7 @@ export function WorktreeList({
             ) : (
               filtered.map((worktree, index) => (
                 <Fragment key={worktree.worktreeId}>
-                  {index > 0 && (
-                    <Separator className="worktree-separator" size="4" />
-                  )}
+                  {index > 0 && <Separator size="4" />}
                   <WorktreeRow
                     worktree={worktree}
                     busy={busyIds.has(worktree.worktreeId)}
@@ -120,17 +108,17 @@ export function WorktreeList({
                 </Fragment>
               ))
             )}
-          </Box>
+          </VBox>
         </ScrollArea>
       </Card>
-    </Flex>
+    </VBox>
   )
 }
 
 function EmptyState({ text }: { text: string }): React.JSX.Element {
   return (
-    <Flex className="worktree-empty" align="center" justify="center" p="6">
-      <Text color="gray">{text}</Text>
-    </Flex>
+    <HBox p="2" justify="center">
+      <Text>{text}</Text>
+    </HBox>
   )
 }

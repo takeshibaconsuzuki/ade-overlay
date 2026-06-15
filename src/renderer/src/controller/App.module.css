@@ -1,0 +1,7 @@
+/* The root column fills the window (height: 100%) and scrolls when too short for
+ * its fixed chrome. Padding (rather than margin) lives on this scroll container
+ * so the bottom gap is preserved below the last item instead of being escaped by
+ * overflow. */
+.windowContent {
+  overflow-y: auto;
+}

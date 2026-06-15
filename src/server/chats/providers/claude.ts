@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { type Logger } from '../../../api/server/logger'
 import {
   CHAT_HOOKS_PATH,
   CHAT_PROVIDER,
@@ -8,6 +7,7 @@ import {
   type ChatStatus,
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
+import { type Logger } from '../../../api/server/logger'
 import {
   type ChatDetails,
   type ChatHookContext,
@@ -44,8 +44,6 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 }
 
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
-
-const MAX_DESCRIPTION_LENGTH = 140
 
 export class ClaudeChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER.claude
@@ -108,7 +106,7 @@ export class ClaudeChatProvider implements ChatProvider {
     // fallback (see resolveDetails) backfills it when no live event carries it.
     const description =
       eventName === 'UserPromptSubmit'
-        ? summarize(asString(payload.prompt))
+        ? firstLine(asString(payload.prompt))
         : undefined
 
     return {
@@ -212,8 +210,8 @@ async function readTranscriptDetails(
   }
 
   return {
-    title: summarize(summary ?? firstUserMessage),
-    description: summarize(lastUserMessage),
+    title: firstLine(summary ?? firstUserMessage),
+    description: firstLine(lastUserMessage),
   }
 }
 
@@ -253,17 +251,14 @@ function userMessageText(entry: Record<string, unknown>): string | undefined {
   return text
 }
 
-function summarize(value: string | undefined): string | undefined {
+// Reduce a multi-line message to its first non-empty line. The full line is
+// sent as-is; the client truncates for display via CSS ellipsis.
+function firstLine(value: string | undefined): string | undefined {
   if (!value) {
     return undefined
   }
-  const firstLine = value.trim().split('\n', 1)[0].trim()
-  if (!firstLine) {
-    return undefined
-  }
-  return firstLine.length > MAX_DESCRIPTION_LENGTH
-    ? `${firstLine.slice(0, MAX_DESCRIPTION_LENGTH - 1)}…`
-    : firstLine
+  const line = value.trim().split('\n', 1)[0].trim()
+  return line || undefined
 }
 
 function asString(value: unknown): string | undefined {

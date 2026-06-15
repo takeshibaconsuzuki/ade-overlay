@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { type Logger } from '../../api/server/logger'
 import { CHAT_EVENT_TYPE } from '../../api/server/chats'
+import { type Logger } from '../../api/server/logger'
 import {
   type ChatHookContext,
   type ChatProvider,

@@ -1,0 +1,14 @@
+/* The content below the titlebar scrolls when the window is too short for its
+ * fixed chrome. Padding (rather than margin) lives on this scroll container so
+ * the bottom gap is preserved below the last item instead of being escaped by
+ * overflow. */
+.windowContent {
+  overflow-y: auto;
+}
+
+/* The live chats card claims the space left below the Worktrees button and
+ * scrolls within it — the launcher equivalent of the worktree list. */
+.liveChats {
+  flex-grow: 1;
+  min-height: 0;
+}

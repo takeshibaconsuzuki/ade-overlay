@@ -1,13 +1,5 @@
+import { Badge, Button, Callout, Heading, Spinner } from '@radix-ui/themes'
 import { useCallback, useState } from 'react'
-import {
-  Badge,
-  Button,
-  Callout,
-  Container,
-  Flex,
-  Heading,
-  Spinner,
-} from '@radix-ui/themes'
 import {
   addRepository,
   createWorktree,
@@ -18,12 +10,14 @@ import {
   removeRepository,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
-import { useWorktreeStream } from './worktrees'
-import { useEditorSessionStream } from './editorSessions'
+import { HBox, VBox } from '../components/Box'
 import { logger } from '../logger'
 import { RECENT_WORKTREE_EDITOR_KEY, setCacheItem } from '../persistentCache'
-import { WorktreeList } from './WorktreeList'
+import styles from './App.module.css'
 import { CreateWorktreeForm } from './CreateWorktreeForm'
+import { useEditorSessionStream } from './editorSessions'
+import { WorktreeList } from './WorktreeList'
+import { useWorktreeStream } from './worktrees'
 
 type CreateValues = CreateWorktreeData['body']
 
@@ -180,45 +174,41 @@ export function App(): React.JSX.Element {
   const { worktrees, repositories } = snapshot
 
   return (
-    <Container size="2" px="5" pt="5" className="app-container">
-      <Flex direction="column" gap="4" className="app-main">
-        <Flex align="center" justify="between" gap="3">
-          <Heading size="6">Worktrees</Heading>
-          <Flex align="center" gap="3">
-            <Badge color={connected ? 'grass' : 'gray'} variant="soft">
-              {connected ? 'Live' : 'Connecting…'}
-            </Badge>
-            <Button onClick={handleAddRepository} disabled={addingRepository}>
-              <Spinner loading={addingRepository} />
-              Add repository
-            </Button>
-          </Flex>
-        </Flex>
+    <VBox className={styles.windowContent} height="100%" justify="start" p="2">
+      <HBox>
+        <Heading>Worktrees</Heading>
+        <HBox>
+          <Badge>{connected ? 'Live' : 'Connecting…'}</Badge>
+          <Button onClick={handleAddRepository} disabled={addingRepository}>
+            <Spinner loading={addingRepository} />
+            Add repository
+          </Button>
+        </HBox>
+      </HBox>
 
-        {error && (
-          <Callout.Root color="red" role="alert">
-            <Callout.Text>{error}</Callout.Text>
-          </Callout.Root>
-        )}
+      {error && (
+        <Callout.Root role="alert">
+          <Callout.Text>{error}</Callout.Text>
+        </Callout.Root>
+      )}
 
-        <WorktreeList
-          worktrees={worktrees}
-          busyIds={busyIds}
-          sessionStatuses={sessionStatuses}
-          onOpen={handleOpenCode}
-          onDelete={handleDelete}
-          onRemoveRepository={handleRemoveRepository}
-          onOpenCreationLogs={handleOpenCreationLogs}
-          onDismissCreationError={handleDismissCreationError}
-        />
+      <WorktreeList
+        worktrees={worktrees}
+        busyIds={busyIds}
+        sessionStatuses={sessionStatuses}
+        onOpen={handleOpenCode}
+        onDelete={handleDelete}
+        onRemoveRepository={handleRemoveRepository}
+        onOpenCreationLogs={handleOpenCreationLogs}
+        onDismissCreationError={handleDismissCreationError}
+      />
 
-        <CreateWorktreeForm
-          repositories={repositories}
-          busy={creating}
-          onCreate={handleCreate}
-        />
-      </Flex>
-    </Container>
+      <CreateWorktreeForm
+        repositories={repositories}
+        busy={creating}
+        onCreate={handleCreate}
+      />
+    </VBox>
   )
 }
 

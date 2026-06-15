@@ -1,28 +1,28 @@
-import { useEffect, useState } from 'react'
 import {
   Button,
   Callout,
   Card,
   Checkbox,
-  Flex,
   Select,
   Spinner,
   Text,
   TextField,
 } from '@radix-ui/themes'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import {
   listBranches,
   previewWorktreePath,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
-import {
-  RECENT_WORKTREE_PROJECT_KEY,
-  getCacheItem,
-  setCacheItem,
-} from '../persistentCache'
+import { HBox, VBox } from '../components/Box'
 import { Combobox } from '../components/Combobox'
 import { logger } from '../logger'
+import {
+  getCacheItem,
+  RECENT_WORKTREE_PROJECT_KEY,
+  setCacheItem,
+} from '../persistentCache'
 import type { Repository } from './worktrees'
 
 type CreateValues = CreateWorktreeData['body']
@@ -90,7 +90,7 @@ export function CreateWorktreeForm({
         return
       }
 
-      const { data } = await previewWorktreePath({
+      const { data, error } = await previewWorktreePath({
         body: {
           mainWorktreePath: selectedRepository,
           baseBranch: trimmedBaseBranch,
@@ -99,6 +99,12 @@ export function CreateWorktreeForm({
       })
 
       if (!canceled) {
+        if (error) {
+          logger.warn(
+            { selectedRepository, err: error },
+            'worktree path preview failed',
+          )
+        }
         setGeneratedWorktreePath(data?.worktreePath ?? '')
       }
     }
@@ -171,22 +177,18 @@ export function CreateWorktreeForm({
   }
 
   return (
-    <Flex direction="column" gap="2">
-      <Button
-        variant="soft"
-        onClick={() => setOpen((value) => !value)}
-        style={{ justifyContent: 'flex-start' }}
-      >
-        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+    <VBox>
+      <Button onClick={() => setOpen((value) => !value)}>
+        {open ? <ChevronDown /> : <ChevronRight />}
         Create worktree
       </Button>
 
       {open && (
         <Card>
           <form onSubmit={handleSubmit}>
-            <Flex direction="column" gap="3">
+            <VBox>
               {!hasRepositories && (
-                <Callout.Root color="gray">
+                <Callout.Root>
                   <Callout.Text>
                     No tracked repositories yet — add one to create worktrees.
                   </Callout.Text>
@@ -202,10 +204,7 @@ export function CreateWorktreeForm({
                   }}
                   disabled={!hasRepositories}
                 >
-                  <Select.Trigger
-                    placeholder="Select a repository"
-                    style={{ width: '100%' }}
-                  />
+                  <Select.Trigger placeholder="Select a repository" />
                   <Select.Content>
                     {repositories.map((repo) => (
                       <Select.Item
@@ -261,8 +260,8 @@ export function CreateWorktreeForm({
                 />
               </Field>
 
-              <Text as="label" size="2">
-                <Flex align="center" gap="2">
+              <Text as="label">
+                <HBox justify="start">
                   <Checkbox
                     checked={bootstrap && hasBootstrapCommand}
                     disabled={!hasBootstrapCommand}
@@ -271,20 +270,20 @@ export function CreateWorktreeForm({
                     }
                   />
                   Bootstrap
-                </Flex>
+                </HBox>
               </Text>
 
-              <Flex justify="end">
+              <HBox justify="end">
                 <Button type="submit" disabled={!canSubmit}>
                   <Spinner loading={busy} />
                   Create
                 </Button>
-              </Flex>
-            </Flex>
+              </HBox>
+            </VBox>
           </form>
         </Card>
       )}
-    </Flex>
+    </VBox>
   )
 }
 
@@ -296,11 +295,9 @@ function Field({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <Flex direction="column" gap="1">
-      <Text as="label" size="2" weight="medium">
-        {label}
-      </Text>
+    <VBox>
+      <Text as="label">{label}</Text>
       {children}
-    </Flex>
+    </VBox>
   )
 }

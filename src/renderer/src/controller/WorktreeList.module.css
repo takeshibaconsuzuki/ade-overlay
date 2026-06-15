@@ -1,0 +1,20 @@
+/* Let the search box and card join the App's column directly (instead of nesting
+ * in a box that collapses and spills the search box onto the form). The card
+ * flexes into the leftover height and collapses to 0 when the window is short,
+ * while the search box keeps its natural height as a sibling. */
+.list {
+  display: contents;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+.scroll {
+  flex-grow: 1;
+  min-height: 0;
+}

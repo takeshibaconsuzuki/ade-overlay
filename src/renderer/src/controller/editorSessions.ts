@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
+import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
   EDITOR_SESSION_STATUS_EVENT,
   type EditorSessionStatus,
   type EditorSessionStatusValue,
 } from '../../../api/server/editor'
-import { SERVER_ORIGIN } from '../../../api/server/config'
 import { logger } from '../logger'
 
 export type EditorSessionStatusMap = ReadonlyMap<
