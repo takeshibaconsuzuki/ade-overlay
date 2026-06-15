@@ -1,5 +1,6 @@
 import { Card, ScrollArea, Separator, Text, TextField } from '@radix-ui/themes'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { HBox, VBox } from '../components/Box'
 import { useSearchableList } from '../hooks/useSearchableList'
 import type { EditorSessionStatusMap } from './editorSessions'
@@ -48,12 +49,30 @@ export function WorktreeList({
     [busyIds, onOpen],
   )
 
-  const { filtered, onKeyDown, getItemProps } = useSearchableList({
+  const {
+    filtered,
+    onKeyDown: handleListKeyDown,
+    getItemProps,
+  } = useSearchableList({
     items: worktrees,
     getText: getWorktreeText,
     query,
     onSelect: handleSelect,
   })
+
+  const handleSearchKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        void window.desktop?.closeWindow()
+        return
+      }
+
+      handleListKeyDown(event)
+    },
+    [handleListKeyDown],
+  )
 
   const hasWorktrees = worktrees.length > 0
   const noMatches = hasWorktrees && filtered.length === 0
@@ -65,7 +84,7 @@ export function WorktreeList({
         value={query}
         placeholder="Search worktrees…"
         onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleSearchKeyDown}
       />
 
       <Card className={styles.card}>
