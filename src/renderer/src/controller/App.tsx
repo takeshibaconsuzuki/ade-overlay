@@ -180,8 +180,8 @@ export function App(): React.JSX.Element {
   const { worktrees, repositories } = snapshot
 
   return (
-    <Container size="2" p="5">
-      <Flex direction="column" gap="4">
+    <Container size="2" px="5" pt="5" className="app-container">
+      <Flex direction="column" gap="4" className="app-main">
         <Flex align="center" justify="between" gap="3">
           <Heading size="6">Worktrees</Heading>
           <Flex align="center" gap="3">

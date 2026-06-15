@@ -4,13 +4,107 @@ body {
 }
 
 html,
-body,
-#root,
-/* Scope the rule to the app's root theme. Radix Themes wraps every portalled
-   popup (Select/DropdownMenu content, etc.) in its own `.radix-themes`
-   element. */
-#root > .radix-themes {
+body {
   min-height: 100vh;
+}
+
+/* The worktrees view is a single column that fills the window: the list
+   scrollbox flexes to fill the leftover space — shrinking as the window
+   shrinks or the create form grows — down to a fixed floor, with the create
+   button pinned at the bottom. The root theme element is the page scroll
+   container, so once the scrollbox hits its floor and the rest no longer fits,
+   the whole page scrolls.
+
+   For the scrollbox to *shrink*, a definite (capping) height has to reach it:
+   `min-height: 100vh` is only a floor and lets containers grow to their
+   content instead, so the box never shrinks. Instead `#root` is a hard
+   `100vh`, and every link in the chain fills its parent (`flex: 1 1 0`) with
+   `min-height: 0` so it caps at the parent's height rather than growing to its
+   content. Overflow then bubbles back up to `#root`, which scrolls. */
+#root {
+  height: 100vh;
+  overflow-y: auto;
+}
+
+/* Scope the flex chain to the app's root theme. Radix Themes wraps every
+   portalled popup (Select/DropdownMenu content, etc.) in its own
+   `.radix-themes` element; this selector matches only the root one. */
+#root,
+#root > .radix-themes {
+  display: flex;
+  flex-direction: column;
+}
+
+#root > .radix-themes {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* `.rt-Container` is `flex-shrink: 0`, so override the whole flex shorthand to
+   let it cap; its inner wrapper isn't a flex column, so teach it to be one. */
+.app-container.rt-Container {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.app-container > .rt-ContainerInner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.app-main {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* Bottom padding for the page, applied to the last child (the create form)
+   rather than the Container or `#root`. The Container collapses in the cap
+   chain and a flex scroll container's own `padding-bottom` is *not* part of its
+   scrollable overflow in Chromium — so both lose the gap once the page scrolls.
+   Padding on a real, content-sized box (the form) does extend the scrollable
+   region, so the gap below the form survives the scroll. Matches the top/side
+   padding on `Container` (`pt`/`px` = space-5). */
+.app-main > :last-child {
+  padding-bottom: var(--space-5);
+}
+
+/* The floor lives here on the frame, not on the scrollbox. The frame is the
+   capped column's direct child and the create form's sibling, so it's the one
+   element that must neither grow to its content nor collapse under it:
+   - An explicit `min-height` (not `auto`) caps it independently of the
+     scrollbox's tall content. `auto` would resolve to the full rendered list
+     height (the ScrollArea root is `height: 100%`, which sizes to content
+     during min-content), pinning the floor to ~the whole list so it never
+     shrinks.
+   - Because it's a fixed floor (not 0), the frame never collapses under the
+     form below it; once it hits the floor, the overflow bubbles to `#root` and
+     the page scrolls.
+   The value is the scrollbox's usable minimum plus the search field, gap, and
+   card padding above it. */
+.worktree-list-frame {
+  flex: 1 1 auto;
+  min-height: 300px;
+}
+
+/* Keep the search field at its natural height — without this it's a flex item
+   in the list frame and gets shrunk as the frame tightens. */
+.worktree-search {
+  flex: none;
+}
+
+/* The card and scrollbox shrink freely inside the frame's allotted space. */
+.worktree-list-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.worktree-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* The list is a 3-column grid (status | text | actions). Rows opt into the same

@@ -64,9 +64,10 @@ export function WorktreeList({
   const noMatches = hasWorktrees && filtered.length === 0
 
   return (
-    <Flex direction="column" gap="2">
+    <Flex direction="column" gap="2" className="worktree-list-frame">
       <TextField.Root
         ref={searchRef}
+        className="worktree-search"
         value={query}
         placeholder="Search worktrees…"
         onChange={(event) => setQuery(event.target.value)}
@@ -76,12 +77,11 @@ export function WorktreeList({
       {/* Padding lives on the Card (outside the scroll clip) so the gap around
           rows stays uniform on every side — including where a highlighted row
           meets the scroll boundary. The inner list carries no padding. */}
-      <Card style={{ padding: 'var(--space-2)' }}>
+      <Card className="worktree-list-card" style={{ padding: 'var(--space-2)' }}>
         <ScrollArea
           type="scroll"
           scrollbars="vertical"
-          className="scroll-clip-x"
-          style={{ height: 360 }}
+          className="scroll-clip-x worktree-list-scroll"
         >
           <Box role="listbox" className="worktree-list">
             {!hasWorktrees ? (
