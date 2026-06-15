@@ -121,7 +121,12 @@ const boundaries = {
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'node_modules/**', 'src/api/server/generated/**'],
+    ignores: [
+      'dist/**',
+      'out/**',
+      'node_modules/**',
+      'src/api/server/generated/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -150,6 +155,7 @@ export default tseslint.config(
     files: [
       'electron.vite.config.ts',
       'openapi-ts.config.ts',
+      'scripts/**/*.mjs',
       'scripts/**/*.ts',
       'src/main/**/*.ts',
       'src/preload/**/*.ts',

@@ -1,7 +1,9 @@
 import pino, { type Logger } from 'pino'
 import { createLogShippingStream, flushLogShipper } from './logShipper'
 
-const isProduction = process.env.NODE_ENV === 'production'
+const isPackagedElectron =
+  process.versions.electron !== undefined && process.defaultApp !== true
+const isProduction = process.env.NODE_ENV === 'production' || isPackagedElectron
 
 /**
  * Set by spawned Node processes that don't share the server's stdout (the

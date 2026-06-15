@@ -8,3 +8,4 @@ node_modules/
 /.node.*/
 /.openapi.generated.json
 /out/
+/dist/

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { constants } from 'node:fs'
+import { access, mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { EDITOR_BASE_PATH } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
@@ -27,7 +29,8 @@ export async function startVscodeServer(
   await symlinkLocalExtensions(extensionsDir, log)
   await writeAdeHelperExtension(extensionsDir, log)
 
-  const child = spawnCodeServeWeb(worktree, port, serverDataDir)
+  const codeCliPath = await resolveVscodeCliPath()
+  const child = spawnCodeServeWeb(worktree, port, serverDataDir, codeCliPath)
   const spawnError = waitForSpawnError(child)
   log.info(
     {
@@ -35,6 +38,7 @@ export async function startVscodeServer(
       port,
       serverDataDir,
       path: worktree.path,
+      codeCliPath,
     },
     'starting vscode serve-web',
   )
@@ -71,9 +75,10 @@ function spawnCodeServeWeb(
   worktree: Worktree,
   port: number,
   serverDataDir: string,
+  codeCliPath: string,
 ): ChildProcess {
   return spawn(
-    'code',
+    codeCliPath,
     [
       'serve-web',
       '--host',
@@ -103,6 +108,84 @@ function spawnCodeServeWeb(
       },
     },
   )
+}
+
+async function resolveVscodeCliPath(): Promise<string> {
+  const configuredPath = process.env.VSCODE_CLI_PATH
+  if (configuredPath) {
+    if (await isExecutable(configuredPath)) {
+      return configuredPath
+    }
+
+    throw new HttpError(
+      500,
+      `VSCODE_CLI_PATH is not executable: ${configuredPath}`,
+    )
+  }
+
+  const pathCode = await findExecutableOnPath('code')
+  if (pathCode) {
+    return pathCode
+  }
+
+  for (const candidate of getMacVscodeCliCandidates()) {
+    if (await isExecutable(candidate)) {
+      return candidate
+    }
+  }
+
+  throw new HttpError(
+    500,
+    'Could not find the VS Code CLI. Install Visual Studio Code in /Applications or set VSCODE_CLI_PATH to the code executable.',
+  )
+}
+
+async function findExecutableOnPath(command: string): Promise<string | null> {
+  for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+    if (!directory) {
+      continue
+    }
+
+    const candidate = join(directory, command)
+    if (await isExecutable(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function getMacVscodeCliCandidates(): string[] {
+  if (process.platform !== 'darwin') {
+    return []
+  }
+
+  return [
+    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    '/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
+    '/Applications/VSCodium.app/Contents/Resources/app/bin/codium',
+    join(
+      homedir(),
+      'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+    ),
+    join(
+      homedir(),
+      'Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
+    ),
+    join(
+      homedir(),
+      'Applications/VSCodium.app/Contents/Resources/app/bin/codium',
+    ),
+  ]
+}
+
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function waitForSpawnError(child: ChildProcess): Promise<never> {

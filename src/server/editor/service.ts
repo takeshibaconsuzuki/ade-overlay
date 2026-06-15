@@ -261,16 +261,23 @@ export class EditorService {
       // (see src/server/logger), so all Electron logging stays centralized in
       // the server's stream rather than its own discarded stdout.
       env: { ...process.env, ADE_LOG_SOURCE: 'editor' },
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     child.unref()
+    child.stdout?.on('data', (chunk: Buffer) => {
+      this.log.info({ output: chunk.toString('utf8').trim() }, 'editor stdout')
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      this.log.warn({ output: chunk.toString('utf8').trim() }, 'editor stderr')
+    })
     child.on('error', (error) => {
       this.log.error({ err: error }, 'editor app launch failed')
     })
-    child.on('exit', () => {
+    child.on('exit', (code, signal) => {
       if (this.editorProcess === child) {
         this.editorProcess = null
       }
+      this.log.info({ code, signal }, 'editor app exited')
     })
     this.editorProcess = child
     this.log.info({ pid: child.pid }, 'editor app launched')

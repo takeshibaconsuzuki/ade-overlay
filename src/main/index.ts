@@ -1,4 +1,4 @@
-import { Command } from 'commander'
+import { parseArgs } from 'node:util'
 import { app, nativeTheme } from 'electron'
 import { startServer } from '../server'
 import { flushLogs, logger } from '../server/logger'
@@ -8,6 +8,7 @@ import { registerWorktreeCreationNotifications } from './controller/worktreeNoti
 import { createWindow as createEditorWindow } from './editor'
 
 const log = logger.child({ process: 'main' })
+const cliOptions = parseAppCliOptions(process.argv)
 let server: Awaited<ReturnType<typeof startServer>> | null = null
 let stopWorktreeCreationNotifications: (() => void) | null = null
 let quitInProgress = false
@@ -21,12 +22,10 @@ process.on('unhandledRejection', (error) => {
   void fatalShutdown(error, 'unhandled rejection in main process')
 })
 
-const command = new Command()
-  .allowUnknownOption()
-  .option('--role <role>')
-  .parse(process.argv)
-
-const { role } = command.opts<{ role?: string }>()
+log.debug(
+  { argv: process.argv, execPath: process.execPath, cliOptions },
+  'app role parsed',
+)
 
 void main().catch((error: unknown) => {
   void fatalShutdown(error, 'main process startup failed')
@@ -62,7 +61,7 @@ async function main(): Promise<void> {
   // worktrees window's titlebar, menus, scrollbars) dark to match.
   nativeTheme.themeSource = 'dark'
 
-  switch (role) {
+  switch (cliOptions.role) {
     case 'editor':
       app.setName('ADE Editor')
       await app.whenReady()
@@ -108,5 +107,23 @@ async function fatalShutdown(error: unknown, message: string): Promise<void> {
   } finally {
     await flushLogs()
     app.exit(1)
+  }
+}
+
+type AppCliOptions = {
+  role?: string
+}
+
+function parseAppCliOptions(argv: string[]): AppCliOptions {
+  const { values } = parseArgs({
+    args: argv.slice(1),
+    options: {
+      role: { type: 'string' },
+    },
+    allowPositionals: true,
+    strict: false,
+  })
+  return {
+    role: typeof values.role === 'string' ? values.role : undefined,
   }
 }
