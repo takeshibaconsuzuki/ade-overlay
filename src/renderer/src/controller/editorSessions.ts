@@ -7,10 +7,11 @@ import {
 } from '../../../api/server/editor'
 import { logger } from '../logger'
 
-export type EditorSessionStatusMap = ReadonlyMap<
-  string,
-  EditorSessionStatusValue
->
+export type EditorSessionState = {
+  status: EditorSessionStatusValue
+  lastSwitchAt?: string
+}
+export type EditorSessionStatusMap = ReadonlyMap<string, EditorSessionState>
 
 /**
  * Subscribe to per-worktree VS Code session status. The initial `snapshot`
@@ -29,7 +30,9 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
       const data = parseStream<EditorSessionStatus[]>('snapshot', event.data)
       if (data) {
         setStatuses(
-          new Map(data.map((entry) => [entry.worktreeId, entry.status])),
+          new Map(
+            data.map((entry) => [entry.worktreeId, toSessionState(entry)]),
+          ),
         )
       }
     })
@@ -47,7 +50,7 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
         if (data.status === 'off') {
           next.delete(data.worktreeId)
         } else {
-          next.set(data.worktreeId, data.status)
+          next.set(data.worktreeId, toSessionState(data))
         }
         return next
       })
@@ -64,6 +67,10 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
   }, [])
 
   return statuses
+}
+
+function toSessionState(entry: EditorSessionStatus): EditorSessionState {
+  return { status: entry.status, lastSwitchAt: entry.lastSwitchAt }
 }
 
 function parseStream<T>(type: string, raw: string): T | null {

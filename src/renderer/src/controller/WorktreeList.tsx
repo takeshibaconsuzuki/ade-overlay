@@ -1,10 +1,20 @@
 import { Card, ScrollArea, Separator, Text, TextField } from '@radix-ui/themes'
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { KeyboardEvent } from 'react'
 import { HBox, VBox } from '../components/Box'
 import { useSearchableList } from '../hooks/useSearchableList'
-import type { EditorSessionStatusMap } from './editorSessions'
-import { worktreeLabel } from './worktreeLabels'
+import type {
+  EditorSessionState,
+  EditorSessionStatusMap,
+} from './editorSessions'
+import { worktreeLabel, worktreeName } from './worktreeLabels'
 import styles from './WorktreeList.module.css'
 import { WorktreeRow } from './WorktreeRow'
 import type { Worktree } from './worktrees'
@@ -40,6 +50,11 @@ export function WorktreeList({
     searchRef.current?.focus()
   }, [])
 
+  const sortedWorktrees = useMemo(
+    () => sortWorktrees(worktrees, sessionStatuses),
+    [sessionStatuses, worktrees],
+  )
+
   const handleSelect = useCallback(
     (worktree: Worktree) => {
       if (worktree.isOpenable && !busyIds.has(worktree.worktreeId)) {
@@ -54,7 +69,7 @@ export function WorktreeList({
     onKeyDown: handleListKeyDown,
     getItemProps,
   } = useSearchableList({
-    items: worktrees,
+    items: sortedWorktrees,
     getText: getWorktreeText,
     query,
     onSelect: handleSelect,
@@ -106,7 +121,7 @@ export function WorktreeList({
                     worktree={worktree}
                     busy={busyIds.has(worktree.worktreeId)}
                     sessionStatus={
-                      sessionStatuses.get(worktree.worktreeId) ?? 'off'
+                      sessionStatuses.get(worktree.worktreeId)?.status ?? 'off'
                     }
                     itemProps={getItemProps(index)}
                     onDelete={(deleteBranch) =>
@@ -133,6 +148,38 @@ export function WorktreeList({
       </Card>
     </VBox>
   )
+}
+
+function sortWorktrees(
+  worktrees: Worktree[],
+  sessionStatuses: EditorSessionStatusMap,
+): Worktree[] {
+  return [...worktrees].sort((left, right) => {
+    const leftSession = sessionStatuses.get(left.worktreeId)
+    const rightSession = sessionStatuses.get(right.worktreeId)
+    const leftSwitchTime = switchTime(leftSession)
+    const rightSwitchTime = switchTime(rightSession)
+
+    if (leftSwitchTime !== rightSwitchTime) {
+      return rightSwitchTime - leftSwitchTime
+    }
+
+    const leftDormant = leftSwitchTime === 0
+    const rightDormant = rightSwitchTime === 0
+    if (leftDormant !== rightDormant) {
+      return leftDormant ? 1 : -1
+    }
+
+    return worktreeName(left).localeCompare(worktreeName(right))
+  })
+}
+
+function switchTime(session: EditorSessionState | undefined): number {
+  if (!session?.lastSwitchAt) {
+    return 0
+  }
+  const time = Date.parse(session.lastSwitchAt)
+  return Number.isNaN(time) ? 0 : time
 }
 
 function EmptyState({ text }: { text: string }): React.JSX.Element {

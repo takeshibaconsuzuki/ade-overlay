@@ -32,6 +32,7 @@ export type EditorSessionStatusValue = 'off' | 'starting' | 'on'
 export type EditorSessionStatus = {
   worktreeId: string
   status: EditorSessionStatusValue
+  lastSwitchAt?: string
 }
 
 /** SSE event name for incremental editor-session status changes. */

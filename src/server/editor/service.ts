@@ -32,6 +32,7 @@ export class EditorService {
   private readonly sessions = new Map<string, EditorSession>()
   private readonly pendingSessions = new Map<string, Promise<EditorSession>>()
   private readonly sessionStatuses = new Map<string, EditorSessionStatusValue>()
+  private readonly lastSwitchTimes = new Map<string, string>()
   private editorProcess: ChildProcess | null = null
   private editorClientCount = 0
   private lastCommand: EditorCommand | null = null
@@ -86,6 +87,7 @@ export class EditorService {
       throw new HttpError(503, 'Editor service is shutting down')
     }
     const alreadyStarted = this.hasLiveSession(worktreeId)
+    this.recordSwitch(worktreeId)
     const session = await this.ensureSession(worktreeId)
     this.ensureEditorApp()
 
@@ -123,7 +125,7 @@ export class EditorService {
   getSessionStatuses(): EditorSessionStatus[] {
     return [...this.sessionStatuses.entries()]
       .filter(([, status]) => status !== 'off')
-      .map(([worktreeId, status]) => ({ worktreeId, status }))
+      .map(([worktreeId, status]) => this.toSessionStatus(worktreeId, status))
   }
 
   private setSessionStatus(
@@ -135,11 +137,40 @@ export class EditorService {
     }
     if (status === 'off') {
       this.sessionStatuses.delete(worktreeId)
+      this.lastSwitchTimes.delete(worktreeId)
     } else {
       this.sessionStatuses.set(worktreeId, status)
     }
-    const event: EditorSessionStatus = { worktreeId, status }
-    this.sessionStatusEvents.emit('session-status', event)
+    this.emitSessionStatus(worktreeId, status)
+  }
+
+  private recordSwitch(worktreeId: string): void {
+    this.lastSwitchTimes.set(worktreeId, new Date().toISOString())
+    const status = this.sessionStatuses.get(worktreeId)
+    if (status) {
+      this.emitSessionStatus(worktreeId, status)
+    }
+  }
+
+  private emitSessionStatus(
+    worktreeId: string,
+    status: EditorSessionStatusValue,
+  ): void {
+    this.sessionStatusEvents.emit(
+      'session-status',
+      this.toSessionStatus(worktreeId, status),
+    )
+  }
+
+  private toSessionStatus(
+    worktreeId: string,
+    status: EditorSessionStatusValue,
+  ): EditorSessionStatus {
+    return {
+      worktreeId,
+      status,
+      lastSwitchAt: this.lastSwitchTimes.get(worktreeId),
+    }
   }
 
   async getProxyPort(worktreeId: string): Promise<number> {
