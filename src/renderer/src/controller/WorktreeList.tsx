@@ -3,8 +3,9 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { HBox, VBox } from '../components/Box'
 import { useSearchableList } from '../hooks/useSearchableList'
 import type { EditorSessionStatusMap } from './editorSessions'
+import { worktreeLabel } from './worktreeLabels'
 import styles from './WorktreeList.module.css'
-import { worktreeLabel, WorktreeRow } from './WorktreeRow'
+import { WorktreeRow } from './WorktreeRow'
 import type { Worktree } from './worktrees'
 
 type WorktreeListProps = {

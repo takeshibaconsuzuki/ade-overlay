@@ -1,9 +1,11 @@
-import { Button, Kbd } from '@radix-ui/themes'
-import { useCallback, useEffect } from 'react'
+import { Button, Text } from '@radix-ui/themes'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { openCode } from '../../../api/server/generated'
-import { VBox } from '../components/Box'
+import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
+import { worktreeName } from '../controller/worktreeLabels'
+import { useWorktreeStream } from '../controller/worktrees'
 import { useChatStream } from '../hooks/useChatStream'
 import { logger } from '../logger'
 import {
@@ -19,6 +21,35 @@ import styles from './Launcher.module.css'
  */
 export function Launcher({ title }: { title: string }): React.JSX.Element {
   const { chats } = useChatStream()
+  const { snapshot } = useWorktreeStream()
+  const [recentWorktreeId, setRecentWorktreeId] = useState<string | null>(() =>
+    getCacheItem(RECENT_WORKTREE_EDITOR_KEY),
+  )
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent): void => {
+      if (event.key === RECENT_WORKTREE_EDITOR_KEY) {
+        setRecentWorktreeId(event.newValue)
+      }
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+
+  const currentWorktree = useMemo(
+    () =>
+      recentWorktreeId
+        ? snapshot.worktrees.find(
+            (worktree) => worktree.worktreeId === recentWorktreeId,
+          )
+        : undefined,
+    [recentWorktreeId, snapshot.worktrees],
+  )
+
+  const worktreesButtonText = currentWorktree
+    ? worktreeName(currentWorktree)
+    : 'Worktrees'
 
   const handleOpenWorktrees = useCallback(async (): Promise<void> => {
     if (!window.desktop) {
@@ -43,6 +74,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     logger.error({ worktreeId, err: error }, 'open recent editor failed')
     if (response?.status === 404) {
       deleteCacheItem(RECENT_WORKTREE_EDITOR_KEY, worktreeId)
+      setRecentWorktreeId(null)
     }
   }, [])
 
@@ -77,9 +109,16 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
         gap="3"
         p="3"
       >
-        <Button size="3" onClick={handleOpenWorktrees}>
-          Worktrees
-          <Kbd>S</Kbd>
+        <Button
+          size="3"
+          title={currentWorktree?.path}
+          onClick={handleOpenWorktrees}
+        >
+          <HBox justify="start" width="100%">
+            <Text as="span" truncate>
+              {worktreesButtonText}
+            </Text>
+          </HBox>
         </Button>
         <LiveChats chats={chats} className={styles.liveChats} />
       </VBox>

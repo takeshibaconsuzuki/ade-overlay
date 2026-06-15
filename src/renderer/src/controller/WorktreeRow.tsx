@@ -11,6 +11,7 @@ import { CircleAlert, Ellipsis } from 'lucide-react'
 import type { EditorSessionStatusValue } from '../../../api/server/editor'
 import { HBox, VBox } from '../components/Box'
 import type { SearchableItemProps } from '../hooks/useSearchableList'
+import { worktreeBranch, worktreeName } from './worktreeLabels'
 import styles from './WorktreeRow.module.css'
 import type { Worktree } from './worktrees'
 
@@ -199,24 +200,4 @@ function SessionDot({
       <Box aria-label={label} className={`${styles.dot} ${className}`} />
     </Tooltip>
   )
-}
-
-/** The worktree directory name, used as the primary label. */
-export function worktreeName(worktree: Worktree): string {
-  return worktree.path.split('/').pop() || worktree.path
-}
-
-/** The branch the worktree is on, used as the secondary label. */
-export function worktreeBranch(worktree: Worktree): string {
-  if (worktree.branchName) {
-    return worktree.branchName
-  }
-  if (worktree.isDetached && worktree.head) {
-    return `detached @ ${worktree.head.slice(0, 7)}`
-  }
-  return '—'
-}
-
-export function worktreeLabel(worktree: Worktree): string {
-  return `${worktreeName(worktree)} ${worktreeBranch(worktree)}`
 }
