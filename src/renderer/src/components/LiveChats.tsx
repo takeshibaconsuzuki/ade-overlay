@@ -61,16 +61,22 @@ function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
       <HBox width="32px" justify="center">
         <ChatStatusDot status={chat.status} />
       </HBox>
-      <VBox className={styles.text} flexGrow="1">
+      <VBox className={styles.text} flexGrow="1" gap="1">
         {chat.title ? (
-          <Text truncate>{chat.title}</Text>
+          <Text size="2" weight="medium" truncate>
+            {chat.title}
+          </Text>
         ) : (
           // Title not resolved yet — show a skeleton until it arrives.
           <Skeleton>
-            <Text>Loading</Text>
+            <Text size="2">Loading</Text>
           </Skeleton>
         )}
-        {secondary ? <Text truncate>{secondary}</Text> : null}
+        {secondary ? (
+          <Text size="1" color="gray" truncate>
+            {secondary}
+          </Text>
+        ) : null}
       </VBox>
     </HBox>
   )

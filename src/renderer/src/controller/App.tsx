@@ -1,4 +1,5 @@
 import { Badge, Button, Callout, Heading, Spinner } from '@radix-ui/themes'
+import { TriangleAlert } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import {
   addRepository,
@@ -176,18 +177,27 @@ export function App(): React.JSX.Element {
   return (
     <VBox className={styles.windowContent} height="100%" justify="start" p="2">
       <HBox>
-        <Heading>Worktrees</Heading>
-        <HBox>
-          <Badge>{connected ? 'Live' : 'Connecting…'}</Badge>
-          <Button onClick={handleAddRepository} disabled={addingRepository}>
-            <Spinner loading={addingRepository} />
-            Add repository
-          </Button>
+        <HBox justify="start" gap="3">
+          <Heading size="6">Worktrees</Heading>
+          <Badge
+            color={connected ? 'green' : 'gray'}
+            variant="soft"
+            radius="full"
+          >
+            {connected ? 'Live' : 'Connecting…'}
+          </Badge>
         </HBox>
+        <Button onClick={handleAddRepository} disabled={addingRepository}>
+          <Spinner loading={addingRepository} />
+          Add repository
+        </Button>
       </HBox>
 
       {error && (
-        <Callout.Root role="alert">
+        <Callout.Root role="alert" color="red" variant="surface">
+          <Callout.Icon>
+            <TriangleAlert size={16} />
+          </Callout.Icon>
           <Callout.Text>{error}</Callout.Text>
         </Callout.Root>
       )}

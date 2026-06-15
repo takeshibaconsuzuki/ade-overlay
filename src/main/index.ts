@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { app } from 'electron'
+import { app, nativeTheme } from 'electron'
 import { startServer } from '../server'
 import { flushLogs, logger } from '../server/logger'
 import { createWindow as createControllerWindow } from './controller'
@@ -58,6 +58,10 @@ app.on('before-quit', (event) => {
 })
 
 async function main(): Promise<void> {
+  // The renderer locks Radix to its dark appearance; force native chrome (the
+  // worktrees window's titlebar, menus, scrollbars) dark to match.
+  nativeTheme.themeSource = 'dark'
+
   switch (role) {
     case 'editor':
       app.setName('ADE Editor')

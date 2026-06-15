@@ -62,16 +62,25 @@ export function WorktreeRow({
         />
       </HBox>
 
-      <VBox flexGrow="1">
+      <VBox flexGrow="1" minWidth="0" gap="1">
         <HBox justify="start">
-          <Text title={worktree.path}>{worktreeName(worktree)}</Text>
-          {isMain && <Badge>main</Badge>}
-          {isCreating && <Badge>creating</Badge>}
-          {isBootstrapping && <Badge>bootstrapping</Badge>}
-          {worktree.isDetached && <Badge>detached</Badge>}
-          {worktree.isPrunable && <Badge>prunable</Badge>}
+          <Text size="2" weight="medium" title={worktree.path}>
+            {worktreeName(worktree)}
+          </Text>
+          {isMain && <Badge color="gray">main</Badge>}
+          {isCreating && <Badge color="blue">creating</Badge>}
+          {isBootstrapping && <Badge color="blue">bootstrapping</Badge>}
+          {worktree.isDetached && <Badge color="amber">detached</Badge>}
+          {worktree.isPrunable && <Badge color="orange">prunable</Badge>}
         </HBox>
-        <Text title={secondary}>{secondary}</Text>
+        <Text
+          size="1"
+          color={isFailed ? 'red' : 'gray'}
+          truncate
+          title={secondary}
+        >
+          {secondary}
+        </Text>
       </VBox>
 
       {!busy && (
@@ -79,9 +88,11 @@ export function WorktreeRow({
           <DropdownMenu.Trigger>
             <IconButton
               aria-label="Worktree actions"
+              variant="ghost"
+              color="gray"
               onClick={(event) => event.stopPropagation()}
             >
-              <Ellipsis />
+              <Ellipsis size={18} />
             </IconButton>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content onClick={(event) => event.stopPropagation()}>
@@ -144,12 +155,14 @@ function LeadingIndicator({
       <Tooltip content="Creation failed — click to dismiss">
         <IconButton
           aria-label="Dismiss creation error"
+          color="red"
+          variant="soft"
           onClick={(event) => {
             event.stopPropagation()
             onDismissCreationError()
           }}
         >
-          <CircleAlert />
+          <CircleAlert size={16} />
         </IconButton>
       </Tooltip>
     )

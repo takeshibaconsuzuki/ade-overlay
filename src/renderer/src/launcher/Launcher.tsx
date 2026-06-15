@@ -1,4 +1,4 @@
-import { Button } from '@radix-ui/themes'
+import { Button, Kbd } from '@radix-ui/themes'
 import { useCallback, useEffect } from 'react'
 import { openCode } from '../../../api/server/generated'
 import { VBox } from '../components/Box'
@@ -74,9 +74,13 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
         flexGrow="1"
         minHeight="0"
         justify="start"
-        p="2"
+        gap="3"
+        p="3"
       >
-        <Button onClick={handleOpenWorktrees}>Worktrees</Button>
+        <Button size="3" onClick={handleOpenWorktrees}>
+          Worktrees
+          <Kbd>S</Kbd>
+        </Button>
         <LiveChats chats={chats} className={styles.liveChats} />
       </VBox>
     </VBox>

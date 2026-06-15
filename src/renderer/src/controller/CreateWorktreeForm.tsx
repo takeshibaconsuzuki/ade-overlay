@@ -8,7 +8,7 @@ import {
   Text,
   TextField,
 } from '@radix-ui/themes'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   listBranches,
@@ -178,7 +178,7 @@ export function CreateWorktreeForm({
 
   return (
     <VBox>
-      <Button onClick={() => setOpen((value) => !value)}>
+      <Button variant="soft" onClick={() => setOpen((value) => !value)}>
         {open ? <ChevronDown /> : <ChevronRight />}
         Create worktree
       </Button>
@@ -188,7 +188,10 @@ export function CreateWorktreeForm({
           <form onSubmit={handleSubmit}>
             <VBox>
               {!hasRepositories && (
-                <Callout.Root>
+                <Callout.Root color="gray" variant="surface">
+                  <Callout.Icon>
+                    <Info size={16} />
+                  </Callout.Icon>
                   <Callout.Text>
                     No tracked repositories yet — add one to create worktrees.
                   </Callout.Text>
@@ -260,7 +263,11 @@ export function CreateWorktreeForm({
                 />
               </Field>
 
-              <Text as="label">
+              <Text
+                as="label"
+                size="2"
+                color={hasBootstrapCommand ? undefined : 'gray'}
+              >
                 <HBox justify="start">
                   <Checkbox
                     checked={bootstrap && hasBootstrapCommand}
@@ -295,8 +302,10 @@ function Field({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <VBox>
-      <Text as="label">{label}</Text>
+    <VBox gap="1">
+      <Text as="label" size="1" color="gray" weight="medium">
+        {label}
+      </Text>
       {children}
     </VBox>
   )

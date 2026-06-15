@@ -17,3 +17,13 @@ body {
 .rt-SelectTrigger {
   flex-shrink: 0;
 }
+
+/* Cancel the negative offset so a ghost
+ * button occupies its natural padded box, while still composing with any Radix
+ * margin props, which feed the same --margin-* variables. */
+.rt-BaseButton:where(.rt-variant-ghost) {
+  --margin-top-override: var(--margin-top);
+  --margin-right-override: var(--margin-right);
+  --margin-bottom-override: var(--margin-bottom);
+  --margin-left-override: var(--margin-left);
+}

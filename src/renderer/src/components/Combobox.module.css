@@ -1,5 +1,7 @@
 .item {
+  cursor: pointer;
   user-select: none;
+  transition: background-color 120ms ease;
 }
 
 .item[data-active='true'] {

@@ -7,6 +7,13 @@ const log = logger.child({ process: 'main' })
 /** Global shortcut that flips the launcher between active and dormant. */
 const TOGGLE_ACCELERATOR = 'CommandOrControl+Shift+Space'
 
+/**
+ * Window background painted before the renderer's first frame. Matches the dark
+ * theme's base surface (Radix slate-1 in dark mode, also the editor window's
+ * background) so the window never flashes white while the renderer loads.
+ */
+const WINDOW_BACKGROUND = '#111113'
+
 /** Window opacity used while the launcher is dormant. */
 const DORMANT_OPACITY = 0.4
 
@@ -95,6 +102,7 @@ export function createWindow(): void {
     resizable: true,
     alwaysOnTop: true,
     show: false,
+    backgroundColor: WINDOW_BACKGROUND,
     // Drop the native titlebar on every platform; the renderer draws its own
     // titlebar (drag region + close button) so the chrome looks identical
     // everywhere.
@@ -149,6 +157,7 @@ export function openWorktreesWindow(): void {
   const window = new BrowserWindow({
     width: 900,
     height: 600,
+    backgroundColor: WINDOW_BACKGROUND,
     webPreferences: webPreferences(),
   })
 

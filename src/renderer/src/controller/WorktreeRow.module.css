@@ -1,3 +1,17 @@
+.row {
+  transition: background-color 120ms ease;
+}
+
+/* Openable rows invite a click; non-openable rows (busy or not yet ready) are
+ * dimmed and keep the default cursor. */
+.row:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
+.row[aria-disabled='true'] {
+  opacity: 0.55;
+}
+
 .row[data-active='true'] {
   background-color: var(--accent-a4);
 }

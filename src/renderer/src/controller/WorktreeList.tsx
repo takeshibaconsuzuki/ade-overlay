@@ -117,8 +117,10 @@ export function WorktreeList({
 
 function EmptyState({ text }: { text: string }): React.JSX.Element {
   return (
-    <HBox p="2" justify="center">
-      <Text>{text}</Text>
+    <HBox p="5" justify="center">
+      <Text size="2" color="gray">
+        {text}
+      </Text>
     </HBox>
   )
 }

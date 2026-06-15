@@ -22,6 +22,16 @@ document.title = title
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Theme>{view === 'worktrees' ? <App /> : <Launcher title={title} />}</Theme>
+    {/* Dark + iris + slate is intentional: slate-1 in dark mode is #111113, the
+     * exact background the editor window hardcodes, so every surface matches.
+     * Iris keeps the accent clear of the green/amber status dots. */}
+    <Theme
+      appearance="dark"
+      accentColor="iris"
+      grayColor="slate"
+      radius="large"
+    >
+      {view === 'worktrees' ? <App /> : <Launcher title={title} />}
+    </Theme>
   </React.StrictMode>,
 )

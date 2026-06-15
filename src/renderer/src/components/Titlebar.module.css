@@ -1,0 +1,5 @@
+/* A hairline under the titlebar separates the draggable chrome from the window
+ * content without adding a heavy bar. */
+.titlebar {
+  border-bottom: 1px solid var(--gray-a4);
+}
