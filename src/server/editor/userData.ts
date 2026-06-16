@@ -4,12 +4,16 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
+  rm,
   stat,
   symlink,
+  writeFile,
 } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { type Logger } from '../../api/server/logger'
+import { readJsonFile } from '../json'
 
 export type UserDataFile = {
   path: string
@@ -21,6 +25,23 @@ export type UserDataPayload = {
   hash: string
 }
 
+type InstalledExtension = {
+  identifier: { id: string }
+  version?: string
+  relativeLocation: string
+  metadata?: unknown
+}
+
+/**
+ * Mirror the user's desktop extensions into a worktree's serve-web extensions
+ * directory.
+ *
+ * Symlink the extension folders.
+ * Register every linked extension in `extensions.json`.
+ * We drive both the symlinks and the manifest from the desktop's own
+ * `extensions.json`, which already excludes obsolete/superseded versions, so we
+ * never link duplicate versions of the same extension.
+ */
 export async function symlinkLocalExtensions(
   targetDir: string,
   log: Logger,
@@ -36,25 +57,150 @@ export async function symlinkLocalExtensions(
   }
 
   await mkdir(targetDir, { recursive: true })
+  const installed = await readInstalledExtensions(sourceDir)
+  const registered = await Promise.all(
+    installed.map(async (extension) => {
+      const source = join(sourceDir, extension.relativeLocation)
+      const target = join(targetDir, extension.relativeLocation)
+      if (!(await ensureSymlink(source, target, log))) {
+        return null
+      }
+      return manifestEntry(extension, target)
+    }),
+  )
+
+  await mergeManifest(
+    targetDir,
+    registered.filter((entry): entry is ManifestEntry => entry !== null),
+  )
+}
+
+/**
+ * Ensure `target` is a directory symlink pointing at `source`, returning whether
+ * it ends up correct. Idempotent.
+ */
+async function ensureSymlink(
+  source: string,
+  target: string,
+  log: Logger,
+): Promise<boolean> {
+  let existing
+  try {
+    existing = await lstat(target)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log.warn({ err: error, target }, 'extension lstat failed')
+      return false
+    }
+  }
+
+  if (existing) {
+    if (existing.isSymbolicLink() && (await readlink(target)) === source) {
+      return true
+    }
+    await rm(target, { recursive: true, force: true })
+  }
+
+  try {
+    await symlink(source, target, 'dir')
+    return true
+  } catch (error) {
+    log.warn({ err: error, source, target }, 'extension symlink failed')
+    return false
+  }
+}
+
+/**
+ * The extensions the desktop VS Code considers installed. Prefer its
+ * `extensions.json` (already free of obsolete/superseded versions); fall back to
+ * scanning the directory and reading each `package.json` when it is missing.
+ */
+async function readInstalledExtensions(
+  sourceDir: string,
+): Promise<InstalledExtension[]> {
+  const manifest = await readJsonFile<unknown[]>(
+    join(sourceDir, 'extensions.json'),
+  )
+  if (Array.isArray(manifest)) {
+    return manifest.filter(isInstalledExtension)
+  }
+
   const entries = await readdir(sourceDir, { withFileTypes: true })
-  await Promise.all(
+  const scanned = await Promise.all(
     entries
       .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const source = join(sourceDir, entry.name)
-        const target = join(targetDir, entry.name)
-        try {
-          await lstat(target)
-          return
-        } catch {
-          // Create the symlink below.
+      .map(async (entry): Promise<InstalledExtension | null> => {
+        const pkg = await readJsonFile<{
+          name?: unknown
+          publisher?: unknown
+          version?: unknown
+        }>(join(sourceDir, entry.name, 'package.json'))
+        if (
+          typeof pkg?.name !== 'string' ||
+          typeof pkg.publisher !== 'string'
+        ) {
+          return null
         }
-        try {
-          await symlink(source, target, 'dir')
-        } catch (error) {
-          log.warn({ err: error, source, target }, 'extension symlink failed')
+        return {
+          identifier: { id: `${pkg.publisher}.${pkg.name}` },
+          version: typeof pkg.version === 'string' ? pkg.version : undefined,
+          relativeLocation: entry.name,
         }
       }),
+  )
+  return scanned.filter((entry): entry is InstalledExtension => entry !== null)
+}
+
+type ManifestEntry = {
+  identifier: { id: string }
+  version?: string
+  location: { $mid: 1; path: string; scheme: 'file' }
+  relativeLocation: string
+  metadata?: unknown
+}
+
+function manifestEntry(
+  extension: InstalledExtension,
+  target: string,
+): ManifestEntry {
+  return {
+    identifier: extension.identifier,
+    version: extension.version,
+    location: { $mid: 1, path: target, scheme: 'file' },
+    relativeLocation: extension.relativeLocation,
+    metadata: extension.metadata,
+  }
+}
+
+/**
+ * Write `entries` into the worktree manifest, preserving any entries already
+ * present for ids we are not registering.
+ */
+async function mergeManifest(
+  targetDir: string,
+  entries: ManifestEntry[],
+): Promise<void> {
+  const manifestPath = join(targetDir, 'extensions.json')
+  const existing = await readJsonFile<unknown[]>(manifestPath)
+  const registeredIds = new Set(entries.map((entry) => entry.identifier.id))
+  const preserved = Array.isArray(existing)
+    ? existing.filter((entry) => {
+        const id = (entry as { identifier?: { id?: unknown } })?.identifier?.id
+        return typeof id === 'string' && !registeredIds.has(id)
+      })
+    : []
+  await writeFile(
+    manifestPath,
+    JSON.stringify([...preserved, ...entries]),
+    'utf8',
+  )
+}
+
+function isInstalledExtension(entry: unknown): entry is InstalledExtension {
+  const candidate = entry as InstalledExtension
+  return (
+    typeof candidate?.identifier?.id === 'string' &&
+    typeof candidate?.relativeLocation === 'string'
   )
 }
 
