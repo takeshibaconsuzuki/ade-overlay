@@ -1,2 +1,5 @@
 - Synthetic data dir worktree
 - Codex chats still live after terminating
+- Stop vscode servers
+- Live chat buttons
+- Codex historical chats

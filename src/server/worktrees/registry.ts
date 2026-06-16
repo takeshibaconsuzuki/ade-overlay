@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { createWriteStream } from 'node:fs'
 import { appendFile, mkdir, rm } from 'node:fs/promises'
-import { platform, userInfo } from 'node:os'
+import { platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import Mustache from 'mustache'
 import { WORKTREE_DIRTY_ERROR_CODE } from '../../api/server/config'
@@ -11,6 +11,7 @@ import { type AppConfigStore } from '../appConfig'
 import { getCreationLogsDir } from '../dataDir'
 import { HttpError } from '../errors'
 import { canonicalizePath, normalizePath, precanonicalizePath } from '../paths'
+import { getUserLoginShell } from '../userShell'
 import {
   listGitBranches,
   listGitWorktrees,
@@ -908,18 +909,6 @@ function getBootstrapShell(command: string): BootstrapShell {
   return {
     file: loginShell,
     args: ['-lic', command],
-  }
-}
-
-function getUserLoginShell(): string | undefined {
-  if (process.env.SHELL) {
-    return process.env.SHELL
-  }
-
-  try {
-    return userInfo().shell ?? undefined
-  } catch {
-    return undefined
   }
 }
 

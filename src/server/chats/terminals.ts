@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { platform } from 'node:os'
 import { type IPty, type spawn as PtySpawn } from 'node-pty'
 import { type WebSocket } from 'ws'
 import {
@@ -8,6 +9,7 @@ import {
   type ChatTerminalStatus,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
+import { getUserLoginShell } from '../userShell'
 import { type ChatTerminal } from './schemas'
 
 /**
@@ -74,7 +76,8 @@ export class TerminalManager {
 
   create(options: CreateTerminalOptions): ChatTerminal {
     const id = randomUUID()
-    const pty = loadPtySpawn()(options.command, options.args, {
+    const target = withUserEnvironment(options.command, options.args)
+    const pty = loadPtySpawn()(target.file, target.args, {
       name: 'xterm-256color',
       cwd: options.cwd,
       cols: DEFAULT_COLS,
@@ -248,6 +251,45 @@ export class TerminalManager {
       )
     }
   }
+}
+
+/**
+ * Resolve how to actually spawn a chat command so it runs with the user's real
+ * environment.
+ *
+ * A packaged app launched from the macOS Finder/Dock inherits only a minimal
+ * `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), so the chat CLIs — `claude` in
+ * `~/.local/bin`, `codex` in `/opt/homebrew/bin`, etc. — aren't on it and the
+ * PTY exits instantly (the chat never starts; in dev it works only because the
+ * terminal that ran `npm run dev` already exported the right `PATH`). Running
+ * through a login+interactive shell sources the user's profile so those CLIs
+ * resolve, exactly as worktree bootstrap commands do. `exec` replaces the shell
+ * with the CLI so it becomes the PTY's controlling process — input, resize, and
+ * exit all behave as if it were spawned directly. On Windows there is no such
+ * `PATH` stripping, so spawn the command directly.
+ */
+function withUserEnvironment(
+  command: string,
+  args: string[],
+): { file: string; args: string[] } {
+  if (platform() === 'win32') {
+    return { file: command, args }
+  }
+  const shell = getUserLoginShell()
+  if (!shell) {
+    return { file: command, args }
+  }
+  const line = [command, ...args].map(shellQuote).join(' ')
+  return { file: shell, args: ['-lic', `exec ${line}`] }
+}
+
+/**
+ * POSIX single-quote a token: wrap in single quotes, breaking out around any
+ * embedded single quote. Safe for interpolating session ids / paths into the
+ * `exec` line above.
+ */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
 function toDescriptor(record: TerminalRecord): ChatTerminal {
