@@ -62,7 +62,6 @@ function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
             {chat.title}
           </Text>
         ) : (
-          // Title not resolved yet — show a skeleton until it arrives.
           <Skeleton>
             <Text size="2">Loading</Text>
           </Skeleton>
@@ -71,7 +70,11 @@ function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
           <Text size="1" color="gray" truncate>
             {secondary}
           </Text>
-        ) : null}
+        ) : (
+          <Skeleton>
+            <Text size="1">Loading</Text>
+          </Skeleton>
+        )}
       </VBox>
     </HBox>
   )
