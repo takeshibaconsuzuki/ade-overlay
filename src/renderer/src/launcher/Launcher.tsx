@@ -1,9 +1,10 @@
 import { Button, Text } from '@radix-ui/themes'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { openCode } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
+import { useEditorSessionStream } from '../controller/editorSessions'
 import { worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
 import { useChatStream } from '../hooks/useChatStream'
@@ -22,29 +23,32 @@ import styles from './Launcher.module.css'
 export function Launcher({ title }: { title: string }): React.JSX.Element {
   const { chats } = useChatStream()
   const { snapshot } = useWorktreeStream()
-  const [recentWorktreeId, setRecentWorktreeId] = useState<string | null>(() =>
-    getCacheItem(RECENT_WORKTREE_EDITOR_KEY),
-  )
+  const sessionStatuses = useEditorSessionStream()
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent): void => {
-      if (event.key === RECENT_WORKTREE_EDITOR_KEY) {
-        setRecentWorktreeId(event.newValue)
+  // Prefer the most recently switched-to live editor session. The server emits
+  // a fresh `lastSwitchAt` on every switch (including switches to an already
+  // open editor). Fall back to the remembered worktree from the persistent
+  // cache when no session is live (e.g. a fresh app start).
+  const activeWorktreeId = useMemo(() => {
+    let latestId: string | null = null
+    let latestAt = ''
+    for (const [worktreeId, state] of sessionStatuses) {
+      if (state.lastSwitchAt && state.lastSwitchAt > latestAt) {
+        latestAt = state.lastSwitchAt
+        latestId = worktreeId
       }
     }
-
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
+    return latestId ?? getCacheItem(RECENT_WORKTREE_EDITOR_KEY)
+  }, [sessionStatuses])
 
   const currentWorktree = useMemo(
     () =>
-      recentWorktreeId
+      activeWorktreeId
         ? snapshot.worktrees.find(
-            (worktree) => worktree.worktreeId === recentWorktreeId,
+            (worktree) => worktree.worktreeId === activeWorktreeId,
           )
         : undefined,
-    [recentWorktreeId, snapshot.worktrees],
+    [activeWorktreeId, snapshot.worktrees],
   )
 
   const worktreesButtonText = currentWorktree
@@ -74,7 +78,6 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     logger.error({ worktreeId, err: error }, 'open recent editor failed')
     if (response?.status === 404) {
       deleteCacheItem(RECENT_WORKTREE_EDITOR_KEY, worktreeId)
-      setRecentWorktreeId(null)
     }
   }, [])
 

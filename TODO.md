@@ -1,5 +1,4 @@
 - Synthetic data dir worktree
 - Codex chats still live after terminating
-- Last used worktree button does not update immediately
 - Force delete confirmation popup
 - Failed deletion leaves creating row?
