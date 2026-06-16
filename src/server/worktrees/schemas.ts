@@ -36,6 +36,8 @@ export const DeleteWorktreeParams = z.object({
 
 export const DeleteWorktreeRequest = z.object({
   deleteBranch: z.boolean().default(false),
+  // Force removal even when the worktree has modified or untracked files.
+  force: z.boolean().default(false),
 })
 
 export const WorktreeIdParams = z.object({

@@ -117,7 +117,7 @@ export function createServer() {
   server.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
       reply.status(error.statusCode).send({
-        error: 'HTTP_ERROR',
+        error: error.code ?? 'HTTP_ERROR',
         message: error.message,
       })
       return

@@ -156,6 +156,7 @@ export function registerWorktreeRoutes(
         200: DeleteWorktreeResponse,
         400: ErrorResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
       },
     },
     handler: async (request) => {
@@ -166,6 +167,7 @@ export function registerWorktreeRoutes(
       return registry.deleteWorktree(
         request.params.worktreeId,
         request.body.deleteBranch,
+        request.body.force,
       )
     },
   })

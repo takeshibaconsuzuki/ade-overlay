@@ -1,6 +1,15 @@
-import { Badge, Button, Callout, Heading, Spinner } from '@radix-ui/themes'
+import {
+  AlertDialog,
+  Badge,
+  Button,
+  Callout,
+  Flex,
+  Heading,
+  Spinner,
+} from '@radix-ui/themes'
 import { TriangleAlert } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { WORKTREE_DIRTY_ERROR_CODE } from '../../../api/server/config'
 import {
   addRepository,
   createWorktree,
@@ -29,6 +38,11 @@ export function App(): React.JSX.Element {
   const [addingRepository, setAddingRepository] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [forcePrompt, setForcePrompt] = useState<{
+    worktreeId: string
+    deleteBranch: boolean
+    message: string
+  } | null>(null)
 
   const markBusy = useCallback((worktreeId: string, busy: boolean): void => {
     setBusyIds((current) => {
@@ -84,18 +98,37 @@ export function App(): React.JSX.Element {
     [markBusy],
   )
 
-  const handleDelete = useCallback(
-    async (worktreeId: string, deleteBranch: boolean): Promise<void> => {
+  const runDelete = useCallback(
+    async (
+      worktreeId: string,
+      deleteBranch: boolean,
+      force: boolean,
+    ): Promise<void> => {
       setError(null)
-      logger.info({ worktreeId, deleteBranch }, 'deleting worktree')
+      logger.info({ worktreeId, deleteBranch, force }, 'deleting worktree')
       markBusy(worktreeId, true)
       const { error } = await deleteWorktree({
         path: { worktreeId },
-        body: { deleteBranch },
+        body: { deleteBranch, force },
       })
       if (error) {
-        logger.error({ worktreeId, err: error }, 'delete worktree failed')
-        setError(messageOf(error, 'Failed to delete worktree'))
+        // A non-forced delete of a worktree with uncommitted/untracked changes
+        // is recoverable: prompt the user to force or cancel instead of just
+        // surfacing the failure.
+        if (!force && codeOf(error) === WORKTREE_DIRTY_ERROR_CODE) {
+          logger.info(
+            { worktreeId },
+            'worktree has changes, prompting to force',
+          )
+          setForcePrompt({
+            worktreeId,
+            deleteBranch,
+            message: messageOf(error, 'Worktree has uncommitted changes.'),
+          })
+        } else {
+          logger.error({ worktreeId, err: error }, 'delete worktree failed')
+          setError(messageOf(error, 'Failed to delete worktree'))
+        }
       } else {
         logger.info({ worktreeId }, 'deleted worktree')
       }
@@ -103,6 +136,22 @@ export function App(): React.JSX.Element {
     },
     [markBusy],
   )
+
+  const handleDelete = useCallback(
+    (worktreeId: string, deleteBranch: boolean): void => {
+      void runDelete(worktreeId, deleteBranch, false)
+    },
+    [runDelete],
+  )
+
+  const handleConfirmForceDelete = useCallback((): void => {
+    if (!forcePrompt) {
+      return
+    }
+    const { worktreeId, deleteBranch } = forcePrompt
+    setForcePrompt(null)
+    void runDelete(worktreeId, deleteBranch, true)
+  }, [forcePrompt, runDelete])
 
   const handleCreate = useCallback(
     async (values: CreateValues): Promise<boolean> => {
@@ -218,6 +267,35 @@ export function App(): React.JSX.Element {
         busy={creating}
         onCreate={handleCreate}
       />
+
+      <AlertDialog.Root
+        open={forcePrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setForcePrompt(null)
+          }
+        }}
+      >
+        <AlertDialog.Content maxWidth="450px">
+          <AlertDialog.Title>Force delete worktree?</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            {forcePrompt?.message} Forcing will discard those changes
+            permanently.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button variant="soft" color="gray">
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button color="red" onClick={handleConfirmForceDelete}>
+                Force delete
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </VBox>
   )
 }
@@ -232,4 +310,16 @@ function messageOf(error: unknown, fallback: string): string {
     return (error as { message: string }).message
   }
   return fallback
+}
+
+function codeOf(error: unknown): string | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'error' in error &&
+    typeof (error as { error: unknown }).error === 'string'
+  ) {
+    return (error as { error: string }).error
+  }
+  return undefined
 }

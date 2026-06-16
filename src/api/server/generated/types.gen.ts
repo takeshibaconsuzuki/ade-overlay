@@ -321,6 +321,7 @@ export type PreviewWorktreePathResponse = PreviewWorktreePathResponses[keyof Pre
 export type DeleteWorktreeData = {
     body: {
         deleteBranch?: boolean;
+        force?: boolean;
     };
     path: {
         worktreeId: string;
@@ -341,6 +342,13 @@ export type DeleteWorktreeErrors = {
      * Default Response
      */
     404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
         error: string;
         message: string;
     };

@@ -1,4 +1,2 @@
 - Synthetic data dir worktree
 - Codex chats still live after terminating
-- Force delete confirmation popup
-- Failed deletion leaves creating row?

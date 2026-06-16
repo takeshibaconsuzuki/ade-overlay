@@ -5,6 +5,7 @@ import { appendFile, mkdir, rm } from 'node:fs/promises'
 import { platform, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import Mustache from 'mustache'
+import { WORKTREE_DIRTY_ERROR_CODE } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
 import { type AppConfigStore } from '../appConfig'
 import { getCreationLogsDir } from '../dataDir'
@@ -470,6 +471,7 @@ export class WorktreeRegistry {
   async deleteWorktree(
     worktreeId: string,
     deleteBranch: boolean,
+    force = false,
   ): Promise<{ deleted: boolean; branchDeleted: boolean }> {
     const job = this.creationJobs.get(worktreeId)
 
@@ -498,11 +500,25 @@ export class WorktreeRegistry {
       throw new HttpError(400, 'Cannot delete a tracked main worktree')
     }
 
-    await runGit(
-      worktree.mainWorktreePath,
-      ['worktree', 'remove', worktree.path],
-      this.log,
-    )
+    try {
+      await runGit(
+        worktree.mainWorktreePath,
+        ['worktree', 'remove', ...(force ? ['--force'] : []), worktree.path],
+        this.log,
+      )
+    } catch (error) {
+      // git refuses a plain remove when the worktree has modified or untracked
+      // files. Surface a recognizable code so the renderer can offer a force
+      // delete instead of treating it as a generic failure.
+      if (!force && isDirtyWorktreeError(error)) {
+        throw new HttpError(
+          409,
+          `${worktree.path} has uncommitted or untracked changes.`,
+          WORKTREE_DIRTY_ERROR_CODE,
+        )
+      }
+      throw error
+    }
 
     let branchDeleted = false
     if (deleteBranch && worktree.branchName) {
@@ -894,6 +910,15 @@ function getBranchName(branch?: string): string | undefined {
   return branch?.startsWith('refs/heads/')
     ? branch.slice('refs/heads/'.length)
     : undefined
+}
+
+/**
+ * Detect git's refusal to remove a worktree that still has modified or
+ * untracked files, e.g. "contains modified or untracked files, use --force".
+ */
+function isDirtyWorktreeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /use --force/i.test(message)
 }
 
 /**
