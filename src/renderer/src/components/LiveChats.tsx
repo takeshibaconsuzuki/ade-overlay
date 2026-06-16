@@ -37,7 +37,11 @@ export function LiveChats({
 
   return (
     <Card className={className ? `${styles.card} ${className}` : styles.card}>
-      <ScrollArea type="auto" scrollbars="vertical" className={styles.scroll}>
+      <ScrollArea
+        type="auto"
+        scrollbars="vertical"
+        className={`${styles.scroll} scroll-area-fill`}
+      >
         <VBox gap="0">
           {live.map((chat) => (
             <ChatRow key={`${chat.providerId}:${chat.chatId}`} chat={chat} />

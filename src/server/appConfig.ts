@@ -13,6 +13,7 @@ const RepositoryConfig = z.object({
 const AppConfig = z
   .object({
     repositories: z.array(RepositoryConfig).default([]),
+    selectedWorktreeId: z.string().min(1).optional(),
   })
   .passthrough()
 
@@ -75,6 +76,18 @@ export class AppConfigStore {
     await this.write({
       ...config,
       repositories: dedupeRepositories(repositories),
+    })
+  }
+
+  async readSelectedWorktreeId(): Promise<string | undefined> {
+    return (await this.read()).selectedWorktreeId
+  }
+
+  async writeSelectedWorktreeId(worktreeId: string): Promise<void> {
+    const config = await this.read()
+    await this.write({
+      ...config,
+      selectedWorktreeId: worktreeId,
     })
   }
 }

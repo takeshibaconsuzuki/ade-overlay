@@ -58,6 +58,7 @@ export class WorktreeRegistry {
 
   private readonly repositories = new Map<string, TrackedRepository>()
   private readonly creationJobs = new Map<string, CreationJob>()
+  private selectedWorktreeId: string | undefined
   private persistRepositoriesTail = Promise.resolve()
 
   constructor(
@@ -87,6 +88,7 @@ export class WorktreeRegistry {
 
     const config = await this.appConfig.read()
     this.repositories.clear()
+    this.selectedWorktreeId = config.selectedWorktreeId
 
     for (const repository of config.repositories) {
       const mainWorktreePath = normalizePath(repository.mainWorktreePath)
@@ -632,8 +634,23 @@ export class WorktreeRegistry {
     )
 
     const repositories = trackedRepositories.map(toPublicRepository)
+    const selectedWorktreeId = this.selectedWorktreeId
+    const selectedExists =
+      selectedWorktreeId !== undefined && byId.has(selectedWorktreeId)
 
-    return { repositories, worktrees }
+    return {
+      repositories,
+      worktrees,
+      selectedWorktreeId: selectedExists ? selectedWorktreeId : undefined,
+    }
+  }
+
+  async selectWorktree(worktreeId: string): Promise<void> {
+    await this.getWorktreeById(worktreeId)
+    this.selectedWorktreeId = worktreeId
+    await this.appConfig?.writeSelectedWorktreeId(worktreeId)
+    const snapshot = await this.getSnapshot()
+    this.emit({ type: 'worktree-selected', worktreeId, snapshot })
   }
 
   private async getRepository(

@@ -15,6 +15,7 @@ export const WORKTREE_EVENT_TYPE = {
   worktreeCreated: 'worktree-created',
   worktreeCreationUpdated: 'worktree-creation-updated',
   worktreeDeleted: 'worktree-deleted',
+  worktreeSelected: 'worktree-selected',
 } as const
 
 export type WorktreeEventType =

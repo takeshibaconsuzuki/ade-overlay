@@ -27,3 +27,12 @@ body {
   --margin-bottom-override: var(--margin-bottom);
   --margin-left-override: var(--margin-left);
 }
+
+/* Radix's ScrollArea sizes its viewport content to `width: fit-content`, so a
+ * long nowrap line grows the content past the viewport and pushes the ellipsis
+ * off-screen instead of truncating (the row looks clipped, never truncated).
+ * Add this class to a vertical ScrollArea to pin the content to the viewport
+ * width so descendants truncate at the visible edge. */
+.scroll-area-fill .rt-ScrollAreaViewport > * {
+  width: 100%;
+}

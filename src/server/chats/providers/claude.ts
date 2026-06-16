@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   CHAT_HOOKS_PATH,
@@ -11,7 +12,9 @@ import { type Logger } from '../../../api/server/logger'
 import {
   type ChatDetails,
   type ChatHookContext,
+  type ChatLaunch,
   type ChatProvider,
+  type ChatSessionSummary,
   type ChatStatusUpdate,
   type WorktreeRef,
 } from './types'
@@ -127,6 +130,57 @@ export class ClaudeChatProvider implements ChatProvider {
    */
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails> {
     return readTranscriptDetails(asString(payload.transcript_path))
+  }
+
+  /**
+   * Claude Code keeps one JSONL transcript per session under
+   * `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, where the directory
+   * name is the worktree path with every non-alphanumeric character replaced by
+   * `-` (the same scheme Claude Code uses). The session id is the file stem.
+   */
+  async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
+    const dir = join(homedir(), '.claude', 'projects', encodeCwd(worktree.path))
+
+    let entries: string[]
+    try {
+      entries = await readdir(dir)
+    } catch {
+      // No transcripts for this worktree yet.
+      return []
+    }
+
+    const sessions = await Promise.all(
+      entries
+        .filter((name) => name.endsWith('.jsonl'))
+        .map(async (name): Promise<ChatSessionSummary | null> => {
+          const filePath = join(dir, name)
+          try {
+            const [info, details] = await Promise.all([
+              stat(filePath),
+              readTranscriptDetails(filePath),
+            ])
+            return {
+              sessionId: name.slice(0, -'.jsonl'.length),
+              title: details.title,
+              updatedAt: info.mtimeMs,
+            }
+          } catch {
+            return null
+          }
+        }),
+    )
+
+    return sessions
+      .filter((session): session is ChatSessionSummary => session !== null)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+  }
+
+  resumeLaunch(sessionId: string): ChatLaunch {
+    return { command: 'claude', args: ['--resume', sessionId] }
+  }
+
+  newLaunch(): ChatLaunch {
+    return { command: 'claude', args: [] }
   }
 
   /**
@@ -259,6 +313,15 @@ function firstLine(value: string | undefined): string | undefined {
   }
   const line = value.trim().split('\n', 1)[0].trim()
   return line || undefined
+}
+
+/**
+ * Encode a working directory the way Claude Code names its project transcript
+ * directory: every non-alphanumeric character becomes `-`. e.g.
+ * `/Users/me/Workspace/ade-overlay` → `-Users-me-Workspace-ade-overlay`.
+ */
+function encodeCwd(path: string): string {
+  return path.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
 function asString(value: unknown): string | undefined {

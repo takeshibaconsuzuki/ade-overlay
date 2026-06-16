@@ -78,6 +78,7 @@ export const Worktree = z.object({
 export const WorktreeSnapshot = z.object({
   repositories: z.array(Repository),
   worktrees: z.array(Worktree),
+  selectedWorktreeId: z.string().optional(),
 })
 
 const WorktreeSnapshotEvent = z.object({
@@ -110,6 +111,11 @@ export const WorktreeEvent = z.discriminatedUnion('type', [
     type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
     worktreeId: z.string(),
     branchDeleted: z.boolean(),
+    snapshot: WorktreeSnapshot,
+  }),
+  z.object({
+    type: z.literal(WORKTREE_EVENT_TYPE.worktreeSelected),
+    worktreeId: z.string(),
     snapshot: WorktreeSnapshot,
   }),
 ])

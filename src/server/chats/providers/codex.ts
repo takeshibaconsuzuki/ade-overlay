@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   CHAT_HOOKS_PATH,
@@ -11,7 +12,9 @@ import { type Logger } from '../../../api/server/logger'
 import {
   type ChatDetails,
   type ChatHookContext,
+  type ChatLaunch,
   type ChatProvider,
+  type ChatSessionSummary,
   type ChatStatusUpdate,
   type WorktreeRef,
 } from './types'
@@ -103,6 +106,51 @@ export class CodexChatProvider implements ChatProvider {
     return readTranscriptDetails(asStringOrNull(payload.transcript_path))
   }
 
+  /**
+   * Codex stores one rollout transcript per session under
+   * `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Each file's first
+   * line is a `session_meta` record carrying the session `id` and the `cwd` it
+   * ran in. We read only that head line to attribute a session to a worktree,
+   * then read the matched files in full for a title.
+   */
+  async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
+    const root = join(homedir(), '.codex', 'sessions')
+
+    let files: string[]
+    try {
+      files = await collectJsonlFiles(root)
+    } catch {
+      return []
+    }
+
+    const metas = await Promise.all(
+      files.map(async (filePath): Promise<ChatSessionSummary | null> => {
+        const meta = await readSessionMeta(filePath)
+        if (!meta || meta.cwd !== worktree.path) {
+          return null
+        }
+        const details = await readTranscriptDetails(filePath)
+        return {
+          sessionId: meta.id,
+          title: details.title,
+          updatedAt: meta.updatedAt,
+        }
+      }),
+    )
+
+    return metas
+      .filter((session): session is ChatSessionSummary => session !== null)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+  }
+
+  resumeLaunch(sessionId: string): ChatLaunch {
+    return { command: 'codex', args: ['resume', sessionId] }
+  }
+
+  newLaunch(): ChatLaunch {
+    return { command: 'codex', args: [] }
+  }
+
   private hook(worktreeId: string): {
     type: 'command'
     command: string
@@ -186,6 +234,75 @@ async function readTranscriptDetails(
     title: firstUserMessage,
     description: lastUserMessage,
   }
+}
+
+/** Recursively collect every `.jsonl` rollout file under a directory. */
+async function collectJsonlFiles(root: string): Promise<string[]> {
+  const found: string[] = []
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) {
+          await walk(path)
+        } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          found.push(path)
+        }
+      }),
+    )
+  }
+  await walk(root)
+  return found
+}
+
+/**
+ * Read just the first line of a rollout file and parse its `session_meta`.
+ * Returns the session id, the cwd it ran in, and a sort timestamp (epoch ms).
+ */
+async function readSessionMeta(
+  filePath: string,
+): Promise<{ id: string; cwd: string; updatedAt: number } | null> {
+  let head: string
+  try {
+    const handle = await open(filePath, 'r')
+    try {
+      const buffer = Buffer.alloc(16_384)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      head = buffer.toString('utf8', 0, bytesRead)
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return null
+  }
+
+  const firstLineText = head.split('\n', 1)[0]
+  let entry: unknown
+  try {
+    entry = JSON.parse(firstLineText)
+  } catch {
+    return null
+  }
+
+  if (!isRecord(entry) || entry.type !== 'session_meta') {
+    return null
+  }
+  const payload = isRecord(entry.payload) ? entry.payload : undefined
+  const id = asString(payload?.id)
+  const cwd = asString(payload?.cwd)
+  if (!id || !cwd) {
+    return null
+  }
+
+  const timestamp = asString(payload?.timestamp ?? entry.timestamp)
+  const parsed = timestamp ? Date.parse(timestamp) : Number.NaN
+  return { id, cwd, updatedAt: Number.isNaN(parsed) ? 0 : parsed }
 }
 
 function firstLine(value: string | undefined): string | undefined {

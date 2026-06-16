@@ -1,13 +1,13 @@
 import { Button, Text } from '@radix-ui/themes'
 import { useCallback, useEffect, useMemo } from 'react'
-import { openCode } from '../../../api/server/generated'
+import { openChat, openCode } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
-import { useEditorSessionStream } from '../controller/editorSessions'
 import { worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
 import { useChatStream } from '../hooks/useChatStream'
+import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
 import { logger } from '../logger'
 import {
   deleteCacheItem,
@@ -23,23 +23,7 @@ import styles from './Launcher.module.css'
 export function Launcher({ title }: { title: string }): React.JSX.Element {
   const { chats } = useChatStream()
   const { snapshot } = useWorktreeStream()
-  const sessionStatuses = useEditorSessionStream()
-
-  // Prefer the most recently switched-to live editor session. The server emits
-  // a fresh `lastSwitchAt` on every switch (including switches to an already
-  // open editor). Fall back to the remembered worktree from the persistent
-  // cache when no session is live (e.g. a fresh app start).
-  const activeWorktreeId = useMemo(() => {
-    let latestId: string | null = null
-    let latestAt = ''
-    for (const [worktreeId, state] of sessionStatuses) {
-      if (state.lastSwitchAt && state.lastSwitchAt > latestAt) {
-        latestAt = state.lastSwitchAt
-        latestId = worktreeId
-      }
-    }
-    return latestId ?? getCacheItem(RECENT_WORKTREE_EDITOR_KEY)
-  }, [sessionStatuses])
+  const activeWorktreeId = useCurrentWorktreeId()
 
   const currentWorktree = useMemo(
     () =>
@@ -81,6 +65,14 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     }
   }, [])
 
+  const handleOpenChat = useCallback(async (): Promise<void> => {
+    logger.info({ worktreeId: activeWorktreeId }, 'opening chat app')
+    const { error } = await openChat({ body: {} })
+    if (error) {
+      logger.error({ err: error }, 'open chat failed')
+    }
+  }, [activeWorktreeId])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
@@ -94,12 +86,15 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       } else if (key === 'w') {
         event.preventDefault()
         void handleOpenRecentEditor()
+      } else if (key === 'c') {
+        event.preventDefault()
+        void handleOpenChat()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleOpenRecentEditor, handleOpenWorktrees])
+  }, [handleOpenChat, handleOpenRecentEditor, handleOpenWorktrees])
 
   return (
     <VBox gap="0" height="100%">

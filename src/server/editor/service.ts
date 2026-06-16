@@ -89,6 +89,7 @@ export class EditorService {
     const alreadyStarted = this.hasLiveSession(worktreeId)
     this.recordSwitch(worktreeId)
     const session = await this.ensureSession(worktreeId)
+    await this.registry.selectWorktree(worktreeId)
     this.ensureEditorApp()
 
     const command: EditorSwitchCommand = {

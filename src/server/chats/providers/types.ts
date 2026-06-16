@@ -63,10 +63,38 @@ export interface ChatProvider {
    * after a restart, when a chat reappears via a status-only event.
    */
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails>
+
+  /**
+   * List the worktree's historical, on-disk sessions, most-recent first. Read
+   * from the agent's own session store (e.g. Claude Code's project transcripts),
+   * so history survives app restarts and yields resumable session ids.
+   * Best-effort: return an empty list when the store is missing/unreadable.
+   */
+  listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]>
+
+  /** Command + args to resume an existing session in the worktree's cwd. */
+  resumeLaunch(sessionId: string): ChatLaunch
+
+  /** Command + args to start a fresh session in the worktree's cwd. */
+  newLaunch(): ChatLaunch
 }
 
 /** Slow-resolved chat details, used to backfill what live events omit. */
 export type ChatDetails = {
   title?: string
   description?: string
+}
+
+/** A historical session discovered in a provider's on-disk store. */
+export type ChatSessionSummary = {
+  sessionId: string
+  title?: string
+  /** Epoch milliseconds of the session's last activity (for sorting). */
+  updatedAt: number
+}
+
+/** A terminal launch: the executable to run and its argv. */
+export type ChatLaunch = {
+  command: string
+  args: string[]
 }

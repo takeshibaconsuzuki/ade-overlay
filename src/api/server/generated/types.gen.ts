@@ -40,6 +40,7 @@ export type RemoveRepositoryResponses = {
                 hasCreationLogs: boolean;
                 isOpenable: boolean;
             }>;
+            selectedWorktreeId?: string;
         };
     };
 };
@@ -97,6 +98,7 @@ export type AddRepositoryResponses = {
                 hasCreationLogs: boolean;
                 isOpenable: boolean;
             }>;
+            selectedWorktreeId?: string;
         };
     };
 };
@@ -232,6 +234,7 @@ export type DismissCreationErrorResponses = {
                 hasCreationLogs: boolean;
                 isOpenable: boolean;
             }>;
+            selectedWorktreeId?: string;
         };
     };
 };
@@ -495,6 +498,123 @@ export type ListChatsResponses = {
 };
 
 export type ListChatsResponse = ListChatsResponses[keyof ListChatsResponses];
+
+export type OpenChatData = {
+    body: {
+        [key: string]: never;
+    };
+    path?: never;
+    query?: never;
+    url: '/chats/open';
+};
+
+export type OpenChatResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        ok: boolean;
+    };
+};
+
+export type OpenChatResponse = OpenChatResponses[keyof OpenChatResponses];
+
+export type ListChatHistoryData = {
+    body?: never;
+    path?: never;
+    query: {
+        worktreeId: string;
+    };
+    url: '/chats/history';
+};
+
+export type ListChatHistoryResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        sessions: Array<{
+            sessionId: string;
+            providerId: string;
+            worktreeId: string;
+            title?: string;
+            updatedAt: number;
+        }>;
+    };
+};
+
+export type ListChatHistoryResponse = ListChatHistoryResponses[keyof ListChatHistoryResponses];
+
+export type ListChatTerminalsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        worktreeId?: string;
+    };
+    url: '/chats/terminals';
+};
+
+export type ListChatTerminalsResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        terminals: Array<{
+            terminalId: string;
+            worktreeId: string;
+            providerId: string;
+            sessionId?: string;
+            title?: string;
+            status: 'running' | 'exited';
+        }>;
+    };
+};
+
+export type ListChatTerminalsResponse = ListChatTerminalsResponses[keyof ListChatTerminalsResponses];
+
+export type CreateChatTerminalData = {
+    body: {
+        worktreeId: string;
+        providerId?: string;
+        resumeSessionId?: string;
+        title?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/chats/terminals';
+};
+
+export type CreateChatTerminalResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        terminalId: string;
+        worktreeId: string;
+        providerId: string;
+        sessionId?: string;
+        title?: string;
+        status: 'running' | 'exited';
+    };
+};
+
+export type CreateChatTerminalResponse = CreateChatTerminalResponses[keyof CreateChatTerminalResponses];
+
+export type ChatCommandsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/chats/commands';
+};
+
+export type ChatCommandsResponses = {
+    /**
+     * Server-sent chat window commands.
+     */
+    200: string;
+};
+
+export type ChatCommandsResponse = ChatCommandsResponses[keyof ChatCommandsResponses];
 
 export type IngestLogsData = {
     body: {

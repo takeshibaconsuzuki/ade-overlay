@@ -15,6 +15,7 @@ import { ClaudeChatProvider } from './chats/providers/claude'
 import { CodexChatProvider } from './chats/providers/codex'
 import { ChatRegistry } from './chats/registry'
 import { registerChatRoutes } from './chats/routes'
+import { ChatService } from './chats/service'
 import { registerEditorRoutes } from './editor/routes'
 import { EditorService } from './editor/service'
 import { getStatusCode, HttpError } from './errors'
@@ -55,6 +56,11 @@ export function createServer() {
     server.log.child({ service: 'editor' }),
     (worktree) => chatRegistry.configureWorktree(worktree),
   )
+  const chatService = new ChatService(
+    chatRegistry,
+    worktreeRegistry,
+    server.log.child({ service: 'chat' }),
+  )
   const activeSockets = new Set<Socket>()
 
   server.server.on('connection', (socket) => {
@@ -72,6 +78,7 @@ export function createServer() {
 
   server.addHook('onClose', async () => {
     await editor.shutdown()
+    await chatService.shutdown()
   })
   server.addHook('onReady', async () => {
     await worktreeRegistry.loadRepositories()
@@ -108,7 +115,7 @@ export function createServer() {
       registry: worktreeRegistry,
       editor,
     })
-    registerChatRoutes(instance, chatRegistry)
+    registerChatRoutes(instance, chatRegistry, chatService)
     registerLogRoutes(instance)
   })
 

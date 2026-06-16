@@ -3,10 +3,16 @@ import { CHAT_EVENT_TYPE } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import {
   type ChatHookContext,
+  type ChatLaunch,
   type ChatProvider,
   type WorktreeRef,
 } from './providers/types'
-import { type Chat, type ChatEvent, type ChatSnapshot } from './schemas'
+import {
+  type Chat,
+  type ChatEvent,
+  type ChatSession,
+  type ChatSnapshot,
+} from './schemas'
 
 /**
  * How long to wait after a chat first appears before reading its details from
@@ -151,6 +157,53 @@ export class ChatRegistry {
     }, DETAILS_RESOLVE_DELAY_MS)
     // Don't let a pending detail read keep the process alive on shutdown.
     timer.unref()
+  }
+
+  /**
+   * Aggregate every provider's historical, on-disk sessions for a worktree,
+   * tagged with their provider and worktree, most-recent first. Per-provider
+   * failures are logged and skipped so one bad store never hides the rest.
+   */
+  async listSessions(worktree: WorktreeRef): Promise<ChatSession[]> {
+    const perProvider = await Promise.all(
+      [...this.providers.values()].map(async (provider) => {
+        try {
+          const sessions = await provider.listSessions(worktree)
+          return sessions.map(
+            (session): ChatSession => ({
+              sessionId: session.sessionId,
+              providerId: provider.id,
+              worktreeId: worktree.worktreeId,
+              title: session.title,
+              updatedAt: session.updatedAt,
+            }),
+          )
+        } catch (error) {
+          this.log.warn(
+            { err: error, provider: provider.id, path: worktree.path },
+            'failed to list chat sessions',
+          )
+          return []
+        }
+      }),
+    )
+
+    return perProvider
+      .flat()
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+  }
+
+  /**
+   * Resolve the terminal launch (command + args) for a provider — resuming the
+   * given session when provided, otherwise starting a fresh chat. Returns null
+   * for an unknown provider id.
+   */
+  getLaunch(providerId: string, sessionId?: string): ChatLaunch | null {
+    const provider = this.providers.get(providerId)
+    if (!provider) {
+      return null
+    }
+    return sessionId ? provider.resumeLaunch(sessionId) : provider.newLaunch()
   }
 
   getSnapshot(): ChatSnapshot {

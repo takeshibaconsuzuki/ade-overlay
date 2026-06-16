@@ -2,6 +2,7 @@ import { Theme } from '@radix-ui/themes'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import '@radix-ui/themes/styles.css'
+import { ChatApp } from './chat/ChatApp'
 import { configureApiClient } from './client'
 import { App } from './controller/App'
 import { Launcher } from './launcher/Launcher'
@@ -12,6 +13,7 @@ configureApiClient()
 const VIEW_TITLES: Record<string, string> = {
   launcher: 'ADE Overlay',
   worktrees: 'Worktrees',
+  chat: 'ADE Chat',
 }
 
 // The renderer is a single-page app loaded into multiple windows; the URL hash
@@ -31,7 +33,13 @@ createRoot(document.getElementById('root')!).render(
       grayColor="slate"
       radius="large"
     >
-      {view === 'worktrees' ? <App /> : <Launcher title={title} />}
+      {view === 'worktrees' ? (
+        <App />
+      ) : view === 'chat' ? (
+        <ChatApp title={title} />
+      ) : (
+        <Launcher title={title} />
+      )}
     </Theme>
   </React.StrictMode>,
 )

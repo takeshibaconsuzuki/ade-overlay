@@ -70,7 +70,7 @@ function toggleLauncherState(): void {
  * which view to render via the URL hash. Dev and production load paths differ:
  * the dev server is loaded by URL, the build by file.
  */
-function loadRenderer(window: BrowserWindow, hash: string): void {
+export function loadRenderer(window: BrowserWindow, hash: string): void {
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
 
   if (devServerUrl) {
@@ -82,7 +82,7 @@ function loadRenderer(window: BrowserWindow, hash: string): void {
   }
 }
 
-function webPreferences(): Electron.WebPreferences {
+export function webPreferences(): Electron.WebPreferences {
   return {
     preload: join(import.meta.dirname, '../preload/index.mjs'),
     contextIsolation: true,

@@ -1,0 +1,4 @@
+.sessionRow.sessionRow {
+  --card-background-color: var(--color-panel-solid);
+  --backdrop-filter-panel: none;
+}

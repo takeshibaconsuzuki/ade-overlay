@@ -12,14 +12,6 @@
   min-height: 0;
 }
 
-/* Radix's ScrollArea sizes its viewport content to `width: fit-content`, so a
- * long nowrap line grows the content wider than the viewport and pushes the
- * ellipsis off-screen (the row looks clipped, never truncated). Pin the content
- * to the viewport width so descendants truncate at the visible edge. */
-.scroll :global(.rt-ScrollAreaViewport) > * {
-  width: 100%;
-}
-
 /* Allow the title/description column to shrink inside the flex row so the
  * truncated `Text` can render its ellipsis instead of forcing the row wider. */
 .text {

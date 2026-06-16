@@ -57,7 +57,70 @@ export const ChatHookResponse = z.object({
   ok: z.boolean(),
 })
 
+// A historical, on-disk chat session discovered for a worktree (see each
+// provider's `listSessions`). `sessionId` is the provider-native id used to
+// resume the conversation.
+export const ChatSession = z.object({
+  sessionId: z.string(),
+  providerId: z.string(),
+  worktreeId: z.string(),
+  title: z.string().optional(),
+  updatedAt: z.number(),
+})
+
+export const ChatHistoryResponse = z.object({
+  sessions: z.array(ChatSession),
+})
+
+// A live server-hosted terminal running a chat session. Terminals outlive the
+// chat window (their PTYs live in the server), so the reopened app re-lists
+// them and re-attaches.
+export const ChatTerminal = z.object({
+  terminalId: z.string(),
+  worktreeId: z.string(),
+  providerId: z.string(),
+  // Set when the terminal resumed a known session.
+  sessionId: z.string().optional(),
+  title: z.string().optional(),
+  status: z.enum(['running', 'exited']),
+})
+
+export const ChatTerminalListResponse = z.object({
+  terminals: z.array(ChatTerminal),
+})
+
+export const ChatTerminalCreateRequest = z.object({
+  worktreeId: z.string().min(1),
+  // Defaults to the Claude provider when omitted.
+  providerId: z.string().optional(),
+  // When set, resume this session instead of starting a fresh chat.
+  resumeSessionId: z.string().optional(),
+  // Optional label retained for the terminal (e.g. the resumed session's title)
+  // so a reopened chat window can re-show the tab with a meaningful name.
+  title: z.string().optional(),
+})
+
+export const ChatOpenRequest = z.strictObject({})
+
+export const ChatOpenResponse = z.object({
+  ok: z.boolean(),
+})
+
+export const ChatHistoryQuery = z.object({
+  worktreeId: z.string().min(1),
+})
+
+export const ChatTerminalListQuery = z.object({
+  worktreeId: z.string().optional(),
+})
+
+export const ChatTerminalParams = z.object({
+  terminalId: z.string().min(1),
+})
+
 export type Chat = z.infer<typeof Chat>
 export type ChatSnapshot = z.infer<typeof ChatSnapshot>
 export type ChatEvent = z.infer<typeof ChatEvent>
 export type ChatStreamEvent = z.infer<typeof ChatStreamEvent>
+export type ChatSession = z.infer<typeof ChatSession>
+export type ChatTerminal = z.infer<typeof ChatTerminal>

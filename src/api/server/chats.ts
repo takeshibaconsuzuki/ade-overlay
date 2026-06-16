@@ -51,3 +51,49 @@ export const CHAT_HOOKS_PATH = '/chats/hooks'
 
 /** SSE path the launcher subscribes to for live chat status. */
 export const CHAT_STREAM_PATH = '/chats'
+
+/**
+ * The chat app is a separate Electron role that hosts terminals running chat
+ * sessions. These paths coordinate it, mirroring the editor surface
+ * (`src/api/server/editor.ts`):
+ *   - `POST /chats/open` spawns + brings the chat app forward.
+ *   - `GET /chats/history` lists a worktree's historical (on-disk) sessions.
+ *   - `GET|POST /chats/terminals` lists or starts server-hosted PTY terminals.
+ *   - `GET /chats/commands` is the SSE stream the chat process listens to.
+ *   - The per-terminal WebSocket attaches a renderer xterm to a live PTY.
+ */
+export const CHAT_OPEN_PATH = '/chats/open'
+export const CHAT_HISTORY_PATH = '/chats/history'
+export const CHAT_TERMINALS_PATH = '/chats/terminals'
+export const CHAT_COMMAND_STREAM_PATH = '/chats/commands'
+
+/** WebSocket path attaching a renderer xterm to a server-hosted PTY. */
+export function chatTerminalSocketPath(terminalId: string): string {
+  return `${CHAT_TERMINALS_PATH}/${terminalId}/socket`
+}
+
+/** Route template (Fastify param form) for the terminal WebSocket. */
+export const CHAT_TERMINAL_SOCKET_ROUTE = `${CHAT_TERMINALS_PATH}/:terminalId/socket`
+
+/** Whether a server-hosted terminal's PTY is still running or has exited. */
+export type ChatTerminalStatus = 'running' | 'exited'
+
+/**
+ * Commands streamed to the chat Electron process over the SSE command stream.
+ * `show` brings the already-spawned chat window forward.
+ */
+export type ChatShowCommand = {
+  type: 'show'
+}
+
+export type ChatCommand = ChatShowCommand
+
+/** Messages the renderer sends up the terminal WebSocket. */
+export type ChatTerminalClientMessage =
+  | { type: 'input'; data: string }
+  | { type: 'resize'; cols: number; rows: number }
+
+/** Messages the server sends down the terminal WebSocket. */
+export type ChatTerminalServerMessage =
+  | { type: 'output'; data: string }
+  | { type: 'exit'; code: number | null }
