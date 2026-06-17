@@ -14,6 +14,9 @@ export type Chat = {
   title?: string
   description?: string
   worktreeId?: string
+  // The terminal this app runs the chat in, stamped by the server. Its presence
+  // is the single source of truth for whether the chat can be opened here.
+  terminalId?: string
   updatedAt: number
 }
 

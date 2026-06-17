@@ -97,4 +97,12 @@ export type ChatSessionSummary = {
 export type ChatLaunch = {
   command: string
   args: string[]
+  /**
+   * The provider session id this launch will run as, when it can be pinned up
+   * front (resuming a session, or a fresh session the provider lets us name).
+   * Recorded on the terminal so a live chat — keyed by the same id — can be
+   * matched back to its terminal. Absent when the provider only learns its
+   * session id after the process starts.
+   */
+  sessionId?: string
 }

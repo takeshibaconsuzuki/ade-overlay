@@ -82,18 +82,41 @@ export class EditorService {
     }
   }
 
+  /** Open a worktree in the editor, making it the globally selected worktree. */
   async openCode(worktreeId: string): Promise<{
     worktreeId: string
     url: string
     alreadyStarted: boolean
   }> {
+    return this.switchEditorTo(worktreeId, { select: true })
+  }
+
+  /**
+   * Bring the editor forward on a worktree without changing the globally
+   * selected worktree — for "show the editor" actions (the launcher's `w` key)
+   * that should focus the window, not switch the worktree the user is in.
+   */
+  async revealEditor(worktreeId: string): Promise<{
+    worktreeId: string
+    url: string
+    alreadyStarted: boolean
+  }> {
+    return this.switchEditorTo(worktreeId, { select: false })
+  }
+
+  private async switchEditorTo(
+    worktreeId: string,
+    { select }: { select: boolean },
+  ): Promise<{ worktreeId: string; url: string; alreadyStarted: boolean }> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
     const alreadyStarted = this.hasLiveSession(worktreeId)
     this.recordSwitch(worktreeId)
     const session = await this.ensureSession(worktreeId)
-    await this.registry.selectWorktree(worktreeId)
+    if (select) {
+      await this.registry.selectWorktree(worktreeId)
+    }
     this.ensureEditorApp()
 
     const command: EditorSwitchCommand = {
@@ -102,7 +125,10 @@ export class EditorService {
       url: session.url,
     }
     this.emitCommand(command)
-    this.log.info({ worktreeId, url: session.url }, 'editor switch emitted')
+    this.log.info(
+      { worktreeId, url: session.url, select },
+      'editor switch emitted',
+    )
 
     return { worktreeId, url: session.url, alreadyStarted }
   }

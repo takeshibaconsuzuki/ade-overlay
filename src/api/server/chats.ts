@@ -80,10 +80,14 @@ export type ChatTerminalStatus = 'running' | 'exited'
 
 /**
  * Commands streamed to the chat Electron process over the SSE command stream.
- * `show` brings the already-spawned chat window forward.
+ * `show` brings the already-spawned chat window forward. When it carries a
+ * target chat (a live chat clicked from another window, e.g. the launcher), the
+ * chat renderer also selects that chat's terminal once it is available.
  */
 export type ChatShowCommand = {
   type: 'show'
+  providerId?: string
+  chatId?: string
 }
 
 export type ChatCommand = ChatShowCommand

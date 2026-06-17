@@ -444,6 +444,47 @@ export type OpenCodeResponses = {
 
 export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
 
+export type ShowEditorData = {
+    body: {
+        worktreeId: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/showEditor';
+};
+
+export type ShowEditorErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type ShowEditorError = ShowEditorErrors[keyof ShowEditorErrors];
+
+export type ShowEditorResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        worktreeId: string;
+        url: string;
+        alreadyStarted: boolean;
+    };
+};
+
+export type ShowEditorResponse = ShowEditorResponses[keyof ShowEditorResponses];
+
 export type OpenWorktreeData = {
     body: {
         worktreeId: string;
@@ -542,7 +583,8 @@ export type ListChatsResponse = ListChatsResponses[keyof ListChatsResponses];
 
 export type OpenChatData = {
     body: {
-        [key: string]: never;
+        providerId?: string;
+        chatId?: string;
     };
     path?: never;
     query?: never;

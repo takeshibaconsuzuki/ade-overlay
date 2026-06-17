@@ -22,7 +22,6 @@ import {
 } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { logger } from '../logger'
-import { RECENT_WORKTREE_EDITOR_KEY, setCacheItem } from '../persistentCache'
 import styles from './App.module.css'
 import { CreateWorktreeForm } from './CreateWorktreeForm'
 import { useEditorSessionStream } from './editorSessions'
@@ -213,9 +212,9 @@ export function App(): React.JSX.Element {
       if (error) {
         logger.error({ worktreeId, err: error }, 'open editor failed')
         setError(messageOf(error, 'Failed to open editor'))
-      } else {
-        setCacheItem(RECENT_WORKTREE_EDITOR_KEY, worktreeId)
       }
+      // The server records the selection (`selectedWorktreeId`); no client-side
+      // copy — that's what used to drift from the server's source of truth.
       markBusy(worktreeId, false)
     },
     [markBusy],

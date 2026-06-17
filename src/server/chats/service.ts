@@ -36,7 +36,14 @@ export class ChatService {
     private readonly worktrees: WorktreeRegistry,
     private readonly log: Logger,
   ) {
-    this.terminals = new TerminalManager(log)
+    // Re-broadcast chats whenever the terminal set changes so each chat's
+    // server-stamped `terminalId` (and thus "openable" everywhere) stays current.
+    this.terminals = new TerminalManager(log, () =>
+      this.registry.notifyTerminalsChanged(),
+    )
+    this.registry.setTerminalResolver((providerId, chatId) =>
+      this.terminals.terminalIdForSession(providerId, chatId),
+    )
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
   }
 
@@ -65,10 +72,13 @@ export class ChatService {
     this.ensureChatApp()
   }
 
-  focusChat(): void {
-    const command: ChatCommand = { type: 'show' }
+  focusChat(target?: { providerId?: string; chatId?: string }): void {
+    const command: ChatCommand =
+      target?.chatId && target.providerId
+        ? { type: 'show', providerId: target.providerId, chatId: target.chatId }
+        : { type: 'show' }
     this.emitCommand(command)
-    this.log.info('chat show emitted')
+    this.log.info({ chatId: command.chatId }, 'chat show emitted')
   }
 
   /** Historical, on-disk sessions for a worktree, most-recent first. */
@@ -97,7 +107,11 @@ export class ChatService {
     return this.terminals.create({
       worktreeId: options.worktreeId,
       providerId,
-      sessionId: options.resumeSessionId,
+      // Prefer the launch's pinned session id (a resumed id, or a fresh one the
+      // provider named) so the terminal links to its live chat; fall back to the
+      // requested resume id.
+      sessionId: launch.sessionId ?? options.resumeSessionId,
+      resumed: !!options.resumeSessionId,
       title: options.title,
       cwd: worktree.path,
       command: launch.command,

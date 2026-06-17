@@ -144,7 +144,7 @@ export class CodexChatProvider implements ChatProvider {
   }
 
   resumeLaunch(sessionId: string): ChatLaunch {
-    return { command: 'codex', args: ['resume', sessionId] }
+    return { command: 'codex', args: ['resume', sessionId], sessionId }
   }
 
   newLaunch(): ChatLaunch {

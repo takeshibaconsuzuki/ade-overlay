@@ -1,19 +1,18 @@
 import { Button, Text } from '@radix-ui/themes'
 import { useCallback, useEffect, useMemo } from 'react'
-import { openChat, openCode } from '../../../api/server/generated'
+import {
+  openChat,
+  openWorktree,
+  showEditor,
+} from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
 import { worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
-import { useChatStream } from '../hooks/useChatStream'
+import { useChatStream, type Chat } from '../hooks/useChatStream'
 import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
 import { logger } from '../logger'
-import {
-  deleteCacheItem,
-  getCacheItem,
-  RECENT_WORKTREE_EDITOR_KEY,
-} from '../persistentCache'
 import styles from './Launcher.module.css'
 
 /**
@@ -39,6 +38,16 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     ? worktreeName(currentWorktree)
     : 'Worktrees'
 
+  const resolveWorktreeName = useCallback(
+    (id: string | undefined): string | undefined => {
+      const entry = id
+        ? snapshot.worktrees.find((worktree) => worktree.worktreeId === id)
+        : undefined
+      return entry ? worktreeName(entry) : undefined
+    },
+    [snapshot.worktrees],
+  )
+
   const handleOpenWorktrees = useCallback(async (): Promise<void> => {
     if (!window.desktop) {
       return
@@ -47,23 +56,23 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     await window.desktop.openWorktrees()
   }, [])
 
-  const handleOpenRecentEditor = useCallback(async (): Promise<void> => {
-    const worktreeId = getCacheItem(RECENT_WORKTREE_EDITOR_KEY)
-    if (!worktreeId) {
+  // Bring the editor forward on the worktree the user is currently in, without
+  // switching worktrees — `showEditor` reveals the window without re-selecting.
+  const handleShowEditor = useCallback(async (): Promise<void> => {
+    if (!activeWorktreeId) {
       return
     }
-
-    logger.info({ worktreeId }, 'opening recent worktree editor')
-    const { error, response } = await openCode({ body: { worktreeId } })
-    if (!error) {
-      return
+    logger.info({ worktreeId: activeWorktreeId }, 'showing editor')
+    const { error } = await showEditor({
+      body: { worktreeId: activeWorktreeId },
+    })
+    if (error) {
+      logger.error(
+        { worktreeId: activeWorktreeId, err: error },
+        'show editor failed',
+      )
     }
-
-    logger.error({ worktreeId, err: error }, 'open recent editor failed')
-    if (response?.status === 404) {
-      deleteCacheItem(RECENT_WORKTREE_EDITOR_KEY, worktreeId)
-    }
-  }, [])
+  }, [activeWorktreeId])
 
   const handleOpenChat = useCallback(async (): Promise<void> => {
     logger.info({ worktreeId: activeWorktreeId }, 'opening chat app')
@@ -72,6 +81,34 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       logger.error({ err: error }, 'open chat failed')
     }
   }, [activeWorktreeId])
+
+  // Clicking a live chat jumps to its worktree and brings the chat window
+  // forward; the chat window then surfaces that worktree's terminals.
+  const handleOpenLiveChat = useCallback(
+    async (chat: Chat): Promise<void> => {
+      if (!chat.terminalId || !chat.worktreeId) {
+        return
+      }
+      if (chat.worktreeId !== activeWorktreeId) {
+        const { error } = await openWorktree({
+          body: { worktreeId: chat.worktreeId },
+        })
+        if (error) {
+          logger.error(
+            { err: error, worktreeId: chat.worktreeId },
+            'failed to switch worktree for live chat',
+          )
+          return
+        }
+      }
+      // Focus the chat window last, carrying the target chat so the chat window
+      // selects its terminal (the launcher can't reach into it directly).
+      await openChat({
+        body: { providerId: chat.providerId, chatId: chat.chatId },
+      })
+    },
+    [activeWorktreeId],
+  )
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -85,7 +122,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
         void handleOpenWorktrees()
       } else if (key === 'w') {
         event.preventDefault()
-        void handleOpenRecentEditor()
+        void handleShowEditor()
       } else if (key === 'c') {
         event.preventDefault()
         void handleOpenChat()
@@ -94,7 +131,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleOpenChat, handleOpenRecentEditor, handleOpenWorktrees])
+  }, [handleOpenChat, handleShowEditor, handleOpenWorktrees])
 
   return (
     <VBox gap="0" height="100%">
@@ -118,7 +155,13 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
             </Text>
           </HBox>
         </Button>
-        <LiveChats chats={chats} className={styles.liveChats} />
+        <LiveChats
+          chats={chats}
+          className={styles.liveChats}
+          onSelect={(chat) => void handleOpenLiveChat(chat)}
+          isChatDisabled={(chat) => !chat.terminalId}
+          resolveWorktreeName={resolveWorktreeName}
+        />
       </VBox>
     </VBox>
   )

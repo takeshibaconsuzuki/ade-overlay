@@ -12,6 +12,31 @@
   min-height: 0;
 }
 
+/* Each chat is a full-width button row that resets the native button chrome and
+ * leans on the inner layout. Disabled rows (no attachable terminal) dim and stop
+ * responding to the pointer. */
+.row {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.row:hover:not(:disabled) {
+  background-color: var(--gray-a3);
+}
+
+.row:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 /* Allow the title/description column to shrink inside the flex row so the
  * truncated `Text` can render its ellipsis instead of forcing the row wider. */
 .text {

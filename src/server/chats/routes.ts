@@ -31,6 +31,7 @@ import {
   ChatTerminalListQuery,
   ChatTerminalListResponse,
   type ChatEvent,
+  type ChatSnapshot,
 } from './schemas'
 import { type ChatService } from './service'
 
@@ -100,9 +101,9 @@ export function registerChatRoutes(
         200: ChatOpenResponse,
       },
     },
-    handler: async () => {
+    handler: async (request) => {
       chat.openChat()
-      chat.focusChat()
+      chat.focusChat(request.body)
       return { ok: true as const }
     },
   })
@@ -182,10 +183,16 @@ function streamChatEvents(
   const onChatEvent = (event: ChatEvent): void => {
     stream.send(event.type, event)
   }
+  // A terminal change re-broadcasts the full snapshot (no single chat changed).
+  const onSnapshot = (snapshot: ChatSnapshot): void => {
+    stream.send('snapshot', snapshot)
+  }
 
   registry.events.on('chat-event', onChatEvent)
+  registry.events.on('chat-snapshot', onSnapshot)
   stream.onClose(() => {
     registry.events.off('chat-event', onChatEvent)
+    registry.events.off('chat-snapshot', onSnapshot)
   })
 
   stream.send('snapshot', registry.getSnapshot())

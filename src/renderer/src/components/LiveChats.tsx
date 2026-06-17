@@ -1,4 +1,5 @@
 import {
+  Badge,
   Box,
   Card,
   ScrollArea,
@@ -8,6 +9,7 @@ import {
   Tooltip,
 } from '@radix-ui/themes'
 import { CHAT_STATUS, type ChatStatus } from '../../../api/server/chats'
+import { formatTimestamp } from '../format'
 import type { Chat } from '../hooks/useChatStream'
 import { HBox, VBox } from './Box'
 import styles from './LiveChats.module.css'
@@ -25,10 +27,19 @@ const STATUS_DOT: Record<ChatStatus, { className: string; label: string }> = {
 export function LiveChats({
   chats,
   className,
+  onSelect,
+  isChatDisabled,
+  resolveWorktreeName,
 }: {
   chats: Chat[]
   /** Lets the consumer size the card in its layout (e.g. grow to fill space). */
   className?: string
+  /** Invoked when a chat row is activated; makes the rows clickable buttons. */
+  onSelect?: (chat: Chat) => void
+  /** Disables a row's button, e.g. when the chat has no attachable terminal. */
+  isChatDisabled?: (chat: Chat) => boolean
+  /** Resolves a chat's worktree id to a display name, shown as a row badge. */
+  resolveWorktreeName?: (worktreeId: string | undefined) => string | undefined
 }): React.JSX.Element | null {
   const live = chats.filter((chat) => chat.status !== CHAT_STATUS.dormant)
   if (live.length === 0) {
@@ -44,7 +55,13 @@ export function LiveChats({
       >
         <VBox gap="0">
           {live.map((chat) => (
-            <ChatRow key={`${chat.providerId}:${chat.chatId}`} chat={chat} />
+            <ChatRow
+              key={`${chat.providerId}:${chat.chatId}`}
+              chat={chat}
+              onSelect={onSelect}
+              disabled={isChatDisabled?.(chat) ?? false}
+              worktreeName={resolveWorktreeName?.(chat.worktreeId)}
+            />
           ))}
         </VBox>
       </ScrollArea>
@@ -52,35 +69,65 @@ export function LiveChats({
   )
 }
 
-function ChatRow({ chat }: { chat: Chat }): React.JSX.Element {
+function ChatRow({
+  chat,
+  onSelect,
+  disabled,
+  worktreeName,
+}: {
+  chat: Chat
+  onSelect?: (chat: Chat) => void
+  disabled: boolean
+  worktreeName?: string
+}): React.JSX.Element {
   const secondary = chat.description || undefined
 
   return (
-    <HBox p="2">
-      <HBox width="32px" flexShrink="0" justify="center">
-        <ChatStatusDot status={chat.status} />
+    <button
+      type="button"
+      className={styles.row}
+      disabled={disabled}
+      onClick={onSelect ? () => onSelect(chat) : undefined}
+    >
+      <HBox p="2">
+        <HBox width="32px" flexShrink="0" justify="center">
+          <ChatStatusDot status={chat.status} />
+        </HBox>
+        <VBox className={styles.text} flexGrow="1" gap="1">
+          <HBox gap="2" align="center" justify="between">
+            {chat.title ? (
+              <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
+                {chat.title}
+              </Text>
+            ) : (
+              <Skeleton>
+                <Text size="2">Loading</Text>
+              </Skeleton>
+            )}
+            <Text size="1" color="gray" style={{ flexShrink: 0 }}>
+              {formatTimestamp(chat.updatedAt)}
+            </Text>
+          </HBox>
+          <HBox gap="2" align="center">
+            {worktreeName ? (
+              <Badge
+                size="1"
+                color="gray"
+                variant="soft"
+                style={{ flexShrink: 0 }}
+              >
+                {worktreeName}
+              </Badge>
+            ) : null}
+            {secondary ? (
+              <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
+                {secondary}
+              </Text>
+            ) : null}
+          </HBox>
+        </VBox>
       </HBox>
-      <VBox className={styles.text} flexGrow="1" gap="1">
-        {chat.title ? (
-          <Text size="2" weight="medium" truncate>
-            {chat.title}
-          </Text>
-        ) : (
-          <Skeleton>
-            <Text size="2">Loading</Text>
-          </Skeleton>
-        )}
-        {secondary ? (
-          <Text size="1" color="gray" truncate>
-            {secondary}
-          </Text>
-        ) : (
-          <Skeleton>
-            <Text size="1">Loading</Text>
-          </Skeleton>
-        )}
-      </VBox>
-    </HBox>
+    </button>
   )
 }
 

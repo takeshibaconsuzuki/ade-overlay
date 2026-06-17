@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -176,11 +177,14 @@ export class ClaudeChatProvider implements ChatProvider {
   }
 
   resumeLaunch(sessionId: string): ChatLaunch {
-    return { command: 'claude', args: ['--resume', sessionId] }
+    return { command: 'claude', args: ['--resume', sessionId], sessionId }
   }
 
+  // Name the fresh session up front so its terminal can be linked to the live
+  // chat that Claude reports under the same id (`--session-id` takes any UUID).
   newLaunch(): ChatLaunch {
-    return { command: 'claude', args: [] }
+    const sessionId = randomUUID()
+    return { command: 'claude', args: ['--session-id', sessionId], sessionId }
   }
 
   /**

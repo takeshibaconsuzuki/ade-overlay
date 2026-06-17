@@ -113,6 +113,27 @@ export function registerEditorRoutes(
 
   routes.route({
     method: 'POST',
+    url: '/showEditor',
+    schema: {
+      operationId: 'showEditor',
+      body: OpenCodeRequest,
+      response: {
+        200: OpenCodeResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    // Bring the editor forward on a worktree without selecting it — focuses the
+    // window without changing the worktree the user is in.
+    handler: async (request) => {
+      const response = await editor.revealEditor(request.body.worktreeId)
+      editor.showEditor()
+      return response
+    },
+  })
+
+  routes.route({
+    method: 'POST',
     url: '/openWorktree',
     schema: {
       operationId: 'openWorktree',

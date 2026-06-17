@@ -32,6 +32,13 @@ export class ChatRegistry {
   private readonly providers = new Map<string, ChatProvider>()
   // Chats whose detail read has already been scheduled, so we only do it once.
   private readonly detailsResolved = new Set<string>()
+  // Resolves the terminal a chat is running in, injected by the owner that holds
+  // the terminals. Lets the registry stamp `terminalId` onto every emitted chat
+  // so clients never compute that join themselves (and so never disagree).
+  private resolveTerminalId: (
+    providerId: string,
+    chatId: string,
+  ) => string | undefined = () => undefined
 
   constructor(
     private readonly log: Logger,
@@ -207,13 +214,39 @@ export class ChatRegistry {
   }
 
   getSnapshot(): ChatSnapshot {
-    const chats = [...this.chats.values()].sort(
-      (left, right) => right.updatedAt - left.updatedAt,
-    )
+    const chats = [...this.chats.values()]
+      .map((chat) => this.withTerminal(chat))
+      .sort((left, right) => right.updatedAt - left.updatedAt)
     return { chats }
   }
 
+  /** Inject the terminal resolver used to stamp `terminalId` onto chats. */
+  setTerminalResolver(
+    resolve: (providerId: string, chatId: string) => string | undefined,
+  ): void {
+    this.resolveTerminalId = resolve
+  }
+
+  /**
+   * Re-broadcast the snapshot after a terminal change alters the chat↔terminal
+   * join (e.g. a terminal started or exited), so clients refresh `terminalId`.
+   */
+  notifyTerminalsChanged(): void {
+    this.events.emit('chat-snapshot', this.getSnapshot())
+  }
+
+  /** Stamp the terminal this app is running the chat in, if any. */
+  private withTerminal(chat: Chat): Chat {
+    return {
+      ...chat,
+      terminalId: this.resolveTerminalId(chat.providerId, chat.chatId),
+    }
+  }
+
   private emit(event: ChatEvent): void {
-    this.events.emit('chat-event', event)
+    this.events.emit('chat-event', {
+      ...event,
+      chat: this.withTerminal(event.chat),
+    })
   }
 }

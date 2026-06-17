@@ -62,6 +62,10 @@ export type CreateTerminalOptions = {
   cwd: string
   command: string
   args: string[]
+  // Whether this resumes an existing session (vs. a fresh chat). Used only for
+  // logging — a fresh chat still gets a pinned `sessionId`, so the presence of
+  // one no longer distinguishes the two.
+  resumed?: boolean
 }
 
 /**
@@ -73,7 +77,31 @@ export type CreateTerminalOptions = {
 export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>()
 
-  constructor(private readonly log: Logger) {}
+  /**
+   * @param onChange Invoked whenever the terminal set changes (created/exited/
+   *   closed) so the owner can re-broadcast any state that joins against it.
+   */
+  constructor(
+    private readonly log: Logger,
+    private readonly onChange: () => void = () => {},
+  ) {}
+
+  /** The id of the running terminal hosting a provider session, if any. */
+  terminalIdForSession(
+    providerId: string,
+    sessionId: string,
+  ): string | undefined {
+    for (const record of this.terminals.values()) {
+      if (
+        record.status === 'running' &&
+        record.providerId === providerId &&
+        record.sessionId === sessionId
+      ) {
+        return record.id
+      }
+    }
+    return undefined
+  }
 
   create(options: CreateTerminalOptions): ChatTerminal {
     const id = randomUUID()
@@ -121,18 +149,21 @@ export class TerminalManager {
         { terminalId: id, worktreeId: record.worktreeId, exitCode },
         'chat terminal exited',
       )
+      this.onChange()
     })
 
     this.log.info(
       {
         terminalId: id,
+        chatId: options.sessionId,
         worktreeId: options.worktreeId,
         providerId: options.providerId,
         command: options.command,
-        resume: !!options.sessionId,
+        resume: options.resumed ?? false,
       },
       'chat terminal started',
     )
+    this.onChange()
     return toDescriptor(record)
   }
 
@@ -219,6 +250,7 @@ export class TerminalManager {
     this.terminals.delete(terminalId)
     record.socket?.close()
     this.killPty(record)
+    this.onChange()
   }
 
   closeForWorktree(worktreeId: string): void {

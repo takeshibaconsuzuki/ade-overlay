@@ -20,6 +20,11 @@ export const Chat = z.object({
   description: z.string().optional(),
   // The worktree this chat is running in, matching a worktree snapshot row.
   worktreeId: z.string().optional(),
+  // The server-hosted terminal this app is running the chat in, when one exists.
+  // Set by the server (joining live chats to owned terminals) so every client
+  // agrees on whether a chat is openable here; absent for chats started outside
+  // this app. The single source of truth for "can this chat be opened".
+  terminalId: z.string().optional(),
   updatedAt: z.number(),
 })
 
@@ -100,7 +105,12 @@ export const ChatTerminalCreateRequest = z.object({
   title: z.string().optional(),
 })
 
-export const ChatOpenRequest = z.strictObject({})
+// Optionally targets a live chat: when set, the chat window also selects that
+// chat's terminal (used when a live chat is opened from another window).
+export const ChatOpenRequest = z.strictObject({
+  providerId: z.string().optional(),
+  chatId: z.string().optional(),
+})
 
 export const ChatOpenResponse = z.object({
   ok: z.boolean(),

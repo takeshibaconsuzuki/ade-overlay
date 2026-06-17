@@ -2,3 +2,44 @@
   --card-background-color: var(--color-panel-solid);
   --backdrop-filter-panel: none;
 }
+
+/* The live-chats card fills the Live tab and scrolls within it. */
+.liveChats {
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* The tabbed sidebar fills the column below the New chat button. */
+.tabs {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Pin the trigger bar's height: without this it shares the flex column and gets
+ * shrunk to nothing when the active panel's content is tall (which made the
+ * tabs "disappear" on the Historical tab). */
+.tabsList {
+  flex-shrink: 0;
+}
+
+/* Split the two triggers evenly across the list width. */
+.tabsList button {
+  flex: 1 1 0;
+}
+
+/* The active panel becomes a flex column filling the remaining height; its
+ * scroll area (`.scroll`) then grows within it instead of pushing the column
+ * taller. Inactive panels are unmounted by Radix, so no `display` reset needed. */
+.tabContent[data-state='active'] {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+.scroll {
+  flex-grow: 1;
+  min-height: 0;
+}
