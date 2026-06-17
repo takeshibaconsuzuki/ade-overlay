@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process'
-import { access, chmod, cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import {
+  access,
+  chmod,
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+} from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
