@@ -19,6 +19,7 @@ import {
 } from '../../api/server/editor'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
+import { type WorktreeOpener } from '../worktrees/opener'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { WorktreeIdParams } from '../worktrees/schemas'
 import {
@@ -28,17 +29,20 @@ import {
   OpenCodeRequest,
   OpenCodeResponse,
   OpenCreationLogsResponse,
+  OpenWorktreeRequest,
+  OpenWorktreeResponse,
 } from './schemas'
 import { EditorService } from './service'
 
 type EditorRouteOptions = {
   registry: WorktreeRegistry
   editor: EditorService
+  opener: WorktreeOpener
 }
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { registry, editor }: EditorRouteOptions,
+  { registry, editor, opener }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
@@ -100,7 +104,26 @@ export function registerEditorRoutes(
         500: ErrorResponse,
       },
     },
-    handler: async (request) => editor.openCode(request.body.worktreeId),
+    handler: async (request) => {
+      const response = await editor.openCode(request.body.worktreeId)
+      editor.showEditor()
+      return response
+    },
+  })
+
+  routes.route({
+    method: 'POST',
+    url: '/openWorktree',
+    schema: {
+      operationId: 'openWorktree',
+      body: OpenWorktreeRequest,
+      response: {
+        200: OpenWorktreeResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    handler: async (request) => opener.openWorktree(request.body.worktreeId),
   })
 
   routes.route({
@@ -336,9 +359,8 @@ function streamEditorCommands(
     editor.commands.off('command', onCommand)
   })
 
-  const lastCommand = editor.getLastCommand()
-  if (lastCommand) {
-    stream.send(lastCommand.type, lastCommand)
+  for (const command of editor.getReplayCommands()) {
+    stream.send(command.type, command)
   }
 }
 

@@ -102,6 +102,7 @@ export function registerChatRoutes(
     },
     handler: async () => {
       chat.openChat()
+      chat.focusChat()
       return { ok: true as const }
     },
   })

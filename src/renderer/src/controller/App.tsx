@@ -15,8 +15,8 @@ import {
   createWorktree,
   deleteWorktree,
   dismissCreationError,
-  openCode,
   openCreationLogs,
+  openWorktree,
   removeRepository,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
@@ -209,7 +209,7 @@ export function App(): React.JSX.Element {
       setError(null)
       logger.info({ worktreeId }, 'opening worktree editor')
       markBusy(worktreeId, true)
-      const { error } = await openCode({ body: { worktreeId } })
+      const { error } = await openWorktree({ body: { worktreeId } })
       if (error) {
         logger.error({ worktreeId, err: error }, 'open editor failed')
         setError(messageOf(error, 'Failed to open editor'))

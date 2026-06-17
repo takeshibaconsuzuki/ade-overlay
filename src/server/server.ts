@@ -11,6 +11,8 @@ import {
 } from 'fastify-type-provider-zod'
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
 import { AppConfigStore } from './appConfig'
+import { registerAppFocusRoutes } from './appFocus/routes'
+import { AppFocusService } from './appFocus/service'
 import { ClaudeChatProvider } from './chats/providers/claude'
 import { CodexChatProvider } from './chats/providers/codex'
 import { ChatRegistry } from './chats/registry'
@@ -21,6 +23,7 @@ import { EditorService } from './editor/service'
 import { getStatusCode, HttpError } from './errors'
 import { logger } from './logger'
 import { registerLogRoutes } from './logs/routes'
+import { WorktreeOpener } from './worktrees/opener'
 import { WorktreeRegistry } from './worktrees/registry'
 import { registerWorktreeRoutes } from './worktrees/routes'
 
@@ -46,6 +49,9 @@ export function createServer() {
       ),
     ],
   )
+  const appFocus = new AppFocusService(
+    server.log.child({ service: 'app-focus' }),
+  )
   const worktreeRegistry = new WorktreeRegistry(
     server.log.child({ service: 'worktrees' }),
     appConfig,
@@ -61,6 +67,7 @@ export function createServer() {
     worktreeRegistry,
     server.log.child({ service: 'chat' }),
   )
+  const worktreeOpener = new WorktreeOpener(editor, chatService, appFocus)
   const activeSockets = new Set<Socket>()
 
   server.server.on('connection', (socket) => {
@@ -114,8 +121,10 @@ export function createServer() {
     registerEditorRoutes(instance, {
       registry: worktreeRegistry,
       editor,
+      opener: worktreeOpener,
     })
     registerChatRoutes(instance, chatRegistry, chatService)
+    registerAppFocusRoutes(instance, appFocus)
     registerLogRoutes(instance)
   })
 

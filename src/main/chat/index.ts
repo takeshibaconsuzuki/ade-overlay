@@ -1,8 +1,10 @@
 import { request } from 'node:http'
 import { BrowserWindow, ipcMain } from 'electron'
+import { ADE_APP_ROLE, APP_FOCUS_EVENT } from '../../api/server/appFocus'
 import { CHAT_COMMAND_STREAM_PATH } from '../../api/server/chats'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { logger } from '../../server/logger'
+import { reportAppFocus } from '../appFocus'
 import { loadRenderer, webPreferences } from '../controller'
 import { CONTROLLER_IPC_CHANNELS } from '../controller/ipc-channels'
 
@@ -43,11 +45,14 @@ export function createWindow(): BrowserWindow {
 
   window.on('closed', () => {
     log.info('chat window closed')
+    reportAppFocus(ADE_APP_ROLE.chat, APP_FOCUS_EVENT.closed, log)
     window = null
+  })
+  window.on('focus', () => {
+    reportAppFocus(ADE_APP_ROLE.chat, APP_FOCUS_EVENT.focused, log)
   })
 
   loadRenderer(window, 'chat')
-  window.show()
 
   connectChatCommandStream()
   return window
@@ -99,7 +104,6 @@ function handleStreamEvent(rawEvent: string): void {
 function bringForward(): void {
   if (!window || window.isDestroyed()) {
     window = createWindow()
-    return
   }
   window.show()
   window.focus()

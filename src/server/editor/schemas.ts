@@ -12,6 +12,9 @@ export const OpenCodeResponse = z.object({
   alreadyStarted: z.boolean(),
 })
 
+export const OpenWorktreeRequest = OpenCodeRequest
+export const OpenWorktreeResponse = OpenCodeResponse
+
 export const EditorCommandAckRequest = z.object({
   commandId: z.string().min(1),
 })
@@ -30,3 +33,5 @@ export type EditorCommandAckRequest = z.infer<typeof EditorCommandAckRequest>
 export type EditorCommandAckResponse = z.infer<typeof EditorCommandAckResponse>
 export type OpenCodeRequest = z.infer<typeof OpenCodeRequest>
 export type OpenCodeResponse = z.infer<typeof OpenCodeResponse>
+export type OpenWorktreeRequest = z.infer<typeof OpenWorktreeRequest>
+export type OpenWorktreeResponse = z.infer<typeof OpenWorktreeResponse>

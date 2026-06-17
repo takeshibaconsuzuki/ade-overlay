@@ -36,6 +36,7 @@ export class EditorService {
   private editorProcess: ChildProcess | null = null
   private editorClientCount = 0
   private lastCommand: EditorCommand | null = null
+  private lastSwitchCommand: EditorSwitchCommand | null = null
   // Last file requested per worktree, replayed when the helper extension
   // (re)connects so a cold session start never misses the open.
   private readonly lastOpenFile = new Map<string, string>()
@@ -62,8 +63,11 @@ export class EditorService {
     this.registry.events.on('worktree-event', this.onWorktreeEvent)
   }
 
-  getLastCommand(): EditorCommand | null {
-    return this.lastCommand
+  getReplayCommands(): EditorCommand[] {
+    return [this.lastSwitchCommand, this.lastCommand].filter(
+      (command, index, commands): command is EditorCommand =>
+        command !== null && commands.indexOf(command) === index,
+    )
   }
 
   registerEditorClient(): () => void {
@@ -101,6 +105,11 @@ export class EditorService {
     this.log.info({ worktreeId, url: session.url }, 'editor switch emitted')
 
     return { worktreeId, url: session.url, alreadyStarted }
+  }
+
+  showEditor(): void {
+    this.emitCommand({ type: 'show' })
+    this.log.info('editor show emitted')
   }
 
   async openFile(worktreeId: string, filePath: string): Promise<void> {
@@ -380,6 +389,14 @@ export class EditorService {
   }
 
   private emitCommand(command: EditorCommand): void {
+    if (command.type === 'switch') {
+      this.lastSwitchCommand = command
+    } else if (
+      command.type === 'close' &&
+      this.lastSwitchCommand?.worktreeId === command.worktreeId
+    ) {
+      this.lastSwitchCommand = null
+    }
     this.lastCommand = command
     this.commands.emit('command', command)
   }

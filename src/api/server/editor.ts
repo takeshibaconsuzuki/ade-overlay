@@ -8,6 +8,10 @@ export type EditorSwitchCommand = {
   url: string
 }
 
+export type EditorShowCommand = {
+  type: 'show'
+}
+
 export type EditorCloseCommand = {
   type: 'close'
   commandId: string
@@ -23,6 +27,7 @@ export type EditorOpenFileCommand = {
 
 export type EditorCommand =
   | EditorSwitchCommand
+  | EditorShowCommand
   | EditorCloseCommand
   | EditorOpenFileCommand
 

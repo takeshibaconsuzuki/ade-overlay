@@ -3,3 +3,6 @@
 - Stop vscode servers
 - Live chat buttons
 - Codex historical chats
+- Infinite scrollback
+- Closing laptop and resuming leaves dead terminal
+- Historical chat refresh frequency

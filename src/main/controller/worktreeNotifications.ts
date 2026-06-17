@@ -386,7 +386,7 @@ function showFallbackDialog({
 }
 
 async function openWorktree(worktreeId: string, log: Logger): Promise<void> {
-  await post('/openCode', { worktreeId })
+  await post('/openWorktree', { worktreeId })
   log.info({ worktreeId }, 'opened worktree from notification')
 }
 

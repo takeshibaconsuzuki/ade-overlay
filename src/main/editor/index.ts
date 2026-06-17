@@ -1,11 +1,13 @@
 import { request } from 'node:http'
 import { BrowserWindow, WebContentsView } from 'electron'
+import { ADE_APP_ROLE, APP_FOCUS_EVENT } from '../../api/server/appFocus'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import {
   EDITOR_COMMAND_ACK_PATH,
   type EditorCommand,
 } from '../../api/server/editor'
 import { logger } from '../../server/logger'
+import { reportAppFocus } from '../appFocus'
 
 const log = logger.child({ process: 'editor' })
 
@@ -31,9 +33,13 @@ export function createWindow(): BrowserWindow {
 
   window.on('closed', () => {
     log.info('editor window closed')
+    reportAppFocus(ADE_APP_ROLE.editor, APP_FOCUS_EVENT.closed, log)
     views.clear()
     activeWorktreeId = null
     window = null
+  })
+  window.on('focus', () => {
+    reportAppFocus(ADE_APP_ROLE.editor, APP_FOCUS_EVENT.focused, log)
   })
   window.on('resize', resizeViews)
   window.loadURL(
@@ -48,7 +54,6 @@ body{display:grid;place-items:center}
 <body>Waiting for editor...</body>`),
   )
   window.maximize()
-  window.show()
 
   connectEditorCommandStream()
   return window
@@ -116,6 +121,10 @@ function handleEditorCommand(command: EditorCommand): void {
     switchWorktree(command)
     return
   }
+  if (command.type === 'show') {
+    bringForward()
+    return
+  }
   if (command.type === 'open-file') {
     // Bring the worktree's editor to the front; the injected ADE helper
     // extension opens the file via its back-channel to the server.
@@ -124,6 +133,7 @@ function handleEditorCommand(command: EditorCommand): void {
       worktreeId: command.worktreeId,
       url: command.url,
     })
+    bringForward()
     return
   }
   if (command.type === 'close') {
@@ -154,8 +164,6 @@ function switchWorktree(
   const view = getOrCreateWorktreeView(command)
   if (activeWorktreeId === command.worktreeId) {
     view.setVisible(true)
-    window.show()
-    window.focus()
     return
   }
 
@@ -170,6 +178,15 @@ function switchWorktree(
   window.contentView.addChildView(view)
   view.setVisible(true)
   activeWorktreeId = command.worktreeId
+}
+
+function bringForward(): void {
+  if (!window) {
+    return
+  }
+  if (window.isMinimized()) {
+    window.restore()
+  }
   window.show()
   window.focus()
 }

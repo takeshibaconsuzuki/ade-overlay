@@ -444,6 +444,47 @@ export type OpenCodeResponses = {
 
 export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
 
+export type OpenWorktreeData = {
+    body: {
+        worktreeId: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/openWorktree';
+};
+
+export type OpenWorktreeErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type OpenWorktreeError = OpenWorktreeErrors[keyof OpenWorktreeErrors];
+
+export type OpenWorktreeResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        worktreeId: string;
+        url: string;
+        alreadyStarted: boolean;
+    };
+};
+
+export type OpenWorktreeResponse = OpenWorktreeResponses[keyof OpenWorktreeResponses];
+
 export type OpenCreationLogsData = {
     body?: never;
     path: {

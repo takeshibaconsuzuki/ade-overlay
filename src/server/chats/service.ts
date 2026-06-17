@@ -56,12 +56,16 @@ export class ChatService {
     }
   }
 
-  /** Ensure the chat app is running, then bring it forward (focus). */
+  /** Ensure the chat app is running without changing foreground focus. */
   openChat(): void {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
+    this.lastCommand = null
     this.ensureChatApp()
+  }
+
+  focusChat(): void {
     const command: ChatCommand = { type: 'show' }
     this.emitCommand(command)
     this.log.info('chat show emitted')
