@@ -15,7 +15,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "upgrade": "NO_UPDATE_NOTIFIER=1 ncu --peer --removeRange -u && npm install",
     "rebuild:native": "electron-rebuild -f -w node-pty",
-    "postinstall": "install-electron && npm run rebuild:native"
+    "postinstall": "node scripts/patch-xterm-scrollback.mjs && install-electron && npm run rebuild:native"
   },
   "dependencies": {
     "@fastify/cors": "11.2.0",
@@ -36,7 +36,6 @@
   },
   "devDependencies": {
     "@electron/rebuild": "4.0.4",
-    "@types/ws": "8.18.1",
     "@eslint/js": "10.0.1",
     "@hey-api/openapi-ts": "0.98.2",
     "@ianvs/prettier-plugin-sort-imports": "4.7.1",
@@ -44,6 +43,7 @@
     "@types/node": "25.9.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "42.4.0",
     "electron-vite": "5.0.0",

@@ -14,10 +14,11 @@ import { type ChatTerminal } from './schemas'
 
 /**
  * How much recent PTY output to retain per terminal so a reconnecting renderer
- * (the chat window was closed and reopened) can replay the screen. Bounded to
- * keep memory flat on chatty sessions; older bytes are dropped from the front.
+ * (the chat window was closed and reopened) can replay the screen. Sized large
+ * enough that a full session's scrollback survives a reconnect; older bytes are
+ * still dropped from the front as a backstop so memory stays bounded.
  */
-const MAX_BUFFER_BYTES = 256 * 1024
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024
 
 const DEFAULT_COLS = 80
 const DEFAULT_ROWS = 24
