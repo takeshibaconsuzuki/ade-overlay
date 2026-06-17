@@ -150,10 +150,15 @@ export class TerminalManager {
     }
 
     // Replace any prior viewer so only one socket receives output.
-    if (record.socket && record.socket !== socket) {
-      record.socket.close()
+    const superseded = !!record.socket && record.socket !== socket
+    if (superseded) {
+      record.socket?.close()
     }
     record.socket = socket
+    this.log.info(
+      { terminalId, superseded, status: record.status },
+      'chat terminal socket attached',
+    )
 
     if (record.buffer.length > 0) {
       send(socket, { type: 'output', data: record.buffer.join('') })
@@ -167,7 +172,9 @@ export class TerminalManager {
       if (!message) {
         return
       }
-      if (message.type === 'input') {
+      if (message.type === 'ping') {
+        send(socket, { type: 'pong' })
+      } else if (message.type === 'input') {
         record.pty.write(message.data)
       } else if (message.type === 'resize') {
         try {
@@ -187,12 +194,14 @@ export class TerminalManager {
     socket.on('close', () => {
       if (record.socket === socket) {
         record.socket = null
+        this.log.info({ terminalId }, 'chat terminal socket detached')
       }
     })
-    socket.on('error', () => {
+    socket.on('error', (error) => {
       if (record.socket === socket) {
         record.socket = null
       }
+      this.log.warn({ err: error, terminalId }, 'chat terminal socket error')
     })
   }
 
@@ -325,6 +334,9 @@ function parseClientMessage(raw: Buffer): ChatTerminalClientMessage | null {
     return null
   }
   const message = parsed as Record<string, unknown>
+  if (message.type === 'ping') {
+    return { type: 'ping' }
+  }
   if (message.type === 'input' && typeof message.data === 'string') {
     return { type: 'input', data: message.data }
   }

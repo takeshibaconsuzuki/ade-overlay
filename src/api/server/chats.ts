@@ -92,8 +92,13 @@ export type ChatCommand = ChatShowCommand
 export type ChatTerminalClientMessage =
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
+  // Application-level heartbeat: the renderer pings periodically and treats a
+  // missing pong as a dead connection (e.g. a half-open socket after the laptop
+  // slept), which a browser WebSocket cannot otherwise detect.
+  | { type: 'ping' }
 
 /** Messages the server sends down the terminal WebSocket. */
 export type ChatTerminalServerMessage =
   | { type: 'output'; data: string }
   | { type: 'exit'; code: number | null }
+  | { type: 'pong' }
