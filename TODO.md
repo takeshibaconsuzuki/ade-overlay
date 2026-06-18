@@ -10,3 +10,4 @@
 - Make vscode upgrading text white
 - A prunable worktree cannot be deleted through the app
 - Restyle live chat button
+- Open chat window on open chat app

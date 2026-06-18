@@ -5,6 +5,7 @@ import { CHAT_PROVIDER, type ChatCommand } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
+import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { type WorktreeEvent } from '../worktrees/schemas'
 import { type ChatRegistry } from './registry'
@@ -123,7 +124,11 @@ export class ChatService {
     return this.terminals.list(worktreeId)
   }
 
-  attachTerminal(terminalId: string, socket: WebSocket, viewerId?: string): void {
+  attachTerminal(
+    terminalId: string,
+    socket: WebSocket,
+    viewerId?: string,
+  ): void {
     this.terminals.attach(terminalId, socket, viewerId)
   }
 
@@ -135,7 +140,7 @@ export class ChatService {
       return
     }
 
-    const child = spawn(process.execPath, chatLaunchArgs(), {
+    const child = spawn(roleExecutablePath('chat'), roleLaunchArgs('chat'), {
       detached: true,
       env: { ...process.env, ADE_LOG_SOURCE: 'chat' },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -194,27 +199,4 @@ export class ChatService {
       await killChildProcessTree(chatProcess, this.log, 'chat app')
     }
   }
-}
-
-/**
- * Re-derive this process's launch args with the role forced to `chat`, so the
- * spawned Electron process boots the chat window. Mirrors the editor's
- * `getEditorLaunchArgs`.
- */
-function chatLaunchArgs(): string[] {
-  const args = process.argv.slice(1)
-  const filtered: string[] = []
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]
-    if (arg === '--role') {
-      index += 1
-      continue
-    }
-    if (arg.startsWith('--role=')) {
-      continue
-    }
-    filtered.push(arg)
-  }
-  filtered.push('--role', 'chat')
-  return filtered
 }

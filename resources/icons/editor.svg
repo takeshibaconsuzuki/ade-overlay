@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9A86FF" />
+      <stop offset="1" stop-color="#5B34D6" />
+    </linearGradient>
+  </defs>
+  <!-- ADE Editor: code brackets -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" />
+  <g fill="none" stroke="#ffffff" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="426,392 312,512 426,632" />
+    <polyline points="598,392 712,512 598,632" />
+    <line x1="566" y1="366" x2="458" y2="658" />
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9A86FF" />
+      <stop offset="1" stop-color="#5B34D6" />
+    </linearGradient>
+  </defs>
+  <!-- ADE Chat: speech bubble with a tail -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" />
+  <path
+    fill="#ffffff"
+    d="M350 308h324a96 96 0 0 1 96 96v176a96 96 0 0 1-96 96H470l-118 96a18 18 0 0 1-29-14v-82h-3a96 96 0 0 1-96-96V404a96 96 0 0 1 96-96z" />
+  <g fill="#5B34D6">
+    <circle cx="410" cy="492" r="34" />
+    <circle cx="512" cy="492" r="34" />
+    <circle cx="614" cy="492" r="34" />
+  </g>
+</svg>

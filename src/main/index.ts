@@ -9,6 +9,7 @@ import {
 import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
+import { setRoleDockIcon } from './dockIcon'
 import { createWindow as createEditorWindow } from './editor'
 
 const log = logger.child({ process: 'main' })
@@ -69,12 +70,14 @@ async function main(): Promise<void> {
     case 'editor':
       app.setName('ADE Editor')
       await app.whenReady()
+      setRoleDockIcon('editor')
       createEditorWindow()
       log.info('editor window created')
       break
     case 'chat':
       app.setName('ADE Chat')
       await app.whenReady()
+      setRoleDockIcon('chat')
       registerChatIpcHandlers()
       createChatWindow()
       log.info('chat window created')
@@ -82,6 +85,7 @@ async function main(): Promise<void> {
     default:
       server = await startServer()
       await app.whenReady()
+      setRoleDockIcon('controller')
       stopWorktreeCreationNotifications =
         registerWorktreeCreationNotifications(log)
       registerControllerIpcHandlers()

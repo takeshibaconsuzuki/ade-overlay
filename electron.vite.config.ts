@@ -10,6 +10,11 @@ const bootstrapTemplateSource = resolve(
 )
 const bootstrapTemplateOutput = resolve(projectRoot, 'out/main/bootstrap.html')
 
+/** Per-role dock icons the main process hands to `app.dock.setIcon`. */
+const DOCK_ICON_ROLES = ['controller', 'chat', 'editor']
+const iconsSourceDir = resolve(projectRoot, 'resources/icons')
+const iconsOutputDir = resolve(projectRoot, 'out/main/icons')
+
 export default defineConfig({
   main: {
     plugins: [
@@ -18,6 +23,18 @@ export default defineConfig({
         closeBundle() {
           mkdirSync(dirname(bootstrapTemplateOutput), { recursive: true })
           copyFileSync(bootstrapTemplateSource, bootstrapTemplateOutput)
+        },
+      },
+      {
+        name: 'copy-role-dock-icons',
+        closeBundle() {
+          mkdirSync(iconsOutputDir, { recursive: true })
+          for (const role of DOCK_ICON_ROLES) {
+            copyFileSync(
+              resolve(iconsSourceDir, `${role}.png`),
+              resolve(iconsOutputDir, `${role}.png`),
+            )
+          }
         },
       },
     ],

@@ -12,6 +12,7 @@ import {
 import { type Logger } from '../../api/server/logger'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
+import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { type WorktreeEvent } from '../worktrees/schemas'
 import { renderBootstrapHtml } from './bootstrap'
@@ -322,14 +323,18 @@ export class EditorService {
       return
     }
 
-    const child = spawn(process.execPath, getEditorLaunchArgs(), {
-      detached: true,
-      // ADE_LOG_SOURCE makes the editor process ship its logs to POST /logs
-      // (see src/server/logger), so all Electron logging stays centralized in
-      // the server's stream rather than its own discarded stdout.
-      env: { ...process.env, ADE_LOG_SOURCE: 'editor' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const child = spawn(
+      roleExecutablePath('editor'),
+      roleLaunchArgs('editor'),
+      {
+        detached: true,
+        // ADE_LOG_SOURCE makes the editor process ship its logs to POST /logs
+        // (see src/server/logger), so all Electron logging stays centralized in
+        // the server's stream rather than its own discarded stdout.
+        env: { ...process.env, ADE_LOG_SOURCE: 'editor' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    )
     child.unref()
     child.stdout?.on('data', (chunk: Buffer) => {
       this.log.info({ output: chunk.toString('utf8').trim() }, 'editor stdout')
@@ -480,22 +485,4 @@ export class EditorService {
 
 function editorUrlFor(worktreeId: string): string {
   return `http://${worktreeId}.localhost:${SERVER_PORT}${EDITOR_BOOTSTRAP_PATH}`
-}
-
-function getEditorLaunchArgs(): string[] {
-  const args = process.argv.slice(1)
-  const filtered: string[] = []
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]
-    if (arg === '--role') {
-      index += 1
-      continue
-    }
-    if (arg.startsWith('--role=')) {
-      continue
-    }
-    filtered.push(arg)
-  }
-  filtered.push('--role', 'editor')
-  return filtered
 }

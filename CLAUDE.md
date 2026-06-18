@@ -23,7 +23,7 @@
 - `src/api/server/generated/`: generated client output. Do not edit by hand.
 - `src/server/`: Fastify runtime code. Add behavior through service routes and schemas.
 
-Also see @src/DESIGN.md.
+Also see @src/DESIGN.md. You must read this before writing code.
 
 ## Dependency Policy
 
