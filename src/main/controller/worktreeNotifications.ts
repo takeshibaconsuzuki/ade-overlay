@@ -9,34 +9,28 @@ import {
 } from 'electron'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { WORKTREE_EVENT_TYPE } from '../../api/server/events'
-import { type RemoveRepositoryResponses } from '../../api/server/generated'
 import { type Logger } from '../../api/server/logger'
-
-type WorktreeSnapshot = RemoveRepositoryResponses[200]['snapshot']
-type Worktree = WorktreeSnapshot['worktrees'][number]
-type WorktreeCreatedEvent = {
-  type: typeof WORKTREE_EVENT_TYPE.worktreeCreated
-  worktree: Worktree
-  snapshot: WorktreeSnapshot
-}
-type WorktreeCreationUpdatedEvent = {
-  type: typeof WORKTREE_EVENT_TYPE.worktreeCreationUpdated
-  worktreeId: string
-  snapshot: WorktreeSnapshot
-}
-type WorktreeDeletedEvent = {
-  type: typeof WORKTREE_EVENT_TYPE.worktreeDeleted
-  worktreeId: string
-  branchDeleted: boolean
-  snapshot: WorktreeSnapshot
-}
-type WorktreeStreamEvent =
-  | WorktreeCreatedEvent
-  | WorktreeCreationUpdatedEvent
-  | WorktreeDeletedEvent
+import {
+  worktreeCreationLogsOpenPath,
+  WorktreeEvent,
+  worktreeOpenPath,
+  WORKTREES_PATH,
+  type Worktree,
+  type WorktreeEvent as WorktreeEventType,
+} from '../../api/server/worktrees'
 
 const NOTIFICATION_GROUP_ID = 'worktree-creation'
 const RECONNECT_DELAY_MS = 1000
+
+type WorktreeNotificationEvent = Extract<
+  WorktreeEventType,
+  {
+    type:
+      | typeof WORKTREE_EVENT_TYPE.worktreeCreated
+      | typeof WORKTREE_EVENT_TYPE.worktreeCreationUpdated
+      | typeof WORKTREE_EVENT_TYPE.worktreeDeleted
+  }
+>
 
 export function registerWorktreeCreationNotifications(log: Logger): () => void {
   const notifiedWorktreeIds = new Set<string>()
@@ -54,7 +48,7 @@ export function registerWorktreeCreationNotifications(log: Logger): () => void {
       reconnectTimer = null
     }
 
-    const requestUrl = new URL('/worktrees', SERVER_ORIGIN)
+    const requestUrl = new URL(WORKTREES_PATH, SERVER_ORIGIN)
     streamRequest = request(requestUrl, (response) => {
       if (response.statusCode && response.statusCode >= 400) {
         log.warn(
@@ -140,9 +134,17 @@ function handleStreamEvent(
   }
 
   try {
-    const streamEvent = JSON.parse(data) as WorktreeStreamEvent
+    const result = WorktreeEvent.safeParse(JSON.parse(data))
+    if (!result.success) {
+      log.error({ err: result.error, data }, 'invalid worktree notification')
+      return
+    }
+    const streamEvent = result.data
     if (event !== streamEvent.type) {
       log.warn({ event, streamEvent }, 'worktree notification event mismatch')
+      return
+    }
+    if (!isWorktreeNotificationEvent(streamEvent)) {
       return
     }
     handleWorktreeEvent(
@@ -154,6 +156,16 @@ function handleStreamEvent(
   } catch (error) {
     log.error({ err: error, data }, 'failed to parse worktree notification')
   }
+}
+
+function isWorktreeNotificationEvent(
+  event: WorktreeEventType,
+): event is WorktreeNotificationEvent {
+  return (
+    event.type === WORKTREE_EVENT_TYPE.worktreeCreated ||
+    event.type === WORKTREE_EVENT_TYPE.worktreeCreationUpdated ||
+    event.type === WORKTREE_EVENT_TYPE.worktreeDeleted
+  )
 }
 
 function parseSseEvent(rawEvent: string): {
@@ -174,7 +186,7 @@ function parseSseEvent(rawEvent: string): {
 }
 
 function handleWorktreeEvent(
-  event: WorktreeStreamEvent,
+  event: WorktreeNotificationEvent,
   notifiedWorktreeIds: Set<string>,
   activeNotifications: Set<Notification>,
   log: Logger,
@@ -386,7 +398,7 @@ function showFallbackDialog({
 }
 
 async function openWorktree(worktreeId: string, log: Logger): Promise<void> {
-  await post('/openWorktree', { worktreeId })
+  await post(worktreeOpenPath(worktreeId))
   log.info({ worktreeId }, 'opened worktree from notification')
 }
 
@@ -394,7 +406,7 @@ async function openCreationLogs(
   worktreeId: string,
   log: Logger,
 ): Promise<void> {
-  await post(`/worktrees/${encodeURIComponent(worktreeId)}/creation-logs/open`)
+  await post(worktreeCreationLogsOpenPath(worktreeId))
   log.info({ worktreeId }, 'opened creation logs from notification')
 }
 

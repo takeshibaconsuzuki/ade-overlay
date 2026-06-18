@@ -12,9 +12,9 @@ export class WorktreeOpener {
 
   async openWorktree(
     worktreeId: string,
-  ): ReturnType<EditorService['openCode']> {
+  ): ReturnType<EditorService['openWorktreeEditor']> {
     const foregroundRole = this.getForegroundRole()
-    const response = await this.editor.openCode(worktreeId)
+    const response = await this.editor.openWorktreeEditor(worktreeId)
     this.chat.openChat()
     this.foreground(foregroundRole)
     return response

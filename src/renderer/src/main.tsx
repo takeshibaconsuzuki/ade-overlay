@@ -5,6 +5,7 @@ import '@radix-ui/themes/styles.css'
 import { ChatApp } from './chat/ChatApp'
 import { configureApiClient } from './client'
 import { App } from './controller/App'
+import { WorktreeStreamProvider } from './controller/worktrees'
 import { Launcher } from './launcher/Launcher'
 import './style.css'
 
@@ -33,13 +34,15 @@ createRoot(document.getElementById('root')!).render(
       grayColor="slate"
       radius="large"
     >
-      {view === 'worktrees' ? (
-        <App />
-      ) : view === 'chat' ? (
-        <ChatApp title={title} />
-      ) : (
-        <Launcher title={title} />
-      )}
+      <WorktreeStreamProvider>
+        {view === 'worktrees' ? (
+          <App />
+        ) : view === 'chat' ? (
+          <ChatApp title={title} />
+        ) : (
+          <Launcher title={title} />
+        )}
+      </WorktreeStreamProvider>
     </Theme>
   </React.StrictMode>,
 )

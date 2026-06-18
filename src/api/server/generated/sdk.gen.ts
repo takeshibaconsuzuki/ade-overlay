@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateChatTerminalData, CreateChatTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListChatHistoryData, ListChatHistoryResponses, ListChatsData, ListChatsResponses, ListChatTerminalsData, ListChatTerminalsResponses, ListWorktreesData, ListWorktreesResponses, OpenChatData, OpenChatResponses, OpenCodeData, OpenCodeErrors, OpenCodeResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateTerminalData, CreateTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, HistoricalChatsData, HistoricalChatsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, LiveChatsData, LiveChatsResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowChatData, ShowChatResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses, TerminalEventsData, TerminalEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -47,6 +47,8 @@ export const createWorktree = <ThrowOnError extends boolean = false>(options: Op
     }
 });
 
+export const openWorktree = <ThrowOnError extends boolean = false>(options: Options<OpenWorktreeData, ThrowOnError>): RequestResult<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError> => (options.client ?? client).post<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/open', ...options });
+
 export const dismissCreationError = <ThrowOnError extends boolean = false>(options: Options<DismissCreationErrorData, ThrowOnError>): RequestResult<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError> => (options.client ?? client).post<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/dismiss-creation', ...options });
 
 export const listBranches = <ThrowOnError extends boolean = false>(options: Options<ListBranchesData, ThrowOnError>): RequestResult<ListBranchesResponses, ListBranchesErrors, ThrowOnError> => (options.client ?? client).post<ListBranchesResponses, ListBranchesErrors, ThrowOnError>({
@@ -80,15 +82,6 @@ export const editorCommands = <ThrowOnError extends boolean = false>(options?: O
 
 export const editorSessions = <ThrowOnError extends boolean = false>(options?: Options<EditorSessionsData, ThrowOnError>): RequestResult<EditorSessionsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<EditorSessionsResponses, unknown, ThrowOnError>({ url: '/editorSessions', ...options });
 
-export const openCode = <ThrowOnError extends boolean = false>(options: Options<OpenCodeData, ThrowOnError>): RequestResult<OpenCodeResponses, OpenCodeErrors, ThrowOnError> => (options.client ?? client).post<OpenCodeResponses, OpenCodeErrors, ThrowOnError>({
-    url: '/openCode',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
 export const showEditor = <ThrowOnError extends boolean = false>(options: Options<ShowEditorData, ThrowOnError>): RequestResult<ShowEditorResponses, ShowEditorErrors, ThrowOnError> => (options.client ?? client).post<ShowEditorResponses, ShowEditorErrors, ThrowOnError>({
     url: '/showEditor',
     ...options,
@@ -98,21 +91,12 @@ export const showEditor = <ThrowOnError extends boolean = false>(options: Option
     }
 });
 
-export const openWorktree = <ThrowOnError extends boolean = false>(options: Options<OpenWorktreeData, ThrowOnError>): RequestResult<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError> => (options.client ?? client).post<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError>({
-    url: '/openWorktree',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
 export const openCreationLogs = <ThrowOnError extends boolean = false>(options: Options<OpenCreationLogsData, ThrowOnError>): RequestResult<OpenCreationLogsResponses, OpenCreationLogsErrors, ThrowOnError> => (options.client ?? client).post<OpenCreationLogsResponses, OpenCreationLogsErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/creation-logs/open', ...options });
 
-export const listChats = <ThrowOnError extends boolean = false>(options?: Options<ListChatsData, ThrowOnError>): RequestResult<ListChatsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListChatsResponses, unknown, ThrowOnError>({ url: '/chats', ...options });
+export const liveChats = <ThrowOnError extends boolean = false>(options?: Options<LiveChatsData, ThrowOnError>): RequestResult<LiveChatsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<LiveChatsResponses, unknown, ThrowOnError>({ url: '/chats/live', ...options });
 
-export const openChat = <ThrowOnError extends boolean = false>(options: Options<OpenChatData, ThrowOnError>): RequestResult<OpenChatResponses, unknown, ThrowOnError> => (options.client ?? client).post<OpenChatResponses, unknown, ThrowOnError>({
-    url: '/chats/open',
+export const showChat = <ThrowOnError extends boolean = false>(options: Options<ShowChatData, ThrowOnError>): RequestResult<ShowChatResponses, unknown, ThrowOnError> => (options.client ?? client).post<ShowChatResponses, unknown, ThrowOnError>({
+    url: '/showChat',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -120,20 +104,20 @@ export const openChat = <ThrowOnError extends boolean = false>(options: Options<
     }
 });
 
-export const listChatHistory = <ThrowOnError extends boolean = false>(options: Options<ListChatHistoryData, ThrowOnError>): RequestResult<ListChatHistoryResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListChatHistoryResponses, unknown, ThrowOnError>({ url: '/chats/history', ...options });
-
-export const listChatTerminals = <ThrowOnError extends boolean = false>(options?: Options<ListChatTerminalsData, ThrowOnError>): RequestResult<ListChatTerminalsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListChatTerminalsResponses, unknown, ThrowOnError>({ url: '/chats/terminals', ...options });
-
-export const createChatTerminal = <ThrowOnError extends boolean = false>(options: Options<CreateChatTerminalData, ThrowOnError>): RequestResult<CreateChatTerminalResponses, unknown, ThrowOnError> => (options.client ?? client).post<CreateChatTerminalResponses, unknown, ThrowOnError>({
-    url: '/chats/terminals',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
+export const historicalChats = <ThrowOnError extends boolean = false>(options: Options<HistoricalChatsData, ThrowOnError>): RequestResult<HistoricalChatsResponses, unknown, ThrowOnError> => (options.client ?? client).get<HistoricalChatsResponses, unknown, ThrowOnError>({ url: '/chats/history', ...options });
 
 export const chatCommands = <ThrowOnError extends boolean = false>(options?: Options<ChatCommandsData, ThrowOnError>): RequestResult<ChatCommandsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ChatCommandsResponses, unknown, ThrowOnError>({ url: '/chats/commands', ...options });
+
+export const terminalEvents = <ThrowOnError extends boolean = false>(options?: Options<TerminalEventsData, ThrowOnError>): RequestResult<TerminalEventsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<TerminalEventsResponses, unknown, ThrowOnError>({ url: '/terminals', ...options });
+
+export const createTerminal = <ThrowOnError extends boolean = false>(options: Options<CreateTerminalData, ThrowOnError>): RequestResult<CreateTerminalResponses, unknown, ThrowOnError> => (options.client ?? client).post<CreateTerminalResponses, unknown, ThrowOnError>({
+    url: '/terminals',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 export const ingestLogs = <ThrowOnError extends boolean = false>(options: Options<IngestLogsData, ThrowOnError>): RequestResult<IngestLogsResponses, unknown, ThrowOnError> => (options.client ?? client).post<IngestLogsResponses, unknown, ThrowOnError>({
     url: '/logs',

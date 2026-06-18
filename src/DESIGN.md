@@ -4,6 +4,10 @@
 
 Electron code is the frontend and acts as a lightweight client. The server is authoritative and owns all application state. Application coordination should live behind server APIs. Server ownership ensures there is a single source of truth, and thus prevents inconsistencies and desyncs between clients.
 
+## Server API
+
+`src/api/server/*` is the shared server API surface: route constants, enums, Zod schemas, inferred types, and SSE/WebSocket message schemas live there. `src/server/*/routes.ts` registers Fastify routes by importing those shared schemas. Renderer REST calls use the generated OpenAPI client in `src/api/server/generated/*`; renderer SSE and WebSocket code parses messages directly with the shared Zod schemas.
+
 ## Electron Roles
 
 Each role below is a separate app. All roles except the controller get an entry in the macos dock, so users can command+tab between them.

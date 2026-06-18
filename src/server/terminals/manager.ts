@@ -3,14 +3,14 @@ import { createRequire } from 'node:module'
 import { platform } from 'node:os'
 import { type IPty, type spawn as PtySpawn } from 'node-pty'
 import { type WebSocket } from 'ws'
-import {
-  type ChatTerminalClientMessage,
-  type ChatTerminalServerMessage,
-  type ChatTerminalStatus,
-} from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
+import {
+  TerminalClientMessage,
+  type Terminal,
+  type TerminalServerMessage,
+  type TerminalStatus,
+} from '../../api/server/terminals'
 import { getUserLoginShell } from '../userShell'
-import { type ChatTerminal } from './schemas'
 
 /**
  * How much recent PTY output to retain per terminal so a reconnecting renderer
@@ -44,7 +44,7 @@ type TerminalRecord = {
   providerId: string
   sessionId?: string
   title?: string
-  status: ChatTerminalStatus
+  status: TerminalStatus
   exitCode: number | null
   pty: IPty
   // Bounded ring buffer of recent output, replayed to a (re)attaching socket.
@@ -110,7 +110,7 @@ export class TerminalManager {
     return undefined
   }
 
-  create(options: CreateTerminalOptions): ChatTerminal {
+  create(options: CreateTerminalOptions): Terminal {
     const id = randomUUID()
     const target = withUserEnvironment(options.command, options.args)
     const pty = loadPtySpawn()(target.file, target.args, {
@@ -283,7 +283,7 @@ export class TerminalManager {
     })
   }
 
-  list(worktreeId?: string): ChatTerminal[] {
+  list(worktreeId?: string): Terminal[] {
     return [...this.terminals.values()]
       .filter((record) => !worktreeId || record.worktreeId === worktreeId)
       .map(toDescriptor)
@@ -381,7 +381,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
-function toDescriptor(record: TerminalRecord): ChatTerminal {
+function toDescriptor(record: TerminalRecord): Terminal {
   return {
     terminalId: record.id,
     worktreeId: record.worktreeId,
@@ -392,39 +392,20 @@ function toDescriptor(record: TerminalRecord): ChatTerminal {
   }
 }
 
-function send(
-  socket: WebSocket | null,
-  message: ChatTerminalServerMessage,
-): void {
+function send(socket: WebSocket | null, message: TerminalServerMessage): void {
   if (!socket || socket.readyState !== socket.OPEN) {
     return
   }
   socket.send(JSON.stringify(message))
 }
 
-function parseClientMessage(raw: Buffer): ChatTerminalClientMessage | null {
+function parseClientMessage(raw: Buffer): TerminalClientMessage | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw.toString('utf8'))
   } catch {
     return null
   }
-  if (typeof parsed !== 'object' || parsed === null) {
-    return null
-  }
-  const message = parsed as Record<string, unknown>
-  if (message.type === 'ping') {
-    return { type: 'ping' }
-  }
-  if (message.type === 'input' && typeof message.data === 'string') {
-    return { type: 'input', data: message.data }
-  }
-  if (
-    message.type === 'resize' &&
-    typeof message.cols === 'number' &&
-    typeof message.rows === 'number'
-  ) {
-    return { type: 'resize', cols: message.cols, rows: message.rows }
-  }
-  return null
+  const result = TerminalClientMessage.safeParse(parsed)
+  return result.success ? result.data : null
 }

@@ -23,6 +23,8 @@ import { EditorService } from './editor/service'
 import { getStatusCode, HttpError } from './errors'
 import { logger } from './logger'
 import { registerLogRoutes } from './logs/routes'
+import { registerTerminalRoutes } from './terminals/routes'
+import { TerminalService } from './terminals/service'
 import { WorktreeOpener } from './worktrees/opener'
 import { WorktreeRegistry } from './worktrees/registry'
 import { registerWorktreeRoutes } from './worktrees/routes'
@@ -62,9 +64,13 @@ export function createServer() {
     server.log.child({ service: 'editor' }),
     (worktree) => chatRegistry.configureWorktree(worktree),
   )
+  const terminalService = new TerminalService(
+    server.log.child({ service: 'terminals' }),
+  )
   const chatService = new ChatService(
     chatRegistry,
     worktreeRegistry,
+    terminalService,
     server.log.child({ service: 'chat' }),
   )
   const worktreeOpener = new WorktreeOpener(editor, chatService, appFocus)
@@ -86,6 +92,7 @@ export function createServer() {
   server.addHook('onClose', async () => {
     await editor.shutdown()
     await chatService.shutdown()
+    terminalService.shutdown()
   })
   server.addHook('onReady', async () => {
     await worktreeRegistry.loadRepositories()
@@ -116,14 +123,15 @@ export function createServer() {
   // (installed during plugin load) captures them into the OpenAPI document.
   server.register(async (instance) => {
     registerWorktreeRoutes(instance, worktreeRegistry, {
+      opener: worktreeOpener,
       beforeDeleteWorktree: (worktreeId) => editor.closeWorktree(worktreeId),
     })
     registerEditorRoutes(instance, {
       registry: worktreeRegistry,
       editor,
-      opener: worktreeOpener,
     })
-    registerChatRoutes(instance, chatRegistry, chatService)
+    registerChatRoutes(instance, chatRegistry, chatService, worktreeOpener)
+    registerTerminalRoutes(instance, terminalService, chatService)
     registerAppFocusRoutes(instance, appFocus)
     registerLogRoutes(instance)
   })

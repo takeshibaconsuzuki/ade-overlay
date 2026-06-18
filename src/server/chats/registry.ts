@@ -1,5 +1,11 @@
 import { EventEmitter } from 'node:events'
-import { CHAT_EVENT_TYPE } from '../../api/server/chats'
+import {
+  CHAT_EVENT_TYPE,
+  type Chat,
+  type ChatEvent,
+  type ChatSession,
+  type ChatSnapshot,
+} from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import {
   type ChatHookContext,
@@ -7,12 +13,6 @@ import {
   type ChatProvider,
   type WorktreeRef,
 } from './providers/types'
-import {
-  type Chat,
-  type ChatEvent,
-  type ChatSession,
-  type ChatSnapshot,
-} from './schemas'
 
 /**
  * How long to wait after a chat first appears before reading its details from

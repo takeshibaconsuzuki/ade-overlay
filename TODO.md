@@ -1,6 +1,5 @@
 - Synthetic data dir worktree
 - Stop vscode servers
-- Live chat buttons
 - Codex support in chat app
 - Closing laptop and resuming leaves dead terminal
 - Historical chat refresh frequency
@@ -8,6 +7,8 @@
 - Deterministic color per worktree
 - Text on right side of terminal is cut off
 - Make vscode upgrading text white
-- A prunable worktree cannot be deleted through the app
 - Restyle live chat button
 - Open chat window on open chat app
+- Reload config.json
+- 'w' and 'c' drag back to original space.
+- if editor is on the current space and you press 'c', it focuses the editor rather than the chat. inconsistent

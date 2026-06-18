@@ -1,7 +1,11 @@
 import { type FastifyInstance } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
-import { APP_FOCUS_EVENT, APP_FOCUS_PATH } from '../../api/server/appFocus'
-import { AppFocusRequest, AppFocusResponse } from './schemas'
+import {
+  APP_FOCUS_EVENT,
+  APP_FOCUS_PATH,
+  AppFocusRequest,
+  AppFocusResponse,
+} from '../../api/server/appFocus'
 import { type AppFocusService } from './service'
 
 export function registerAppFocusRoutes(

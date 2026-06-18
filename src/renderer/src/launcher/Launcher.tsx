@@ -1,10 +1,6 @@
 import { Button, Text } from '@radix-ui/themes'
 import { useCallback, useEffect, useMemo } from 'react'
-import {
-  openChat,
-  openWorktree,
-  showEditor,
-} from '../../../api/server/generated'
+import { showChat, showEditor } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
@@ -53,7 +49,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       return
     }
     logger.info('opening worktrees window')
-    await window.desktop.openWorktrees()
+    await window.desktop.openWorktreesWindow()
   }, [])
 
   // Bring the editor forward on the worktree the user is currently in, without
@@ -75,40 +71,36 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
   }, [activeWorktreeId])
 
   const handleOpenChat = useCallback(async (): Promise<void> => {
+    if (!activeWorktreeId) {
+      return
+    }
     logger.info({ worktreeId: activeWorktreeId }, 'opening chat app')
-    const { error } = await openChat({ body: {} })
+    const { error } = await showChat({ body: { worktreeId: activeWorktreeId } })
     if (error) {
-      logger.error({ err: error }, 'open chat failed')
+      logger.error({ err: error }, 'show chat failed')
     }
   }, [activeWorktreeId])
 
-  // Clicking a live chat jumps to its worktree and brings the chat window
-  // forward; the chat window then surfaces that worktree's terminals.
-  const handleOpenLiveChat = useCallback(
-    async (chat: Chat): Promise<void> => {
-      if (!chat.terminalId || !chat.worktreeId) {
-        return
-      }
-      if (chat.worktreeId !== activeWorktreeId) {
-        const { error } = await openWorktree({
-          body: { worktreeId: chat.worktreeId },
-        })
-        if (error) {
-          logger.error(
-            { err: error, worktreeId: chat.worktreeId },
-            'failed to switch worktree for live chat',
-          )
-          return
-        }
-      }
-      // Focus the chat window last, carrying the target chat so the chat window
-      // selects its terminal (the launcher can't reach into it directly).
-      await openChat({
-        body: { providerId: chat.providerId, chatId: chat.chatId },
-      })
-    },
-    [activeWorktreeId],
-  )
+  // Clicking a live chat asks the server to jump to its worktree and bring the
+  // chat window forward with that chat selected.
+  const handleOpenLiveChat = useCallback(async (chat: Chat): Promise<void> => {
+    if (!chat.terminalId || !chat.worktreeId) {
+      return
+    }
+    const { error } = await showChat({
+      body: {
+        worktreeId: chat.worktreeId,
+        providerId: chat.providerId,
+        chatId: chat.chatId,
+      },
+    })
+    if (error) {
+      logger.error(
+        { err: error, worktreeId: chat.worktreeId },
+        'failed to open live chat',
+      )
+    }
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {

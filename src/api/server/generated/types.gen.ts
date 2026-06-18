@@ -28,6 +28,7 @@ export type RemoveRepositoryResponses = {
                 worktreeId: string;
                 path: string;
                 mainWorktreePath: string;
+                isMain: boolean;
                 head?: string;
                 branch?: string;
                 branchName?: string;
@@ -86,6 +87,7 @@ export type AddRepositoryResponses = {
                 worktreeId: string;
                 path: string;
                 mainWorktreePath: string;
+                isMain: boolean;
                 head?: string;
                 branch?: string;
                 branchName?: string;
@@ -170,6 +172,7 @@ export type CreateWorktreeResponses = {
             worktreeId: string;
             path: string;
             mainWorktreePath: string;
+            isMain: boolean;
             head?: string;
             branch?: string;
             branchName?: string;
@@ -186,6 +189,47 @@ export type CreateWorktreeResponses = {
 };
 
 export type CreateWorktreeResponse = CreateWorktreeResponses[keyof CreateWorktreeResponses];
+
+export type OpenWorktreeData = {
+    body?: never;
+    path: {
+        worktreeId: string;
+    };
+    query?: never;
+    url: '/worktrees/{worktreeId}/open';
+};
+
+export type OpenWorktreeErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type OpenWorktreeError = OpenWorktreeErrors[keyof OpenWorktreeErrors];
+
+export type OpenWorktreeResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        worktreeId: string;
+        url: string;
+        alreadyStarted: boolean;
+    };
+};
+
+export type OpenWorktreeResponse = OpenWorktreeResponses[keyof OpenWorktreeResponses];
 
 export type DismissCreationErrorData = {
     body?: never;
@@ -222,6 +266,7 @@ export type DismissCreationErrorResponses = {
                 worktreeId: string;
                 path: string;
                 mainWorktreePath: string;
+                isMain: boolean;
                 head?: string;
                 branch?: string;
                 branchName?: string;
@@ -403,47 +448,6 @@ export type EditorSessionsResponses = {
 
 export type EditorSessionsResponse = EditorSessionsResponses[keyof EditorSessionsResponses];
 
-export type OpenCodeData = {
-    body: {
-        worktreeId: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/openCode';
-};
-
-export type OpenCodeErrors = {
-    /**
-     * Default Response
-     */
-    404: {
-        error: string;
-        message: string;
-    };
-    /**
-     * Default Response
-     */
-    500: {
-        error: string;
-        message: string;
-    };
-};
-
-export type OpenCodeError = OpenCodeErrors[keyof OpenCodeErrors];
-
-export type OpenCodeResponses = {
-    /**
-     * Default Response
-     */
-    200: {
-        worktreeId: string;
-        url: string;
-        alreadyStarted: boolean;
-    };
-};
-
-export type OpenCodeResponse = OpenCodeResponses[keyof OpenCodeResponses];
-
 export type ShowEditorData = {
     body: {
         worktreeId: string;
@@ -485,47 +489,6 @@ export type ShowEditorResponses = {
 
 export type ShowEditorResponse = ShowEditorResponses[keyof ShowEditorResponses];
 
-export type OpenWorktreeData = {
-    body: {
-        worktreeId: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/openWorktree';
-};
-
-export type OpenWorktreeErrors = {
-    /**
-     * Default Response
-     */
-    404: {
-        error: string;
-        message: string;
-    };
-    /**
-     * Default Response
-     */
-    500: {
-        error: string;
-        message: string;
-    };
-};
-
-export type OpenWorktreeError = OpenWorktreeErrors[keyof OpenWorktreeErrors];
-
-export type OpenWorktreeResponses = {
-    /**
-     * Default Response
-     */
-    200: {
-        worktreeId: string;
-        url: string;
-        alreadyStarted: boolean;
-    };
-};
-
-export type OpenWorktreeResponse = OpenWorktreeResponses[keyof OpenWorktreeResponses];
-
 export type OpenCreationLogsData = {
     body?: never;
     path: {
@@ -565,33 +528,36 @@ export type OpenCreationLogsResponses = {
 
 export type OpenCreationLogsResponse = OpenCreationLogsResponses[keyof OpenCreationLogsResponses];
 
-export type ListChatsData = {
+export type LiveChatsData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/chats';
+    url: '/chats/live';
 };
 
-export type ListChatsResponses = {
+export type LiveChatsResponses = {
     /**
      * Server-sent live chat snapshot and events.
      */
     200: string;
 };
 
-export type ListChatsResponse = ListChatsResponses[keyof ListChatsResponses];
+export type LiveChatsResponse = LiveChatsResponses[keyof LiveChatsResponses];
 
-export type OpenChatData = {
+export type ShowChatData = {
     body: {
-        providerId?: string;
-        chatId?: string;
+        worktreeId: string;
+    } | {
+        worktreeId: string;
+        providerId: string;
+        chatId: string;
     };
     path?: never;
     query?: never;
-    url: '/chats/open';
+    url: '/showChat';
 };
 
-export type OpenChatResponses = {
+export type ShowChatResponses = {
     /**
      * Default Response
      */
@@ -600,9 +566,9 @@ export type OpenChatResponses = {
     };
 };
 
-export type OpenChatResponse = OpenChatResponses[keyof OpenChatResponses];
+export type ShowChatResponse = ShowChatResponses[keyof ShowChatResponses];
 
-export type ListChatHistoryData = {
+export type HistoricalChatsData = {
     body?: never;
     path?: never;
     query: {
@@ -611,7 +577,7 @@ export type ListChatHistoryData = {
     url: '/chats/history';
 };
 
-export type ListChatHistoryResponses = {
+export type HistoricalChatsResponses = {
     /**
      * Default Response
      */
@@ -626,62 +592,7 @@ export type ListChatHistoryResponses = {
     };
 };
 
-export type ListChatHistoryResponse = ListChatHistoryResponses[keyof ListChatHistoryResponses];
-
-export type ListChatTerminalsData = {
-    body?: never;
-    path?: never;
-    query?: {
-        worktreeId?: string;
-    };
-    url: '/chats/terminals';
-};
-
-export type ListChatTerminalsResponses = {
-    /**
-     * Default Response
-     */
-    200: {
-        terminals: Array<{
-            terminalId: string;
-            worktreeId: string;
-            providerId: string;
-            sessionId?: string;
-            title?: string;
-            status: 'running' | 'exited';
-        }>;
-    };
-};
-
-export type ListChatTerminalsResponse = ListChatTerminalsResponses[keyof ListChatTerminalsResponses];
-
-export type CreateChatTerminalData = {
-    body: {
-        worktreeId: string;
-        providerId?: string;
-        resumeSessionId?: string;
-        title?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/chats/terminals';
-};
-
-export type CreateChatTerminalResponses = {
-    /**
-     * Default Response
-     */
-    200: {
-        terminalId: string;
-        worktreeId: string;
-        providerId: string;
-        sessionId?: string;
-        title?: string;
-        status: 'running' | 'exited';
-    };
-};
-
-export type CreateChatTerminalResponse = CreateChatTerminalResponses[keyof CreateChatTerminalResponses];
+export type HistoricalChatsResponse = HistoricalChatsResponses[keyof HistoricalChatsResponses];
 
 export type ChatCommandsData = {
     body?: never;
@@ -698,6 +609,50 @@ export type ChatCommandsResponses = {
 };
 
 export type ChatCommandsResponse = ChatCommandsResponses[keyof ChatCommandsResponses];
+
+export type TerminalEventsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/terminals';
+};
+
+export type TerminalEventsResponses = {
+    /**
+     * Server-sent terminal snapshot events.
+     */
+    200: string;
+};
+
+export type TerminalEventsResponse = TerminalEventsResponses[keyof TerminalEventsResponses];
+
+export type CreateTerminalData = {
+    body: {
+        worktreeId: string;
+        providerId?: string;
+        resumeSessionId?: string;
+        title?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/terminals';
+};
+
+export type CreateTerminalResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        terminalId: string;
+        worktreeId: string;
+        providerId: string;
+        sessionId?: string;
+        title?: string;
+        status: 'running' | 'exited';
+    };
+};
+
+export type CreateTerminalResponse = CreateTerminalResponses[keyof CreateTerminalResponses];
 
 export type IngestLogsData = {
     body: {

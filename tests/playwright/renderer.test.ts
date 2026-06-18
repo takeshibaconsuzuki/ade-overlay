@@ -16,8 +16,11 @@ declare global {
     __desktopCalls: string[]
     __apiCalls: RecordedRequest[]
     desktop: {
-      selectRepository: () => Promise<string | null>
-      openWorktrees: () => Promise<void>
+      chooseFiles: (options: {
+        title: string
+        allowed: ('d' | 'f')[]
+      }) => Promise<string[]>
+      openWorktreesWindow: () => Promise<void>
       closeWindow: () => Promise<void>
     }
   }
@@ -35,6 +38,7 @@ const worktreeSnapshot = {
       worktreeId: 'aaaaaaaaaaaa',
       path: '/repos/project',
       mainWorktreePath: '/repos/project',
+      isMain: true,
       branch: 'refs/heads/main',
       branchName: 'main',
       isBare: false,
@@ -48,6 +52,7 @@ const worktreeSnapshot = {
       worktreeId: 'bbbbbbbbbbbb',
       path: '/repos/project-feature',
       mainWorktreePath: '/repos/project',
+      isMain: false,
       branch: 'refs/heads/feature/one',
       branchName: 'feature/one',
       isBare: false,
@@ -61,6 +66,7 @@ const worktreeSnapshot = {
       worktreeId: 'cccccccccccc',
       path: '/repos/project-failed',
       mainWorktreePath: '/repos/project',
+      isMain: false,
       branchName: 'feature/fail',
       isBare: false,
       isDetached: false,
@@ -92,6 +98,18 @@ const chatSnapshot = {
       status: 'dormant',
       title: 'Finished chat',
       updatedAt: Date.parse('2026-06-18T11:00:00Z'),
+    },
+  ],
+}
+
+const terminalSnapshot = {
+  terminals: [
+    {
+      terminalId: 'term-live',
+      worktreeId: 'bbbbbbbbbbbb',
+      providerId: 'claude',
+      sessionId: 'live-session',
+      status: 'running',
     },
   ],
 }
@@ -132,18 +150,20 @@ test('launcher renders current worktree and opens server targets', async () => {
   await page.waitForFunction(
     () =>
       window.__apiCalls.some((call) => call.path === '/showEditor') &&
-      window.__apiCalls.some((call) => call.path === '/chats/open'),
+      window.__apiCalls.some((call) => call.path === '/showChat'),
   )
 
   const apiCalls = await page.evaluate(() => window.__apiCalls)
   assert.equal(
-    apiCalls.some((call) => call.path === '/openWorktree'),
+    apiCalls.some((call) => call.path === '/worktrees/bbbbbbbbbbbb/open'),
     false,
   )
   assert.ok(
     apiCalls.some(
       (call) =>
-        call.path === '/chats/open' &&
+        call.path === '/showChat' &&
+        (call.body as { worktreeId?: string; chatId?: string }).worktreeId ===
+          'bbbbbbbbbbbb' &&
         (call.body as { chatId?: string }).chatId === 'live-session',
     ),
   )
@@ -161,9 +181,7 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
 
   await page.waitForFunction(() =>
     window.__apiCalls.some(
-      (call) =>
-        call.path === '/openWorktree' &&
-        (call.body as { worktreeId?: string }).worktreeId === 'bbbbbbbbbbbb',
+      (call) => call.path === '/worktrees/bbbbbbbbbbbb/open',
     ),
   )
 
@@ -242,13 +260,13 @@ test('chat app shows live terminals and resumes historical sessions', async () =
 
   await page.waitForFunction(() => {
     const creates = window.__apiCalls.filter(
-      (call) => call.method === 'POST' && call.path === '/chats/terminals',
+      (call) => call.method === 'POST' && call.path === '/terminals',
     )
     return creates.length === 2
   })
 
   const terminalCreates = (await page.evaluate(() => window.__apiCalls)).filter(
-    (call) => call.method === 'POST' && call.path === '/chats/terminals',
+    (call) => call.method === 'POST' && call.path === '/terminals',
   )
   assert.equal(
     (terminalCreates[0].body as { worktreeId?: string }).worktreeId,
@@ -268,12 +286,12 @@ async function newMockedPage(): Promise<Page> {
     window.__desktopCalls = []
     window.__apiCalls = []
     window.desktop = {
-      selectRepository: async () => {
-        window.__desktopCalls.push('selectRepository')
-        return '/repos/project'
+      chooseFiles: async () => {
+        window.__desktopCalls.push('chooseFiles')
+        return ['/repos/project']
       },
-      openWorktrees: async () => {
-        window.__desktopCalls.push('openWorktrees')
+      openWorktreesWindow: async () => {
+        window.__desktopCalls.push('openWorktreesWindow')
       },
       closeWindow: async () => {
         window.__desktopCalls.push('closeWindow')
@@ -351,15 +369,22 @@ async function handleApiRoute(route: Route): Promise<void> {
         lastSwitchAt: '2026-06-18T12:00:00.000Z',
       },
     ])
-  } else if (path === '/openWorktree' || path === '/showEditor') {
+  } else if (
+    path.match(/^\/worktrees\/[^/]+\/open$/) ||
+    path === '/showEditor'
+  ) {
+    const worktreeId =
+      path === '/showEditor'
+        ? (body as { worktreeId?: string }).worktreeId
+        : path.split('/')[2]
     await json(route, {
-      worktreeId: (body as { worktreeId?: string }).worktreeId,
+      worktreeId,
       url: 'http://bbbbbbbbbbbb.localhost:3000/__ade-overlay/editor-bootstrap',
       alreadyStarted: true,
     })
-  } else if (path === '/chats' && request.method() === 'GET') {
+  } else if (path === '/chats/live' && request.method() === 'GET') {
     await sse(route, 'snapshot', chatSnapshot)
-  } else if (path === '/chats/open') {
+  } else if (path === '/showChat') {
     await json(route, { ok: true })
   } else if (path === '/chats/commands') {
     await sse(route, 'snapshot', {})
@@ -375,19 +400,9 @@ async function handleApiRoute(route: Route): Promise<void> {
         },
       ],
     })
-  } else if (path === '/chats/terminals' && request.method() === 'GET') {
-    await json(route, {
-      terminals: [
-        {
-          terminalId: 'term-live',
-          worktreeId: 'bbbbbbbbbbbb',
-          providerId: 'claude',
-          sessionId: 'live-session',
-          status: 'running',
-        },
-      ],
-    })
-  } else if (path === '/chats/terminals' && request.method() === 'POST') {
+  } else if (path === '/terminals' && request.method() === 'GET') {
+    await sse(route, 'snapshot', terminalSnapshot)
+  } else if (path === '/terminals' && request.method() === 'POST') {
     const requestBody = body as {
       worktreeId: string
       providerId?: string

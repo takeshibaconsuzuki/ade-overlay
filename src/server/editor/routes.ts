@@ -7,53 +7,61 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
-import { z } from 'zod/v4'
 import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BASE_PATH,
   EDITOR_BOOTSTRAP_PATH,
   EDITOR_COMMAND_ACK_PATH,
+  EDITOR_COMMAND_STREAM_PATH,
+  EDITOR_EXTENSION_COMMAND_STREAM_PATH,
+  EDITOR_EXTENSION_OPEN_FILE_EVENT,
   EDITOR_SESSION_STATUS_EVENT,
-  type EditorCommand,
-  type EditorSessionStatus,
-} from '../../api/server/editor'
-import { HttpError } from '../errors'
-import { createSseStream } from '../sse'
-import { type WorktreeOpener } from '../worktrees/opener'
-import { type WorktreeRegistry } from '../worktrees/registry'
-import { WorktreeIdParams } from '../worktrees/schemas'
-import {
+  EDITOR_SESSION_STREAM_PATH,
+  EDITOR_SHOW_PATH,
   EditorCommandAckRequest,
   EditorCommandAckResponse,
+  EditorCommandSseEvents,
+  EditorCommandStreamResponse,
+  EditorExtensionCommandQuery,
+  EditorExtensionCommandSseEvents,
+  EditorSessionSseEvents,
+  EditorSessionStreamResponse,
+  EditorWorktreeRequest,
+  EditorWorktreeResponse,
   ErrorResponse,
-  OpenCodeRequest,
-  OpenCodeResponse,
   OpenCreationLogsResponse,
-  OpenWorktreeRequest,
-  OpenWorktreeResponse,
-} from './schemas'
+  type EditorCommand,
+  type EditorExtensionOpenFileCommand,
+  type EditorSessionStatus,
+} from '../../api/server/editor'
+import {
+  WORKTREE_CREATION_LOGS_OPEN_PATH,
+  WorktreeIdParams,
+} from '../../api/server/worktrees'
+import { HttpError } from '../errors'
+import { createSseStream } from '../sse'
+import { type WorktreeRegistry } from '../worktrees/registry'
 import { EditorService } from './service'
 
 type EditorRouteOptions = {
   registry: WorktreeRegistry
   editor: EditorService
-  opener: WorktreeOpener
 }
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { registry, editor, opener }: EditorRouteOptions,
+  { registry, editor }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
 
   routes.route({
     method: 'GET',
-    url: '/editorCommands',
+    url: EDITOR_COMMAND_STREAM_PATH,
     schema: {
       operationId: 'editorCommands',
       response: {
-        200: z.string().describe('Server-sent editor switch commands.'),
+        200: EditorCommandStreamResponse,
       },
     },
     handler: async (request, reply) => {
@@ -63,11 +71,11 @@ export function registerEditorRoutes(
 
   routes.route({
     method: 'GET',
-    url: '/editorSessions',
+    url: EDITOR_SESSION_STREAM_PATH,
     schema: {
       operationId: 'editorSessions',
       response: {
-        200: z.string().describe('Server-sent editor session status events.'),
+        200: EditorSessionStreamResponse,
       },
     },
     handler: async (request, reply) => {
@@ -77,10 +85,10 @@ export function registerEditorRoutes(
 
   routes.route({
     method: 'GET',
-    url: '/editorExtensionCommands',
+    url: EDITOR_EXTENSION_COMMAND_STREAM_PATH,
     schema: {
       hide: true,
-      querystring: z.object({ worktreeId: z.string() }),
+      querystring: EditorExtensionCommandQuery,
     },
     handler: async (request, reply) => {
       streamEditorExtensionCommands(
@@ -94,31 +102,12 @@ export function registerEditorRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/openCode',
-    schema: {
-      operationId: 'openCode',
-      body: OpenCodeRequest,
-      response: {
-        200: OpenCodeResponse,
-        404: ErrorResponse,
-        500: ErrorResponse,
-      },
-    },
-    handler: async (request) => {
-      const response = await editor.openCode(request.body.worktreeId)
-      editor.showEditor()
-      return response
-    },
-  })
-
-  routes.route({
-    method: 'POST',
-    url: '/showEditor',
+    url: EDITOR_SHOW_PATH,
     schema: {
       operationId: 'showEditor',
-      body: OpenCodeRequest,
+      body: EditorWorktreeRequest,
       response: {
-        200: OpenCodeResponse,
+        200: EditorWorktreeResponse,
         404: ErrorResponse,
         500: ErrorResponse,
       },
@@ -134,22 +123,7 @@ export function registerEditorRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/openWorktree',
-    schema: {
-      operationId: 'openWorktree',
-      body: OpenWorktreeRequest,
-      response: {
-        200: OpenWorktreeResponse,
-        404: ErrorResponse,
-        500: ErrorResponse,
-      },
-    },
-    handler: async (request) => opener.openWorktree(request.body.worktreeId),
-  })
-
-  routes.route({
-    method: 'POST',
-    url: '/worktrees/:worktreeId/creation-logs/open',
+    url: WORKTREE_CREATION_LOGS_OPEN_PATH,
     schema: {
       operationId: 'openCreationLogs',
       params: WorktreeIdParams,
@@ -367,7 +341,7 @@ function streamEditorCommands(
   reply: FastifyReply,
   editor: EditorService,
 ): void {
-  const stream = createSseStream(request, reply)
+  const stream = createSseStream<typeof EditorCommandSseEvents>(request, reply)
   const unregisterClient = editor.registerEditorClient()
 
   const onCommand = (command: EditorCommand): void => {
@@ -391,11 +365,17 @@ function streamEditorExtensionCommands(
   editor: EditorService,
   worktreeId: string,
 ): void {
-  const stream = createSseStream(request, reply)
+  const stream = createSseStream<typeof EditorExtensionCommandSseEvents>(
+    request,
+    reply,
+  )
 
   const onCommand = (command: EditorCommand): void => {
     if (command.type === 'open-file' && command.worktreeId === worktreeId) {
-      stream.send('open-file', { filePath: command.filePath })
+      const payload: EditorExtensionOpenFileCommand = {
+        filePath: command.filePath,
+      }
+      stream.send(EDITOR_EXTENSION_OPEN_FILE_EVENT, payload)
     }
   }
 
@@ -408,7 +388,8 @@ function streamEditorExtensionCommands(
   // connects after the command was emitted) still opens it.
   const lastFilePath = editor.getLastOpenFile(worktreeId)
   if (lastFilePath) {
-    stream.send('open-file', { filePath: lastFilePath })
+    const payload: EditorExtensionOpenFileCommand = { filePath: lastFilePath }
+    stream.send(EDITOR_EXTENSION_OPEN_FILE_EVENT, payload)
   }
 }
 
@@ -417,7 +398,7 @@ function streamEditorSessions(
   reply: FastifyReply,
   editor: EditorService,
 ): void {
-  const stream = createSseStream(request, reply)
+  const stream = createSseStream<typeof EditorSessionSseEvents>(request, reply)
 
   const onStatus = (status: EditorSessionStatus): void => {
     stream.send(EDITOR_SESSION_STATUS_EVENT, status)

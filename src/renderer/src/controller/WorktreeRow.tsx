@@ -36,7 +36,7 @@ export function WorktreeRow({
   onOpenCreationLogs,
   onDismissCreationError,
 }: WorktreeRowProps): React.JSX.Element {
-  const isMain = worktree.path === worktree.mainWorktreePath
+  const isMain = worktree.isMain
   const isFailed = worktree.creationState === 'failed'
   const isCreating = worktree.creationState === 'creating'
   const isBootstrapping = worktree.creationState === 'bootstrapping'

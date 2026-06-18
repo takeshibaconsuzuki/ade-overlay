@@ -7,18 +7,17 @@ import {
   Tabs,
   Text,
 } from '@radix-ui/themes'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CHAT_COMMAND_STREAM_PATH,
   CHAT_STATUS,
+  ChatCommandSseEvents,
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
-  createChatTerminal,
-  listChatHistory,
-  listChatTerminals,
-  openChat,
-  openWorktree,
+  createTerminal,
+  historicalChats,
+  showChat,
 } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
@@ -28,7 +27,12 @@ import { useWorktreeStream } from '../controller/worktrees'
 import { formatTimestamp } from '../format'
 import { useChatStream, type Chat } from '../hooks/useChatStream'
 import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
+import {
+  useTerminalStream,
+  type TerminalDescriptor,
+} from '../hooks/useTerminalStream'
 import { logger } from '../logger'
+import { parseSsePayload } from '../sse'
 import styles from './ChatApp.module.css'
 import { Terminal } from './Terminal'
 
@@ -38,15 +42,6 @@ type ChatSession = {
   worktreeId: string
   title?: string
   updatedAt: number
-}
-
-type ChatTerminal = {
-  terminalId: string
-  worktreeId: string
-  providerId: string
-  sessionId?: string
-  title?: string
-  status: 'running' | 'exited'
 }
 
 /**
@@ -74,67 +69,10 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   )
 
   const { chats } = useChatStream()
+  const { terminals } = useTerminalStream()
 
   const [sessions, setSessions] = useState<ChatSession[]>([])
-  // Every live terminal across worktrees: the tab strip filters to the current
-  // worktree, while the live-chat list needs the full set to resolve a chat in
-  // another worktree to its terminal.
-  const [terminals, setTerminals] = useState<ChatTerminal[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  // A live chat targeted from another window (via the `show` command) whose
-  // terminal isn't loaded yet (a cross-worktree click): held until the
-  // accompanying worktree switch reloads the terminals, then selected by the
-  // load effect below. Same-worktree targets resolve instantly from memory (see
-  // the command listener) and never set this.
-  const [pendingChatTarget, setPendingChatTarget] = useState<{
-    providerId: string
-    chatId: string
-  } | null>(null)
-
-  // Latest terminals, readable from the command listener (registered once) so it
-  // can select an already-loaded terminal without waiting on a refetch.
-  const terminalsRef = useRef(terminals)
-  useEffect(() => {
-    terminalsRef.current = terminals
-  }, [terminals])
-
-  // Terminals are cheap (the server lists them from memory) and drive the Live
-  // tab + panes, so they load on their own — never blocked behind the slow,
-  // git-backed history fetch below.
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      const live = await listChatTerminals()
-      if (cancelled) {
-        return
-      }
-      const openTerminals = live.data?.terminals ?? []
-      setTerminals(openTerminals)
-      setActiveId(
-        (current) =>
-          current ??
-          openTerminals.find((terminal) => terminal.worktreeId === worktreeId)
-            ?.terminalId ??
-          null,
-      )
-      // Select a chat targeted from another window once its terminal is loaded.
-      if (pendingChatTarget) {
-        const terminal = openTerminals.find(
-          (t) =>
-            t.providerId === pendingChatTarget.providerId &&
-            t.sessionId === pendingChatTarget.chatId,
-        )
-        if (terminal) {
-          setActiveId(terminal.terminalId)
-          setPendingChatTarget(null)
-        }
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [worktreeId, pendingChatTarget])
 
   // Historical sessions are read from disk (git), so they load separately and
   // only feed the Historical tab; a slow read never delays terminal display.
@@ -145,7 +83,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
         setSessions([])
         return
       }
-      const history = await listChatHistory({ query: { worktreeId } })
+      const history = await historicalChats({ query: { worktreeId } })
       if (!cancelled) {
         setSessions(history.data?.sessions ?? [])
       }
@@ -157,73 +95,48 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   }, [worktreeId])
 
   // Listen for `show` commands carrying a target chat (a live chat clicked from
-  // another window, e.g. the launcher). If its terminal is already loaded,
-  // select it immediately; otherwise stash it for the load effect to pick up
-  // once the accompanying worktree switch brings its terminals in.
+  // another window, e.g. the launcher). The server resolves and stamps the
+  // terminal id, so the renderer never joins chats to terminals itself.
   useEffect(() => {
     const source = new EventSource(
       `${SERVER_ORIGIN}${CHAT_COMMAND_STREAM_PATH}`,
     )
     source.addEventListener('show', (event) => {
-      try {
-        const data = JSON.parse(event.data) as {
-          providerId?: string
-          chatId?: string
-        }
-        if (!data.providerId || !data.chatId) {
-          return
-        }
-        const terminal = terminalsRef.current.find(
-          (t) =>
-            t.providerId === data.providerId && t.sessionId === data.chatId,
-        )
-        if (terminal) {
-          setActiveId(terminal.terminalId)
-        } else {
-          setPendingChatTarget({
-            providerId: data.providerId,
-            chatId: data.chatId,
-          })
-        }
-      } catch (error) {
-        logger.error({ err: error }, 'failed to parse chat command')
+      const data = parseSsePayload(
+        ChatCommandSseEvents,
+        'show',
+        event.data,
+        'chat-command',
+      )
+      if (data && 'terminalId' in data) {
+        setActiveId(data.terminalId)
       }
     })
     return () => source.close()
   }, [])
 
-  // Clicking a live chat brings its terminal forward: switch to its worktree,
-  // focus the chat window, and select its tab. `terminalId` is stamped by the
-  // server, so a chat is openable exactly when it's set (and the chat's worktree
-  // is the terminal's worktree). The tab selection survives the worktree change
-  // because the terminals effect keeps a set `activeId`.
-  const openLiveChat = useCallback(
-    async (chat: Chat): Promise<void> => {
-      if (!chat.terminalId) {
-        return
-      }
-      setActiveId(chat.terminalId)
-      if (chat.worktreeId && chat.worktreeId !== worktreeId) {
-        const { error } = await openWorktree({
-          body: { worktreeId: chat.worktreeId },
-        })
-        if (error) {
-          logger.error(
-            { err: error, worktreeId: chat.worktreeId },
-            'failed to switch worktree for live chat',
-          )
-          return
-        }
-      }
-      // Focus the chat window last so it ends up in front of the editor that
-      // the worktree switch may have brought forward. Pass the target so the
-      // selection also survives the worktree reload via the pending-target path.
-      await openChat({
-        body: { providerId: chat.providerId, chatId: chat.chatId },
-      })
-    },
-    [worktreeId],
-  )
+  // Clicking a live chat asks the server to switch to its worktree and focus the
+  // chat window. `terminalId` is stamped by the server, so a chat is openable
+  // exactly when it is set.
+  const openLiveChat = useCallback(async (chat: Chat): Promise<void> => {
+    if (!chat.terminalId || !chat.worktreeId) {
+      return
+    }
+    setActiveId(chat.terminalId)
+    const { error } = await showChat({
+      body: {
+        worktreeId: chat.worktreeId,
+        providerId: chat.providerId,
+        chatId: chat.chatId,
+      },
+    })
+    if (error) {
+      logger.error(
+        { err: error, worktreeId: chat.worktreeId },
+        'failed to open live chat',
+      )
+    }
+  }, [])
 
   const startTerminal = async (body: {
     providerId?: string
@@ -233,40 +146,22 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     if (!worktreeId) {
       return
     }
-    const { data, error } = await createChatTerminal({
+    const { data, error } = await createTerminal({
       body: { worktreeId, ...body },
     })
     if (error || !data) {
       logger.error({ err: error }, 'failed to start chat terminal')
       return
     }
-    setTerminals((current) => [...current, data])
     setActiveId(data.terminalId)
   }
 
-  // Resuming a session that already has an open terminal should focus it rather
-  // than spawn a duplicate; otherwise start a fresh resumed terminal.
   const openSession = (session: ChatSession): void => {
-    const existing = terminals.find(
-      (terminal) =>
-        terminal.providerId === session.providerId &&
-        terminal.sessionId === session.sessionId,
-    )
-    if (existing) {
-      setActiveId(existing.terminalId)
-      return
-    }
     void startTerminal({
       providerId: session.providerId,
       resumeSessionId: session.sessionId,
       title: session.title,
     })
-  }
-
-  const removeTerminal = (terminalId: string): void => {
-    setTerminals((current) =>
-      current.filter((terminal) => terminal.terminalId !== terminalId),
-    )
   }
 
   // The tab strip and panes only show the current worktree's terminals.
@@ -383,7 +278,9 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                   variant={
                     terminal.terminalId === activeTerminalId ? 'solid' : 'soft'
                   }
-                  onClick={() => setActiveId(terminal.terminalId)}
+                  onClick={() => {
+                    setActiveId(terminal.terminalId)
+                  }}
                 >
                   {terminalLabel(terminal)}
                 </Button>
@@ -419,7 +316,11 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                     <Terminal
                       terminalId={terminal.terminalId}
                       active={isActive}
-                      onExit={() => removeTerminal(terminal.terminalId)}
+                      onExit={() => {
+                        if (activeTerminalId === terminal.terminalId) {
+                          setActiveId(null)
+                        }
+                      }}
                     />
                   </div>
                 )
@@ -464,7 +365,7 @@ function SessionRow({
   )
 }
 
-function terminalLabel(terminal: ChatTerminal): string {
+function terminalLabel(terminal: TerminalDescriptor): string {
   if (terminal.title) {
     return terminal.title
   }

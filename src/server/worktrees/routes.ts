@@ -4,9 +4,6 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
-import { z } from 'zod/v4'
-import { createSseStream } from '../sse'
-import { WorktreeRegistry } from './registry'
 import {
   AddRepositoryRequest,
   AddRepositoryResponse,
@@ -19,28 +16,43 @@ import {
   ErrorResponse,
   ListBranchesRequest,
   ListBranchesResponse,
+  OpenWorktreeRequest,
+  OpenWorktreeResponse,
   PreviewWorktreePathRequest,
   PreviewWorktreePathResponse,
   RemoveRepositoryRequest,
   RemoveRepositoryResponse,
+  REPOSITORIES_PATH,
+  REPOSITORY_BRANCHES_PATH,
+  WORKTREE_DISMISS_CREATION_PATH,
+  WORKTREE_OPEN_PATH,
+  WORKTREE_PATH,
+  WORKTREE_PATH_PREVIEW_PATH,
   WorktreeIdParams,
+  WORKTREES_PATH,
+  WorktreeSseEvents,
+  WorktreeStreamResponse,
   type WorktreeEvent,
-} from './schemas'
+} from '../../api/server/worktrees'
+import { createSseStream } from '../sse'
+import { type WorktreeOpener } from './opener'
+import { WorktreeRegistry } from './registry'
 
 type WorktreeRouteOptions = {
+  opener: WorktreeOpener
   beforeDeleteWorktree?: (worktreeId: string) => Promise<void>
 }
 
 export function registerWorktreeRoutes(
   server: FastifyInstance,
   registry: WorktreeRegistry,
-  options: WorktreeRouteOptions = {},
+  options: WorktreeRouteOptions,
 ): void {
   const routes = server.withTypeProvider<ZodTypeProvider>()
 
   routes.route({
     method: 'POST',
-    url: '/repositories',
+    url: REPOSITORIES_PATH,
     schema: {
       operationId: 'addRepository',
       body: AddRepositoryRequest,
@@ -55,7 +67,7 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'DELETE',
-    url: '/repositories',
+    url: REPOSITORIES_PATH,
     schema: {
       operationId: 'removeRepository',
       body: RemoveRepositoryRequest,
@@ -63,19 +75,26 @@ export function registerWorktreeRoutes(
         200: RemoveRepositoryResponse,
       },
     },
-    handler: async (request) =>
-      registry.removeRepository(request.body.mainWorktreePath),
+    handler: async (request) => {
+      const worktrees = await registry.getRepositoryWorktrees(
+        request.body.mainWorktreePath,
+      )
+      await Promise.all(
+        worktrees.map((worktree) =>
+          options.beforeDeleteWorktree?.(worktree.worktreeId),
+        ),
+      )
+      return registry.removeRepository(request.body.mainWorktreePath)
+    },
   })
 
   routes.route({
     method: 'GET',
-    url: '/worktrees',
+    url: WORKTREES_PATH,
     schema: {
       operationId: 'listWorktrees',
       response: {
-        200: z
-          .string()
-          .describe('Server-sent worktree snapshot and change events.'),
+        200: WorktreeStreamResponse,
       },
     },
     handler: async (request, reply) => {
@@ -85,7 +104,7 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/worktrees',
+    url: WORKTREES_PATH,
     schema: {
       operationId: 'createWorktree',
       body: CreateWorktreeRequest,
@@ -101,7 +120,23 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/worktrees/:worktreeId/dismiss-creation',
+    url: WORKTREE_OPEN_PATH,
+    schema: {
+      operationId: 'openWorktree',
+      params: OpenWorktreeRequest,
+      response: {
+        200: OpenWorktreeResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    handler: async (request) =>
+      options.opener.openWorktree(request.params.worktreeId),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: WORKTREE_DISMISS_CREATION_PATH,
     schema: {
       operationId: 'dismissCreationError',
       params: WorktreeIdParams,
@@ -116,7 +151,7 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/repositories/branches',
+    url: REPOSITORY_BRANCHES_PATH,
     schema: {
       operationId: 'listBranches',
       body: ListBranchesRequest,
@@ -132,7 +167,7 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'POST',
-    url: '/worktrees/path-preview',
+    url: WORKTREE_PATH_PREVIEW_PATH,
     schema: {
       operationId: 'previewWorktreePath',
       body: PreviewWorktreePathRequest,
@@ -147,7 +182,7 @@ export function registerWorktreeRoutes(
 
   routes.route({
     method: 'DELETE',
-    url: '/worktrees/:worktreeId',
+    url: WORKTREE_PATH,
     schema: {
       operationId: 'deleteWorktree',
       params: DeleteWorktreeParams,
@@ -161,7 +196,7 @@ export function registerWorktreeRoutes(
     },
     handler: async (request) => {
       const worktree = await registry.getWorktreeById(request.params.worktreeId)
-      if (worktree.path !== worktree.mainWorktreePath) {
+      if (!worktree.isMain) {
         await options.beforeDeleteWorktree?.(request.params.worktreeId)
       }
       return registry.deleteWorktree(
@@ -178,7 +213,7 @@ async function streamWorktreeEvents(
   reply: FastifyReply,
   registry: WorktreeRegistry,
 ): Promise<void> {
-  const stream = createSseStream(request, reply)
+  const stream = createSseStream<typeof WorktreeSseEvents>(request, reply)
   const onWorktreeEvent = (event: WorktreeEvent): void => {
     stream.send(event.type, event)
   }

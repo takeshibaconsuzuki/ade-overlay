@@ -7,6 +7,15 @@ import { dirname, join } from 'node:path'
 import Mustache from 'mustache'
 import { WORKTREE_DIRTY_ERROR_CODE } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
+import {
+  type CreateWorktreeRequest,
+  type PreviewWorktreePathRequest,
+  type Repository,
+  type Worktree,
+  type WorktreeCreationState,
+  type WorktreeEvent,
+  type WorktreeSnapshot,
+} from '../../api/server/worktrees'
 import { type AppConfigStore } from '../appConfig'
 import { getCreationLogsDir } from '../dataDir'
 import { HttpError } from '../errors'
@@ -19,15 +28,6 @@ import {
   type GitWorktree,
 } from './git'
 import { createWorktreeId } from './ids'
-import {
-  type CreateWorktreeRequest,
-  type PreviewWorktreePathRequest,
-  type Repository,
-  type Worktree,
-  type WorktreeCreationState,
-  type WorktreeEvent,
-  type WorktreeSnapshot,
-} from './schemas'
 
 /**
  * Transient state for an async `git worktree add` job. Lives only in the
@@ -211,6 +211,14 @@ export class WorktreeRegistry {
     }
 
     return { removed, snapshot }
+  }
+
+  async getRepositoryWorktrees(mainWorktreePath: string): Promise<Worktree[]> {
+    const repository = await this.getRepository(mainWorktreePath)
+    const snapshot = await this.getSnapshot()
+    return snapshot.worktrees.filter(
+      (worktree) => worktree.mainWorktreePath === repository.mainWorktreePath,
+    )
   }
 
   /**
@@ -803,6 +811,7 @@ function toPublicWorktree(
     worktreeId: createWorktreeId(worktree.path),
     path: worktree.path,
     mainWorktreePath: worktree.mainWorktreePath,
+    isMain: worktree.path === worktree.mainWorktreePath,
     head: worktree.head,
     branch: worktree.branch,
     branchName: getBranchName(worktree.branch),
@@ -825,6 +834,7 @@ function toJobWorktree(
     worktreeId: job.worktreeId,
     path: job.canonicalPath,
     mainWorktreePath: job.mainWorktreePath,
+    isMain: false,
     branchName: job.newBranch ?? job.baseBranch,
     isBare: false,
     isDetached: false,

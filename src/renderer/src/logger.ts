@@ -2,6 +2,7 @@ import pino from 'pino'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { ingestLogs, type IngestLogsData } from '../../api/server/generated'
 import { type Logger, type LogLevel } from '../../api/server/logger'
+import { LOGS_PATH } from '../../api/server/logs'
 
 /**
  * Renderer logger. Uses Pino's browser build so the UI shares the same library
@@ -62,7 +63,7 @@ if (typeof window !== 'undefined') {
     }
     const records = queue.splice(0, queue.length)
     navigator.sendBeacon?.(
-      `${SERVER_ORIGIN}/logs`,
+      `${SERVER_ORIGIN}${LOGS_PATH}`,
       new Blob([JSON.stringify({ records })], { type: 'application/json' }),
     )
   })

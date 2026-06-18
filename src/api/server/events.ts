@@ -1,10 +1,9 @@
 /**
  * Single source of truth for worktree change-event names.
  *
- * Lives in `src/api/server`, the node-free shared surface for the HTTP server
- * API: the server schema (`worktrees/schemas.ts`) builds the Zod union from
- * these names, and the unprivileged renderer registers stream listeners from
- * them. Keep it dependency-free (no `node:*`, no Zod) to preserve that boundary.
+ * Lives in `src/api/server`, the shared surface for the HTTP server API: the
+ * shared worktree schema builds the Zod union from these names, and the
+ * unprivileged renderer registers stream listeners from them.
  *
  * The `snapshot` event is intentionally excluded: it is the initial full-state
  * event, not one of the incremental change events listed here.

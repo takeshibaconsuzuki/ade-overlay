@@ -1,6 +1,10 @@
 import { type FastifyInstance } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
-import { IngestLogsRequest, IngestLogsResponse } from './schemas'
+import {
+  IngestLogsRequest,
+  IngestLogsResponse,
+  LOGS_PATH,
+} from '../../api/server/logs'
 
 /**
  * Ingests log records shipped by non-server processes (the renderer and the
@@ -14,7 +18,7 @@ export function registerLogRoutes(server: FastifyInstance): void {
 
   routes.route({
     method: 'POST',
-    url: '/logs',
+    url: LOGS_PATH,
     // Silence Fastify's automatic request/response logging for this route: each
     // batch POST would otherwise add noise that doesn't correspond 1:1 with the
     // client entries we re-emit below. This only affects the request-scoped

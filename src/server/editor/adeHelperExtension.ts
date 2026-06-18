@@ -1,5 +1,9 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  EDITOR_EXTENSION_COMMAND_STREAM_PATH,
+  EDITOR_EXTENSION_OPEN_FILE_EVENT,
+} from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
 
 const EXTENSION_DIR_NAME = 'ade-overlay-helper'
@@ -41,7 +45,7 @@ function activate() {
 }
 
 function connect(origin, worktreeId) {
-  const url = new URL('/editorExtensionCommands', origin)
+  const url = new URL(${JSON.stringify(EDITOR_EXTENSION_COMMAND_STREAM_PATH)}, origin)
   url.searchParams.set('worktreeId', worktreeId)
   const request = http.get(url, (response) => {
     response.setEncoding('utf8')
@@ -65,6 +69,14 @@ function reconnect(origin, worktreeId) {
 }
 
 function handleEvent(raw) {
+  const event = raw
+    .split('\\n')
+    .find((line) => line.startsWith('event:'))
+    ?.slice('event:'.length)
+    .trim()
+  if (event !== ${JSON.stringify(EDITOR_EXTENSION_OPEN_FILE_EVENT)}) {
+    return
+  }
   const data = raw
     .split('\\n')
     .filter((line) => line.startsWith('data:'))

@@ -47,10 +47,7 @@ test('serves OpenAPI and validates app focus and log routes', async () => {
     paths: Record<string, Record<string, { operationId?: string }>>
   }
   assert.equal(spec.paths['/worktrees'].get.operationId, 'listWorktrees')
-  assert.equal(
-    spec.paths['/chats/terminals'].post.operationId,
-    'createChatTerminal',
-  )
+  assert.equal(spec.paths['/terminals'].post.operationId, 'createTerminal')
 
   const logs = await api.post('/logs', {
     data: {
@@ -133,7 +130,7 @@ test('maps provider hooks into live chat snapshots', async () => {
       worktreeId?: string
       updatedAt: number
     }>
-  }>('/chats')
+  }>('/chats/live')
   assert.equal(snapshot.event, 'snapshot')
   assert.deepEqual(snapshot.data.chats, [
     {

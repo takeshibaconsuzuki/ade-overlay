@@ -2,6 +2,7 @@ import { request } from 'node:http'
 import { Writable } from 'node:stream'
 import { SERVER_ORIGIN } from '../api/server/config'
 import { type LogLevel } from '../api/server/logger'
+import { LOGS_PATH } from '../api/server/logs'
 
 /**
  * Ships a Node process's Pino logs to the server's `POST /logs` endpoint so
@@ -59,7 +60,7 @@ function postBatch(records: WireRecord[]): Promise<void> {
   return new Promise((resolve) => {
     const body = JSON.stringify({ records })
     const req = request(
-      `${SERVER_ORIGIN}/logs`,
+      `${SERVER_ORIGIN}${LOGS_PATH}`,
       {
         method: 'POST',
         headers: {

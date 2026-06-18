@@ -1,34 +1,75 @@
-import { useEffect, useState } from 'react'
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { WORKTREE_EVENT_TYPES } from '../../../api/server/events'
-import type { RemoveRepositoryResponses } from '../../../api/server/generated'
+import {
+  WORKTREES_PATH,
+  WorktreeSseEvents,
+  type Repository,
+  type Worktree,
+  type WorktreeSnapshot as WorktreeSnapshotType,
+} from '../../../api/server/worktrees'
 import { logger } from '../logger'
+import { parseSsePayload } from '../sse'
 
-export type WorktreeSnapshot = RemoveRepositoryResponses[200]['snapshot']
-export type Worktree = WorktreeSnapshot['worktrees'][number]
-export type Repository = WorktreeSnapshot['repositories'][number]
+export type WorktreeSnapshot = WorktreeSnapshotType
+export type { Repository, Worktree }
 
 const EMPTY_SNAPSHOT: WorktreeSnapshot = { repositories: [], worktrees: [] }
+
+type WorktreeStreamState = {
+  snapshot: WorktreeSnapshot
+  connected: boolean
+}
+
+const WorktreeStreamContext = createContext<WorktreeStreamState | null>(null)
+
+export function WorktreeStreamProvider({
+  children,
+}: {
+  children: ReactNode
+}): React.JSX.Element {
+  const value = useWorktreeStreamState()
+  return createElement(WorktreeStreamContext.Provider, { value }, children)
+}
 
 /**
  * Subscribe to the server-sent worktree stream. The initial `snapshot` event
  * carries the full state; every change event carries a fresh `snapshot`, so we
  * simply mirror whichever snapshot arrives last.
  */
-export function useWorktreeStream(): {
-  snapshot: WorktreeSnapshot
-  connected: boolean
-} {
+export function useWorktreeStream(): WorktreeStreamState {
+  const value = useContext(WorktreeStreamContext)
+  if (!value) {
+    throw new Error(
+      'useWorktreeStream must be used within WorktreeStreamProvider',
+    )
+  }
+  return value
+}
+
+function useWorktreeStreamState(): WorktreeStreamState {
   const [snapshot, setSnapshot] = useState<WorktreeSnapshot>(EMPTY_SNAPSHOT)
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
-    const url = `${SERVER_ORIGIN}/worktrees`
+    const url = `${SERVER_ORIGIN}${WORKTREES_PATH}`
     logger.info({ url }, 'opening worktree stream')
     const source = new EventSource(url)
 
     source.addEventListener('snapshot', (event) => {
-      const data = parseStream<WorktreeSnapshot>('snapshot', event.data)
+      const data = parseSsePayload(
+        WorktreeSseEvents,
+        'snapshot',
+        event.data,
+        'worktree',
+      )
       if (data) {
         logger.info({ worktrees: data.worktrees.length }, 'snapshot received')
         setSnapshot(data)
@@ -36,9 +77,11 @@ export function useWorktreeStream(): {
     })
     for (const type of WORKTREE_EVENT_TYPES) {
       source.addEventListener(type, (event) => {
-        const data = parseStream<{ snapshot: WorktreeSnapshot }>(
+        const data = parseSsePayload(
+          WorktreeSseEvents,
           type,
           event.data,
+          'worktree',
         )
         if (data) {
           logger.info(
@@ -66,14 +109,4 @@ export function useWorktreeStream(): {
   }, [])
 
   return { snapshot, connected }
-}
-
-/** Parse a stream payload, logging (and swallowing) malformed data. */
-function parseStream<T>(type: string, raw: string): T | null {
-  try {
-    return JSON.parse(raw) as T
-  } catch (error) {
-    logger.error({ type, err: error }, 'failed to parse stream payload')
-    return null
-  }
 }

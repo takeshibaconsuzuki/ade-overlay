@@ -1,12 +1,11 @@
 import { request } from 'node:http'
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow } from 'electron'
 import { ADE_APP_ROLE, APP_FOCUS_EVENT } from '../../api/server/appFocus'
 import { CHAT_COMMAND_STREAM_PATH } from '../../api/server/chats'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
-import { loadRenderer, webPreferences } from '../controller'
-import { CONTROLLER_IPC_CHANNELS } from '../controller/ipc-channels'
+import { loadRenderer, webPreferences } from '../browser'
 
 const log = logger.child({ process: 'chat' })
 
@@ -15,17 +14,6 @@ const WINDOW_BACKGROUND = '#111113'
 
 let window: BrowserWindow | null = null
 let reconnectTimer: NodeJS.Timeout | null = null
-
-/**
- * Registers the chat role's main-process IPC handlers. Call once when launching
- * the chat role, before creating the window. Backs the custom titlebar's close
- * button, like the controller windows.
- */
-export function registerChatIpcHandlers(): void {
-  ipcMain.handle(CONTROLLER_IPC_CHANNELS.closeWindow, (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close()
-  })
-}
 
 /**
  * Creates the chat window: a separate-role app that hosts the terminals running

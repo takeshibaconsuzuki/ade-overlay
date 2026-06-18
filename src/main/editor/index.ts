@@ -4,7 +4,9 @@ import { ADE_APP_ROLE, APP_FOCUS_EVENT } from '../../api/server/appFocus'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import {
   EDITOR_COMMAND_ACK_PATH,
-  type EditorCommand,
+  EDITOR_COMMAND_STREAM_PATH,
+  EditorCommand,
+  type EditorCommand as EditorCommandType,
 } from '../../api/server/editor'
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
@@ -65,7 +67,7 @@ function connectEditorCommandStream(): void {
     reconnectTimer = null
   }
 
-  const requestUrl = new URL('/editorCommands', SERVER_ORIGIN)
+  const requestUrl = new URL(EDITOR_COMMAND_STREAM_PATH, SERVER_ORIGIN)
   const commandRequest = request(requestUrl, (response) => {
     response.setEncoding('utf8')
     let buffer = ''
@@ -105,7 +107,12 @@ function handleStreamEvent(rawEvent: string): void {
   }
 
   try {
-    const command = JSON.parse(data) as EditorCommand
+    const result = EditorCommand.safeParse(JSON.parse(data))
+    if (!result.success) {
+      log.error({ err: result.error, data }, 'invalid editor command')
+      return
+    }
+    const command = result.data
     if (event && event !== command.type) {
       log.warn({ event, command }, 'editor command event mismatch')
       return
@@ -116,7 +123,7 @@ function handleStreamEvent(rawEvent: string): void {
   }
 }
 
-function handleEditorCommand(command: EditorCommand): void {
+function handleEditorCommand(command: EditorCommandType): void {
   if (command.type === 'switch') {
     switchWorktree(command)
     return

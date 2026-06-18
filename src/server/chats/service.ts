@@ -1,28 +1,30 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { type WebSocket } from 'ws'
-import { CHAT_PROVIDER, type ChatCommand } from '../../api/server/chats'
+import {
+  CHAT_PROVIDER,
+  type ChatCommand,
+  type ChatSession,
+} from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
+import { type Terminal } from '../../api/server/terminals'
+import { type WorktreeEvent } from '../../api/server/worktrees'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
+import { type TerminalService } from '../terminals/service'
 import { type WorktreeRegistry } from '../worktrees/registry'
-import { type WorktreeEvent } from '../worktrees/schemas'
 import { type ChatRegistry } from './registry'
-import { type ChatSession, type ChatTerminal } from './schemas'
-import { TerminalManager } from './terminals'
 
 /**
  * Coordinates the chat Electron role (a separate app, like the editor) and the
  * server-hosted terminals it displays. Mirrors {@link EditorService} for app
  * lifecycle: it spawns the chat process on demand and drives it over an SSE
- * command stream, while the terminals themselves live in {@link TerminalManager}
- * so they outlive the window.
+ * command stream. Chat CLIs run in server-owned terminals, but terminal
+ * lifecycle is delegated to {@link TerminalService}.
  */
 export class ChatService {
   readonly commands = new EventEmitter()
 
-  private readonly terminals: TerminalManager
   private chatProcess: ChildProcess | null = null
   private chatClientCount = 0
   private lastCommand: ChatCommand | null = null
@@ -32,19 +34,20 @@ export class ChatService {
     this.handleWorktreeEvent(event)
   }
 
+  private readonly onTerminalSnapshot = (): void => {
+    this.registry.notifyTerminalsChanged()
+  }
+
   constructor(
     private readonly registry: ChatRegistry,
     private readonly worktrees: WorktreeRegistry,
+    private readonly terminals: TerminalService,
     private readonly log: Logger,
   ) {
-    // Re-broadcast chats whenever the terminal set changes so each chat's
-    // server-stamped `terminalId` (and thus "openable" everywhere) stays current.
-    this.terminals = new TerminalManager(log, () =>
-      this.registry.notifyTerminalsChanged(),
-    )
     this.registry.setTerminalResolver((providerId, chatId) =>
       this.terminals.terminalIdForSession(providerId, chatId),
     )
+    this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
   }
 
@@ -73,13 +76,27 @@ export class ChatService {
     this.ensureChatApp()
   }
 
-  focusChat(target?: { providerId?: string; chatId?: string }): void {
-    const command: ChatCommand =
-      target?.chatId && target.providerId
-        ? { type: 'show', providerId: target.providerId, chatId: target.chatId }
-        : { type: 'show' }
+  focusChat(target?: { providerId: string; chatId: string }): void {
+    let command: ChatCommand = { type: 'show' }
+    if (target) {
+      const terminalId = this.terminals.terminalIdForSession(
+        target.providerId,
+        target.chatId,
+      )
+      if (terminalId) {
+        command = { type: 'show', ...target, terminalId }
+      } else {
+        this.log.warn(target, 'chat show target has no terminal')
+      }
+    }
     this.emitCommand(command)
-    this.log.info({ chatId: command.chatId }, 'chat show emitted')
+    this.log.info(
+      {
+        chatId: 'chatId' in command ? command.chatId : undefined,
+        terminalId: 'terminalId' in command ? command.terminalId : undefined,
+      },
+      'chat show emitted',
+    )
   }
 
   /** Historical, on-disk sessions for a worktree, most-recent first. */
@@ -94,7 +111,7 @@ export class ChatService {
     providerId?: string
     resumeSessionId?: string
     title?: string
-  }): Promise<ChatTerminal> {
+  }): Promise<Terminal> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
@@ -104,6 +121,19 @@ export class ChatService {
     if (!launch) {
       throw new HttpError(400, `Unknown chat provider: ${providerId}`)
     }
+    const sessionId = launch.sessionId ?? options.resumeSessionId
+    if (sessionId) {
+      const existing = this.terminals
+        .list(options.worktreeId)
+        .find(
+          (terminal) =>
+            terminal.providerId === providerId &&
+            terminal.sessionId === sessionId,
+        )
+      if (existing) {
+        return existing
+      }
+    }
 
     return this.terminals.create({
       worktreeId: options.worktreeId,
@@ -111,25 +141,13 @@ export class ChatService {
       // Prefer the launch's pinned session id (a resumed id, or a fresh one the
       // provider named) so the terminal links to its live chat; fall back to the
       // requested resume id.
-      sessionId: launch.sessionId ?? options.resumeSessionId,
+      sessionId,
       resumed: !!options.resumeSessionId,
       title: options.title,
       cwd: worktree.path,
       command: launch.command,
       args: launch.args,
     })
-  }
-
-  listTerminals(worktreeId?: string): ChatTerminal[] {
-    return this.terminals.list(worktreeId)
-  }
-
-  attachTerminal(
-    terminalId: string,
-    socket: WebSocket,
-    viewerId?: string,
-  ): void {
-    this.terminals.attach(terminalId, socket, viewerId)
   }
 
   private ensureChatApp(): void {
@@ -190,8 +208,8 @@ export class ChatService {
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     this.worktrees.events.off('worktree-event', this.onWorktreeEvent)
+    this.terminals.events.off('terminal-snapshot', this.onTerminalSnapshot)
     this.commands.removeAllListeners()
-    this.terminals.shutdown()
 
     const chatProcess = this.chatProcess
     this.chatProcess = null

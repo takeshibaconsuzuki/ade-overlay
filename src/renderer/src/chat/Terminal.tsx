@@ -2,12 +2,12 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import {
-  chatTerminalSocketPath,
-  type ChatTerminalClientMessage,
-  type ChatTerminalServerMessage,
-} from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
+import {
+  TerminalServerMessage,
+  terminalSocketPath,
+  type TerminalClientMessage,
+} from '../../../api/server/terminals'
 import { logger } from '../logger'
 
 // The terminal WebSocket shares the server origin, swapped to the ws scheme.
@@ -104,7 +104,7 @@ export function Terminal({
     // fingerprint of a suspend/resume — the event that strands the socket.
     let lastTickAt: number | null = null
 
-    const send = (message: ChatTerminalClientMessage): void => {
+    const send = (message: TerminalClientMessage): void => {
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message))
       }
@@ -211,7 +211,7 @@ export function Terminal({
       // appending it beneath stale content from the previous connection.
       term.reset()
       const next = new WebSocket(
-        `${WS_ORIGIN}${chatTerminalSocketPath(terminalId, viewerId)}`,
+        `${WS_ORIGIN}${terminalSocketPath(terminalId, viewerId)}`,
       )
       socket = next
       next.onopen = () => {
@@ -220,11 +220,16 @@ export function Terminal({
         refit()
       }
       next.onmessage = (event) => {
-        let message: ChatTerminalServerMessage
+        let message
         try {
-          message = JSON.parse(
-            event.data as string,
-          ) as ChatTerminalServerMessage
+          const result = TerminalServerMessage.safeParse(
+            JSON.parse(event.data as string),
+          )
+          if (!result.success) {
+            logger.error({ err: result.error }, 'invalid terminal message')
+            return
+          }
+          message = result.data
         } catch (error) {
           logger.error({ err: error }, 'failed to parse terminal message')
           return

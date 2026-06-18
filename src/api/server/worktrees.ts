@@ -1,8 +1,26 @@
 import { z } from 'zod/v4'
-import { WORKTREE_EVENT_TYPE } from '../../api/server/events'
-import { WORKTREE_ID_LENGTH } from './ids'
+import { WORKTREE_EVENT_TYPE } from './events'
+import { defineSseEvents, SSE_SNAPSHOT_EVENT } from './sse'
+
+export const REPOSITORIES_PATH = '/repositories'
+export const REPOSITORY_BRANCHES_PATH = `${REPOSITORIES_PATH}/branches`
+export const WORKTREES_PATH = '/worktrees'
+export const WORKTREE_PATH = `${WORKTREES_PATH}/:worktreeId`
+export const WORKTREE_OPEN_PATH = `${WORKTREE_PATH}/open`
+export const WORKTREE_CREATION_LOGS_OPEN_PATH = `${WORKTREE_PATH}/creation-logs/open`
+export const WORKTREE_DISMISS_CREATION_PATH = `${WORKTREE_PATH}/dismiss-creation`
+export const WORKTREE_PATH_PREVIEW_PATH = `${WORKTREES_PATH}/path-preview`
 
 export const PathSchema = z.string().min(1)
+export const WorktreeId = z.string().min(1)
+
+export function worktreeOpenPath(worktreeId: string): string {
+  return `${WORKTREES_PATH}/${encodeURIComponent(worktreeId)}/open`
+}
+
+export function worktreeCreationLogsOpenPath(worktreeId: string): string {
+  return `${WORKTREES_PATH}/${encodeURIComponent(worktreeId)}/creation-logs/open`
+}
 
 export const AddRepositoryRequest = z.object({
   repositoryPath: PathSchema,
@@ -31,18 +49,19 @@ export const ListBranchesRequest = z.object({
 })
 
 export const DeleteWorktreeParams = z.object({
-  worktreeId: z.string().length(WORKTREE_ID_LENGTH),
+  worktreeId: WorktreeId,
 })
 
 export const DeleteWorktreeRequest = z.object({
   deleteBranch: z.boolean().default(false),
-  // Force removal even when the worktree has modified or untracked files.
   force: z.boolean().default(false),
 })
 
 export const WorktreeIdParams = z.object({
-  worktreeId: z.string().length(WORKTREE_ID_LENGTH),
+  worktreeId: WorktreeId,
 })
+
+export const OpenWorktreeRequest = WorktreeIdParams
 
 export const Repository = z.object({
   mainWorktreePath: z.string(),
@@ -57,9 +76,10 @@ export const WorktreeCreationState = z.enum([
 ])
 
 export const Worktree = z.object({
-  worktreeId: z.string(),
+  worktreeId: WorktreeId,
   path: z.string(),
   mainWorktreePath: z.string(),
+  isMain: z.boolean(),
   head: z.string().optional(),
   branch: z.string().optional(),
   branchName: z.string().optional(),
@@ -67,8 +87,6 @@ export const Worktree = z.object({
   isDetached: z.boolean(),
   isPrunable: z.boolean(),
   prunableReason: z.string().optional(),
-  // Async-creation status. `ready` worktrees exist in git; `creating`/`failed`
-  // rows are transient registry jobs that may not exist on disk yet.
   creationState: WorktreeCreationState.default('ready'),
   creationError: z.string().optional(),
   hasCreationLogs: z.boolean().default(false),
@@ -78,52 +96,68 @@ export const Worktree = z.object({
 export const WorktreeSnapshot = z.object({
   repositories: z.array(Repository),
   worktrees: z.array(Worktree),
-  selectedWorktreeId: z.string().optional(),
+  selectedWorktreeId: WorktreeId.optional(),
 })
 
-const WorktreeSnapshotEvent = z.object({
-  type: z.literal('snapshot'),
+const RepositoryAddedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.repositoryAdded),
+  repository: Repository,
+  snapshot: WorktreeSnapshot,
+})
+
+const RepositoryRemovedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.repositoryRemoved),
+  mainWorktreePath: z.string(),
+  snapshot: WorktreeSnapshot,
+})
+
+const WorktreeCreatedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreated),
+  worktree: Worktree,
+  snapshot: WorktreeSnapshot,
+})
+
+const WorktreeCreationUpdatedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreationUpdated),
+  worktreeId: WorktreeId,
+  snapshot: WorktreeSnapshot,
+})
+
+const WorktreeDeletedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
+  worktreeId: WorktreeId,
+  branchDeleted: z.boolean(),
+  snapshot: WorktreeSnapshot,
+})
+
+const WorktreeSelectedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.worktreeSelected),
+  worktreeId: WorktreeId,
   snapshot: WorktreeSnapshot,
 })
 
 export const WorktreeEvent = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.repositoryAdded),
-    repository: Repository,
-    snapshot: WorktreeSnapshot,
-  }),
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.repositoryRemoved),
-    mainWorktreePath: z.string(),
-    snapshot: WorktreeSnapshot,
-  }),
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreated),
-    worktree: Worktree,
-    snapshot: WorktreeSnapshot,
-  }),
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.worktreeCreationUpdated),
-    worktreeId: z.string(),
-    snapshot: WorktreeSnapshot,
-  }),
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
-    worktreeId: z.string(),
-    branchDeleted: z.boolean(),
-    snapshot: WorktreeSnapshot,
-  }),
-  z.object({
-    type: z.literal(WORKTREE_EVENT_TYPE.worktreeSelected),
-    worktreeId: z.string(),
-    snapshot: WorktreeSnapshot,
-  }),
+  RepositoryAddedEvent,
+  RepositoryRemovedEvent,
+  WorktreeCreatedEvent,
+  WorktreeCreationUpdatedEvent,
+  WorktreeDeletedEvent,
+  WorktreeSelectedEvent,
 ])
 
-export const WorktreeStreamEvent = z.union([
-  WorktreeSnapshotEvent,
-  WorktreeEvent,
-])
+export const WorktreeSseEvents = defineSseEvents({
+  [SSE_SNAPSHOT_EVENT]: WorktreeSnapshot,
+  [WORKTREE_EVENT_TYPE.repositoryAdded]: RepositoryAddedEvent,
+  [WORKTREE_EVENT_TYPE.repositoryRemoved]: RepositoryRemovedEvent,
+  [WORKTREE_EVENT_TYPE.worktreeCreated]: WorktreeCreatedEvent,
+  [WORKTREE_EVENT_TYPE.worktreeCreationUpdated]: WorktreeCreationUpdatedEvent,
+  [WORKTREE_EVENT_TYPE.worktreeDeleted]: WorktreeDeletedEvent,
+  [WORKTREE_EVENT_TYPE.worktreeSelected]: WorktreeSelectedEvent,
+})
+
+export const WorktreeStreamResponse = z
+  .string()
+  .describe('Server-sent worktree snapshot and change events.')
 
 export const AddRepositoryResponse = z.object({
   repository: Repository,
@@ -136,7 +170,7 @@ export const RemoveRepositoryResponse = z.object({
 })
 
 export const CreateWorktreeResponse = z.object({
-  worktreeId: z.string(),
+  worktreeId: WorktreeId,
   worktree: Worktree,
 })
 
@@ -157,6 +191,12 @@ export const DismissCreationErrorResponse = z.object({
   snapshot: WorktreeSnapshot,
 })
 
+export const OpenWorktreeResponse = z.object({
+  worktreeId: WorktreeId,
+  url: z.string(),
+  alreadyStarted: z.boolean(),
+})
+
 export const ErrorResponse = z.object({
   error: z.string(),
   message: z.string(),
@@ -171,10 +211,13 @@ export type PreviewWorktreePathRequest = z.infer<
 export type ListBranchesRequest = z.infer<typeof ListBranchesRequest>
 export type DeleteWorktreeParams = z.infer<typeof DeleteWorktreeParams>
 export type DeleteWorktreeRequest = z.infer<typeof DeleteWorktreeRequest>
+export type WorktreeId = z.infer<typeof WorktreeId>
 export type WorktreeIdParams = z.infer<typeof WorktreeIdParams>
+export type OpenWorktreeRequest = z.infer<typeof OpenWorktreeRequest>
 export type Repository = z.infer<typeof Repository>
 export type Worktree = z.infer<typeof Worktree>
 export type WorktreeCreationState = z.infer<typeof WorktreeCreationState>
 export type WorktreeSnapshot = z.infer<typeof WorktreeSnapshot>
 export type WorktreeEvent = z.infer<typeof WorktreeEvent>
-export type WorktreeStreamEvent = z.infer<typeof WorktreeStreamEvent>
+export type WorktreeSseEvents = typeof WorktreeSseEvents
+export type OpenWorktreeResponse = z.infer<typeof OpenWorktreeResponse>

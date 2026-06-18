@@ -2,29 +2,17 @@ import { useEffect, useState } from 'react'
 import {
   CHAT_EVENT_TYPES,
   CHAT_STREAM_PATH,
-  type ChatStatus,
+  ChatSseEvents,
+  type Chat,
+  type ChatSnapshot as ChatSnapshotType,
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { logger } from '../logger'
+import { parseSsePayload } from '../sse'
 
-export type Chat = {
-  chatId: string
-  providerId: string
-  status: ChatStatus
-  title?: string
-  description?: string
-  worktreeId?: string
-  // The terminal this app runs the chat in, stamped by the server. Its presence
-  // is the single source of truth for whether the chat can be opened here.
-  terminalId?: string
-  updatedAt: number
-}
+export type { Chat }
 
-export type ChatSnapshot = {
-  chats: Chat[]
-}
-
-const EMPTY_SNAPSHOT: ChatSnapshot = { chats: [] }
+const EMPTY_SNAPSHOT: ChatSnapshotType = { chats: [] }
 
 /**
  * Subscribe to the server-sent live-chat stream. The initial `snapshot` event
@@ -35,7 +23,7 @@ export function useChatStream(): {
   chats: Chat[]
   connected: boolean
 } {
-  const [snapshot, setSnapshot] = useState<ChatSnapshot>(EMPTY_SNAPSHOT)
+  const [snapshot, setSnapshot] = useState<ChatSnapshotType>(EMPTY_SNAPSHOT)
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
@@ -44,14 +32,19 @@ export function useChatStream(): {
     const source = new EventSource(url)
 
     source.addEventListener('snapshot', (event) => {
-      const data = parseStream<ChatSnapshot>('snapshot', event.data)
+      const data = parseSsePayload(
+        ChatSseEvents,
+        'snapshot',
+        event.data,
+        'chat',
+      )
       if (data) {
         setSnapshot(data)
       }
     })
     for (const type of CHAT_EVENT_TYPES) {
       source.addEventListener(type, (event) => {
-        const data = parseStream<{ snapshot: ChatSnapshot }>(type, event.data)
+        const data = parseSsePayload(ChatSseEvents, type, event.data, 'chat')
         if (data) {
           setSnapshot(data.snapshot)
         }
@@ -72,13 +65,4 @@ export function useChatStream(): {
   }, [])
 
   return { chats: snapshot.chats, connected }
-}
-
-function parseStream<T>(type: string, raw: string): T | null {
-  try {
-    return JSON.parse(raw) as T
-  } catch (error) {
-    logger.error({ type, err: error }, 'failed to parse chat stream payload')
-    return null
-  }
 }

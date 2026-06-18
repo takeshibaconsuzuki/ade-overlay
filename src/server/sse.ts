@@ -1,14 +1,17 @@
 import { type FastifyReply, type FastifyRequest } from 'fastify'
+import { type SseEventSchemas, type SsePayload } from '../api/server/sse'
 
-type SseStream = {
-  send: (eventName: string, data: unknown) => void
+type SseStream<Schemas extends SseEventSchemas = SseEventSchemas> = {
+  send: <EventName extends keyof Schemas & string>(
+    eventName: EventName,
+    data: SsePayload<Schemas, EventName>,
+  ) => void
   onClose: (cleanup: () => void) => void
 }
 
-export function createSseStream(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): SseStream {
+export function createSseStream<
+  Schemas extends SseEventSchemas = SseEventSchemas,
+>(request: FastifyRequest, reply: FastifyReply): SseStream<Schemas> {
   reply.hijack()
 
   const headers: Record<string, string> = {

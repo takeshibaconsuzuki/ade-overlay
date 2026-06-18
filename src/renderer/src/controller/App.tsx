@@ -61,7 +61,10 @@ export function App(): React.JSX.Element {
       return
     }
     setError(null)
-    const repositoryPath = await window.desktop.selectRepository()
+    const [repositoryPath] = await window.desktop.chooseFiles({
+      title: 'Select a Git repository',
+      allowed: ['d'],
+    })
     if (!repositoryPath) {
       return
     }
@@ -203,12 +206,12 @@ export function App(): React.JSX.Element {
     [],
   )
 
-  const handleOpenCode = useCallback(
+  const handleOpenWorktree = useCallback(
     async (worktreeId: string): Promise<void> => {
       setError(null)
       logger.info({ worktreeId }, 'opening worktree editor')
       markBusy(worktreeId, true)
-      const { error } = await openWorktree({ body: { worktreeId } })
+      const { error } = await openWorktree({ path: { worktreeId } })
       if (error) {
         logger.error({ worktreeId, err: error }, 'open editor failed')
         setError(messageOf(error, 'Failed to open editor'))
@@ -254,7 +257,7 @@ export function App(): React.JSX.Element {
         worktrees={worktrees}
         busyIds={busyIds}
         sessionStatuses={sessionStatuses}
-        onOpen={handleOpenCode}
+        onOpen={handleOpenWorktree}
         onDelete={handleDelete}
         onRemoveRepository={handleRemoveRepository}
         onOpenCreationLogs={handleOpenCreationLogs}

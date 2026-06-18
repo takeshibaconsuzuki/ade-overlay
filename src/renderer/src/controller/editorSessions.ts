@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
   EDITOR_SESSION_STATUS_EVENT,
-  type EditorSessionStatus,
+  EDITOR_SESSION_STREAM_PATH,
+  EditorSessionSseEvents,
+  type EditorSessionStatus as EditorSessionStatusType,
   type EditorSessionStatusValue,
 } from '../../../api/server/editor'
 import { logger } from '../logger'
+import { parseSsePayload } from '../sse'
 
 export type EditorSessionState = {
   status: EditorSessionStatusValue
@@ -22,12 +25,17 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
   const [statuses, setStatuses] = useState<EditorSessionStatusMap>(new Map())
 
   useEffect(() => {
-    const url = `${SERVER_ORIGIN}/editorSessions`
+    const url = `${SERVER_ORIGIN}${EDITOR_SESSION_STREAM_PATH}`
     logger.info({ url }, 'opening editor session stream')
     const source = new EventSource(url)
 
     source.addEventListener('snapshot', (event) => {
-      const data = parseStream<EditorSessionStatus[]>('snapshot', event.data)
+      const data = parseSsePayload(
+        EditorSessionSseEvents,
+        'snapshot',
+        event.data,
+        'editor-session',
+      )
       if (data) {
         setStatuses(
           new Map(
@@ -38,9 +46,11 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
     })
 
     source.addEventListener(EDITOR_SESSION_STATUS_EVENT, (event) => {
-      const data = parseStream<EditorSessionStatus>(
+      const data = parseSsePayload(
+        EditorSessionSseEvents,
         EDITOR_SESSION_STATUS_EVENT,
         event.data,
+        'editor-session',
       )
       if (!data) {
         return
@@ -69,15 +79,6 @@ export function useEditorSessionStream(): EditorSessionStatusMap {
   return statuses
 }
 
-function toSessionState(entry: EditorSessionStatus): EditorSessionState {
+function toSessionState(entry: EditorSessionStatusType): EditorSessionState {
   return { status: entry.status, lastSwitchAt: entry.lastSwitchAt }
-}
-
-function parseStream<T>(type: string, raw: string): T | null {
-  try {
-    return JSON.parse(raw) as T
-  } catch (error) {
-    logger.error({ type, err: error }, 'failed to parse session stream payload')
-    return null
-  }
 }

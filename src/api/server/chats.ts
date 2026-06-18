@@ -1,11 +1,12 @@
+import { z } from 'zod/v4'
+import { defineSseEvents, SSE_SNAPSHOT_EVENT } from './sse'
+
 /**
  * Single source of truth for the live-chat HTTP surface shared between the
  * Fastify server and the unprivileged renderer.
  *
- * Lives in `src/api/server`, the node-free shared boundary: the server schema
- * (`chats/schemas.ts`) builds its Zod types from these names and the renderer
- * registers SSE listeners from them. Keep it dependency-free (no `node:*`, no
- * Zod) to preserve that boundary.
+ * Lives in `src/api/server`, the shared boundary: the server registers these
+ * Zod schemas and the renderer validates stream payloads with them.
  *
  * A chat is a single conversation inside an agentic coding system. Its status
  * is a coarse lifecycle the launcher can render at a glance:
@@ -50,72 +51,146 @@ export type ChatProviderId = (typeof CHAT_PROVIDER)[keyof typeof CHAT_PROVIDER]
 export const CHAT_HOOKS_PATH = '/chats/hooks'
 
 /** SSE path the launcher subscribes to for live chat status. */
-export const CHAT_STREAM_PATH = '/chats'
+export const CHAT_STREAM_PATH = '/chats/live'
 
 /**
  * The chat app is a separate Electron role that hosts terminals running chat
  * sessions. These paths coordinate it, mirroring the editor surface
  * (`src/api/server/editor.ts`):
- *   - `POST /chats/open` spawns + brings the chat app forward.
+ *   - `POST /showChat` spawns + brings the chat app forward.
+ *   - `GET /chats/live` streams live chat status.
  *   - `GET /chats/history` lists a worktree's historical (on-disk) sessions.
- *   - `GET|POST /chats/terminals` lists or starts server-hosted PTY terminals.
  *   - `GET /chats/commands` is the SSE stream the chat process listens to.
- *   - The per-terminal WebSocket attaches a renderer xterm to a live PTY.
  */
-export const CHAT_OPEN_PATH = '/chats/open'
+export const CHAT_SHOW_PATH = '/showChat'
 export const CHAT_HISTORY_PATH = '/chats/history'
-export const CHAT_TERMINALS_PATH = '/chats/terminals'
 export const CHAT_COMMAND_STREAM_PATH = '/chats/commands'
 
-/**
- * WebSocket path attaching a renderer xterm to a server-hosted PTY. The optional
- * `viewerId` is the renderer's per-mount viewer id; passing it lets the server
- * correlate its socket logs to the exact `Terminal` instance that connected.
- */
-export function chatTerminalSocketPath(
-  terminalId: string,
-  viewerId?: string,
-): string {
-  const path = `${CHAT_TERMINALS_PATH}/${terminalId}/socket`
-  return viewerId ? `${path}?viewer=${encodeURIComponent(viewerId)}` : path
-}
+export const ChatStatus = z.enum([
+  CHAT_STATUS.dormant,
+  CHAT_STATUS.idle,
+  CHAT_STATUS.busy,
+])
 
-/** Route template (Fastify param form) for the terminal WebSocket. */
-export const CHAT_TERMINAL_SOCKET_ROUTE = `${CHAT_TERMINALS_PATH}/:terminalId/socket`
+export const Chat = z.object({
+  chatId: z.string(),
+  providerId: z.string(),
+  status: ChatStatus,
+  title: z.string().optional(),
+  description: z.string().optional(),
+  worktreeId: z.string().optional(),
+  terminalId: z.string().optional(),
+  updatedAt: z.number(),
+})
 
-/** Whether a server-hosted terminal's PTY is still running or has exited. */
-export type ChatTerminalStatus = 'running' | 'exited'
+export const ChatSnapshot = z.object({
+  chats: z.array(Chat),
+})
+
+export const ChatEvent = z.object({
+  type: z.literal(CHAT_EVENT_TYPE.chatUpdated),
+  chat: Chat,
+  snapshot: ChatSnapshot,
+})
+
+export const ChatSseEvents = defineSseEvents({
+  [SSE_SNAPSHOT_EVENT]: ChatSnapshot,
+  [CHAT_EVENT_TYPE.chatUpdated]: ChatEvent,
+})
+
+export const ChatStreamResponse = z
+  .string()
+  .describe('Server-sent live chat snapshot and events.')
+
+export const ChatHookParams = z.object({
+  providerId: z.string().min(1),
+})
+
+export const ChatHookQuery = z.object({
+  worktreeId: z.string().optional(),
+})
+
+export const ChatHookPayload = z.looseObject({})
+
+export const ChatHookResponse = z.object({
+  ok: z.boolean(),
+})
+
+export const ChatSession = z.object({
+  sessionId: z.string(),
+  providerId: z.string(),
+  worktreeId: z.string(),
+  title: z.string().optional(),
+  updatedAt: z.number(),
+})
+
+export const ChatHistoryResponse = z.object({
+  sessions: z.array(ChatSession),
+})
+
+export const ChatShowRequest = z.union([
+  z.strictObject({
+    worktreeId: z.string().min(1),
+  }),
+  z.strictObject({
+    worktreeId: z.string().min(1),
+    providerId: z.string().min(1),
+    chatId: z.string().min(1),
+  }),
+])
+
+export const ChatShowResponse = z.object({
+  ok: z.boolean(),
+})
+
+export const ChatHistoryQuery = z.object({
+  worktreeId: z.string().min(1),
+})
+
+export const ChatCommandStreamResponse = z
+  .string()
+  .describe('Server-sent chat window commands.')
 
 /**
  * Commands streamed to the chat Electron process over the SSE command stream.
  * `show` brings the already-spawned chat window forward. When it carries a
  * target chat (a live chat clicked from another window, e.g. the launcher), the
- * chat renderer also selects that chat's terminal once it is available.
+ * server includes the resolved terminal id for the renderer to select.
  */
-export type ChatShowCommand = {
-  type: 'show'
-  providerId?: string
-  chatId?: string
-}
+export type ChatShowCommand =
+  | {
+      type: 'show'
+    }
+  | {
+      type: 'show'
+      providerId: string
+      chatId: string
+      terminalId: string
+    }
 
 export type ChatCommand = ChatShowCommand
 
-/** Messages the renderer sends up the terminal WebSocket. */
-export type ChatTerminalClientMessage =
-  | { type: 'input'; data: string }
-  | { type: 'resize'; cols: number; rows: number }
-  // Application-level heartbeat: the renderer pings periodically and treats a
-  // missing pong as a dead connection (e.g. a half-open socket after the laptop
-  // slept), which a browser WebSocket cannot otherwise detect.
-  | { type: 'ping' }
+export const ChatShowCommand = z.union([
+  z.strictObject({
+    type: z.literal('show'),
+  }),
+  z.strictObject({
+    type: z.literal('show'),
+    providerId: z.string().min(1),
+    chatId: z.string().min(1),
+    terminalId: z.string().min(1),
+  }),
+])
 
-/** Messages the server sends down the terminal WebSocket. */
-export type ChatTerminalServerMessage =
-  | { type: 'output'; data: string }
-  | { type: 'exit'; code: number | null }
-  | { type: 'pong' }
-  // Sent to a viewer right before the server evicts its socket because a newer
-  // viewer attached to the same terminal. Distinct from `exit` (the PTY is still
-  // alive, now owned by the other viewer): it tells this viewer to stop, without
-  // reconnecting, so two viewers can't ping-pong supersede each other forever.
-  | { type: 'superseded' }
+export const ChatCommand = ChatShowCommand
+
+export const ChatCommandSseEvents = defineSseEvents({
+  show: ChatCommand,
+})
+
+export type Chat = z.infer<typeof Chat>
+export type ChatSnapshot = z.infer<typeof ChatSnapshot>
+export type ChatEvent = z.infer<typeof ChatEvent>
+export type ChatSession = z.infer<typeof ChatSession>
+export type ChatSseEvents = typeof ChatSseEvents
+export type ChatCommandSseEvents = typeof ChatCommandSseEvents

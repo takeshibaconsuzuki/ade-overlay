@@ -10,11 +10,11 @@ import {
   type EditorSwitchCommand,
 } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
+import { type WorktreeEvent } from '../../api/server/worktrees'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
 import { type WorktreeRegistry } from '../worktrees/registry'
-import { type WorktreeEvent } from '../worktrees/schemas'
 import { renderBootstrapHtml } from './bootstrap'
 import { readUserDataPayload } from './userData'
 import { startVscodeServer } from './vscodeServer'
@@ -84,7 +84,7 @@ export class EditorService {
   }
 
   /** Open a worktree in the editor, making it the globally selected worktree. */
-  async openCode(worktreeId: string): Promise<{
+  async openWorktreeEditor(worktreeId: string): Promise<{
     worktreeId: string
     url: string
     alreadyStarted: boolean

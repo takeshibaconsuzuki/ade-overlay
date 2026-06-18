@@ -1,0 +1,320 @@
+Endpoint Inventory
+==================
+
+This file lists the current server endpoints by service. Public routes are
+included first; hidden/internal routes are listed under each service where they
+are still registered by the server.
+
+Shared Types
+------------
+
+type ErrorResponse = {
+  error: string
+  message: string
+}
+
+type Sse<T> = T
+type WebSocket<ClientMessage, ServerMessage> = {
+  send: ClientMessage
+  receive: ServerMessage
+}
+
+type Repository = {
+  mainWorktreePath: string
+  bootstrapCommand?: string
+}
+
+type Worktree = {
+  worktreeId: string
+  path: string
+  mainWorktreePath: string
+  head?: string
+  branch?: string
+  branchName?: string
+  isBare: boolean
+  isDetached: boolean
+  isPrunable: boolean
+  prunableReason?: string
+  creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed'
+  creationError?: string
+  hasCreationLogs: boolean
+  isOpenable: boolean
+}
+
+type WorktreeSnapshot = {
+  repositories: Repository[]
+  worktrees: Worktree[]
+  selectedWorktreeId?: string
+}
+
+type WorktreeEvent =
+  | { type: 'repository-added'; repository: Repository; snapshot: WorktreeSnapshot }
+  | { type: 'repository-removed'; mainWorktreePath: string; snapshot: WorktreeSnapshot }
+  | { type: 'worktree-created'; worktree: Worktree; snapshot: WorktreeSnapshot }
+  | { type: 'worktree-creation-updated'; worktreeId: string; snapshot: WorktreeSnapshot }
+  | { type: 'worktree-deleted'; worktreeId: string; branchDeleted: boolean; snapshot: WorktreeSnapshot }
+  | { type: 'worktree-selected'; worktreeId: string; snapshot: WorktreeSnapshot }
+
+type EditorCommand =
+  | { type: 'switch'; worktreeId: string; url: string }
+  | { type: 'show' }
+  | { type: 'close'; commandId: string; worktreeId: string }
+  | { type: 'open-file'; worktreeId: string; url: string; filePath: string }
+
+type EditorSessionStatus = {
+  worktreeId: string
+  status: 'off' | 'starting' | 'on'
+  lastSwitchAt?: string
+}
+
+type Chat = {
+  chatId: string
+  providerId: string
+  status: 'dormant' | 'idle' | 'busy'
+  title?: string
+  description?: string
+  worktreeId?: string
+  terminalId?: string
+  updatedAt: number
+}
+
+type ChatEvent = {
+  type: 'chat-updated'
+  chat: Chat
+  snapshot: { chats: Chat[] }
+}
+
+type ChatSession = {
+  sessionId: string
+  providerId: string
+  worktreeId: string
+  title?: string
+  updatedAt: number
+}
+
+type Terminal = {
+  terminalId: string
+  worktreeId: string
+  providerId: string
+  sessionId?: string
+  title?: string
+  status: 'running' | 'exited'
+}
+
+Worktrees
+---------
+
+// POST /repositories
+addRepository({
+  repositoryPath: string
+}):
+  | { repository: Repository; snapshot: WorktreeSnapshot }
+  | ErrorResponse
+
+// DELETE /repositories
+removeRepository({
+  mainWorktreePath: string
+}):
+  { removed: boolean; snapshot: WorktreeSnapshot }
+
+// GET /worktrees
+listWorktrees():
+  Sse<WorktreeSnapshot | WorktreeEvent>
+
+// POST /worktrees
+createWorktree({
+  mainWorktreePath: string
+  newBranch?: string
+  baseBranch: string
+  worktreePath: string
+  bootstrap?: boolean
+}):
+  | { worktreeId: string; worktree: Worktree }
+  | ErrorResponse
+
+// POST /worktrees/{worktreeId}/open
+openWorktree({
+  worktreeId: string
+}):
+  | { worktreeId: string; url: string; alreadyStarted: boolean }
+  | ErrorResponse
+
+// POST /worktrees/{worktreeId}/dismiss-creation
+dismissCreationError({
+  worktreeId: string
+}):
+  | { snapshot: WorktreeSnapshot }
+  | ErrorResponse
+
+// POST /repositories/branches
+listBranches({
+  mainWorktreePath: string
+}):
+  | { branches: string[] }
+  | ErrorResponse
+
+// POST /worktrees/path-preview
+previewWorktreePath({
+  mainWorktreePath: string
+  newBranch?: string
+  baseBranch: string
+}):
+  | { worktreePath: string }
+  | ErrorResponse
+
+// DELETE /worktrees/{worktreeId}
+deleteWorktree({
+  worktreeId: string
+  deleteBranch?: boolean
+  force?: boolean
+}):
+  | { deleted: boolean; branchDeleted: boolean }
+  | ErrorResponse
+
+Editor
+------
+
+// GET /editorCommands
+editorCommands():
+  Sse<EditorCommand>
+
+// GET /editorSessions
+editorSessions():
+  Sse<EditorSessionStatus>
+
+// POST /showEditor
+showEditor({
+  worktreeId: string
+}):
+  | { worktreeId: string; url: string; alreadyStarted: boolean }
+  | ErrorResponse
+
+// POST /worktrees/{worktreeId}/creation-logs/open
+openCreationLogs({
+  worktreeId: string
+}):
+  | { ok: true }
+  | ErrorResponse
+
+Editor Hidden/Internal
+----------------------
+
+// GET /editorExtensionCommands?worktreeId=...
+editorExtensionCommands({
+  worktreeId: string
+}):
+  Sse<EditorCommand>
+
+// POST /editorCommandAcks
+editorCommandAcks({
+  commandId: string
+}):
+  { ok: true }
+
+// GET|HEAD /__ade-overlay/editor-bootstrap
+editorBootstrap():
+  string
+
+// DELETE|GET|HEAD|PATCH|POST|PUT /editor
+// DELETE|GET|HEAD|PATCH|POST|PUT /editor/*
+editorProxy():
+  proxiedEditorResponse
+
+Chats
+-----
+
+// GET /chats/live
+liveChats():
+  Sse<{ chats: Chat[] } | ChatEvent>
+
+// POST /showChat
+showChat(
+  | { worktreeId: string }
+  | { worktreeId: string; providerId: string; chatId: string }
+):
+  { ok: boolean }
+
+// GET /chats/history?worktreeId=...
+historicalChats({
+  worktreeId: string
+}):
+  { sessions: ChatSession[] }
+
+// GET /chats/commands
+chatCommands():
+  Sse<{ type: 'show'; providerId?: string; chatId?: string }>
+
+Chats Hidden/Internal
+---------------------
+
+// POST /chats/hooks/{providerId}?worktreeId=...
+chatHook({
+  providerId: string
+  worktreeId?: string
+  body: Record<string, unknown>
+}):
+  { ok: boolean }
+
+Terminals
+---------
+
+// GET /terminals
+terminalEvents():
+  Sse<{ terminals: Terminal[] }>
+
+// POST /terminals
+createTerminal({
+  worktreeId: string
+  providerId?: string
+  resumeSessionId?: string
+  title?: string
+}):
+  Terminal
+
+// WS /terminals/{terminalId}/socket?viewer=...
+terminalSocket({
+  terminalId: string
+  viewer?: string
+}):
+  WebSocket<
+    | { type: 'input'; data: string }
+    | { type: 'resize'; cols: number; rows: number }
+    | { type: 'ping' },
+    | { type: 'output'; data: string }
+    | { type: 'exit'; code: number | null }
+    | { type: 'pong' }
+    | { type: 'superseded' }
+  >
+
+Logs
+----
+
+// POST /logs
+ingestLogs({
+  records: Array<{
+    source?: string
+    level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+    time: number
+    msg?: string
+    fields?: Record<string, unknown>
+    bindings?: Record<string, unknown>
+  }>
+}):
+  { received: number }
+
+App Focus Hidden/Internal
+-------------------------
+
+// POST /app-focus
+appFocus({
+  event: 'closed' | 'focused'
+  role: 'chat' | 'editor'
+}):
+  { ok: true }
+
+Core
+----
+
+// GET /openapi.json
+openapi():
+  OpenAPIObject

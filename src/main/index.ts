@@ -2,15 +2,13 @@ import { parseArgs } from 'node:util'
 import { app, nativeTheme } from 'electron'
 import { startServer } from '../server'
 import { flushLogs, logger } from '../server/logger'
-import {
-  createWindow as createChatWindow,
-  registerChatIpcHandlers,
-} from './chat'
+import { createWindow as createChatWindow } from './chat'
 import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
 import { setRoleDockIcon } from './dockIcon'
 import { createWindow as createEditorWindow } from './editor'
+import { registerMainIpcHandlers } from './ipc'
 
 const log = logger.child({ process: 'main' })
 const cliOptions = parseAppCliOptions(process.argv)
@@ -78,7 +76,7 @@ async function main(): Promise<void> {
       app.setName('ADE Chat')
       await app.whenReady()
       setRoleDockIcon('chat')
-      registerChatIpcHandlers()
+      registerMainIpcHandlers()
       createChatWindow()
       log.info('chat window created')
       break
@@ -88,6 +86,7 @@ async function main(): Promise<void> {
       setRoleDockIcon('controller')
       stopWorktreeCreationNotifications =
         registerWorktreeCreationNotifications(log)
+      registerMainIpcHandlers()
       registerControllerIpcHandlers()
       createControllerWindow()
       log.info('controller window created')

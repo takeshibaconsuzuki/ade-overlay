@@ -22,7 +22,7 @@
 - `src/renderer/`: unprivileged React/browser code. Do not import Node APIs or runtime layers.
 - `src/api/`: node-free shared contracts. Keep server and preload contracts separate.
 - `src/api/server/generated/`: generated client output. Do not edit by hand.
-- `src/server/`: Fastify runtime code. Add behavior through service routes and schemas.
+- `src/server/`: Fastify runtime code. Add behavior through service routes that import shared API schemas.
 
 Also see @src/DESIGN.md. You must read this before writing code.
 
@@ -34,7 +34,9 @@ Also see @src/DESIGN.md. You must read this before writing code.
 ## Server API
 
 - Use Fastify 5 with `fastify-type-provider-zod` and Zod v4.
-- Keep schemas in each service `schemas.ts`; register routes from each service `routes.ts`.
+- Keep route constants, enums, Zod schemas, inferred types, and stream/socket message schemas in `src/api/server/*`.
+- Register Fastify routes from each service `routes.ts` by importing schemas from `src/api/server/*`.
+- Use generated server clients from `src/api/server/generated/` for renderer REST calls; parse SSE/WebSocket messages in the renderer with the shared Zod schemas.
 - Keep shared server constants in `src/api/server/config.ts`.
 - When route schemas or operation IDs change, run `npm run client:generate`.
 

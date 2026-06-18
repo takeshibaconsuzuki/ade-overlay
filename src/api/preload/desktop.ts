@@ -5,11 +5,18 @@
  * implements it; the renderer uses it through the ambient `window.desktop`
  * declaration.
  */
+export type ChooseFileKind = 'd' | 'f'
+
+export type ChooseFilesOptions = {
+  title: string
+  allowed: ChooseFileKind[]
+}
+
 export interface DesktopApi {
-  /** Opens a native directory picker; resolves to the chosen path or null. */
-  selectRepository(): Promise<string | null>
+  /** Opens a native file picker; resolves to the chosen paths. */
+  chooseFiles(options: ChooseFilesOptions): Promise<string[]>
   /** Opens the worktrees window (focusing it if already open). */
-  openWorktrees(): Promise<void>
+  openWorktreesWindow(): Promise<void>
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow(): Promise<void>
 }
