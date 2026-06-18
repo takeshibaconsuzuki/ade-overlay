@@ -1,6 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import {
   chatTerminalSocketPath,
@@ -31,6 +31,13 @@ export function Terminal({
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const refitRef = useRef<(() => void) | null>(null)
+  // A stable id for this mounted viewer (one per Terminal component instance,
+  // not per connection). Stamped on every log line and sent to the server on the
+  // socket URL so a post-mortem can tell one reconnecting viewer from two
+  // instances dueling over the same terminal — `attempt` resets per mount and
+  // can't, on its own, make that distinction. Lazy `useState` keeps it stable
+  // for the instance's life without reading a ref during render.
+  const [viewerId] = useState(() => crypto.randomUUID().slice(0, 8))
   // Keep the latest callback in a ref so the socket handler (bound once per
   // terminal) always calls the current one without re-running the effect.
   const onExitRef = useRef(onExit)
@@ -43,6 +50,11 @@ export function Terminal({
     if (!container) {
       return
     }
+
+    // Mount/dispose bookends: with these, a server-side supersede war can be
+    // attributed to a still-alive viewer (mounted, never disposed) vs. a clean
+    // remount (disposed then a new viewerId mounts).
+    logger.info({ terminalId, viewerId }, 'terminal viewer mounted')
 
     // How often the renderer pings the server, and how long it waits for a pong
     // before declaring the socket dead. A browser WebSocket reports `OPEN` even
@@ -75,13 +87,15 @@ export function Terminal({
     // A single terminal reconnects across the life of this effect, so the socket
     // and its heartbeat timers are mutable. `disposed` guards against the
     // unmount cleanup racing a queued reconnect; `exited` stops reconnecting
-    // once the PTY is gone for good.
+    // once the PTY is gone for good; `yielded` stops it once a newer viewer has
+    // taken over this terminal (the server told us we were superseded).
     let socket: WebSocket | null = null
     let pingTimer: ReturnType<typeof setInterval> | null = null
     let pongTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
     let exited = false
+    let yielded = false
     // Monotonically increasing attempt id so server- and renderer-side logs of a
     // single reproduction can be lined up across a sleep/reconnect cycle.
     let generation = 0
@@ -127,11 +141,11 @@ export function Terminal({
     }
 
     const scheduleReconnect = (): void => {
-      if (disposed || exited || reconnectTimer !== null) {
+      if (disposed || exited || yielded || reconnectTimer !== null) {
         return
       }
       logger.info(
-        { terminalId, delayMs: RECONNECT_DELAY_MS },
+        { terminalId, viewerId, delayMs: RECONNECT_DELAY_MS },
         'terminal reconnect scheduled',
       )
       reconnectTimer = setTimeout(() => {
@@ -150,7 +164,7 @@ export function Terminal({
         const now = Date.now()
         if (lastTickAt !== null && now - lastTickAt > PING_INTERVAL_MS * 2) {
           logger.info(
-            { terminalId, gapMs: now - lastTickAt },
+            { terminalId, viewerId, gapMs: now - lastTickAt },
             'terminal heartbeat gap detected (likely system suspend/resume)',
           )
         }
@@ -159,7 +173,7 @@ export function Terminal({
         if (pongTimer === null) {
           pongTimer = setTimeout(() => {
             logger.warn(
-              { terminalId, timeoutMs: PONG_TIMEOUT_MS },
+              { terminalId, viewerId, timeoutMs: PONG_TIMEOUT_MS },
               'terminal heartbeat timed out; forcing reconnect',
             )
             forceReconnect()
@@ -188,20 +202,20 @@ export function Terminal({
     }
 
     const connect = (): void => {
-      if (disposed || exited) {
+      if (disposed || exited || yielded) {
         return
       }
       const attempt = ++generation
-      logger.info({ terminalId, attempt }, 'terminal connecting')
+      logger.info({ terminalId, viewerId, attempt }, 'terminal connecting')
       // Rebuild the screen from the server's replayed buffer instead of
       // appending it beneath stale content from the previous connection.
       term.reset()
       const next = new WebSocket(
-        `${WS_ORIGIN}${chatTerminalSocketPath(terminalId)}`,
+        `${WS_ORIGIN}${chatTerminalSocketPath(terminalId, viewerId)}`,
       )
       socket = next
       next.onopen = () => {
-        logger.info({ terminalId, attempt }, 'terminal connected')
+        logger.info({ terminalId, viewerId, attempt }, 'terminal connected')
         startHeartbeat()
         refit()
       }
@@ -223,19 +237,33 @@ export function Terminal({
             pongTimer = null
           }
         } else if (message.type === 'exit') {
-          logger.info({ terminalId, attempt }, 'terminal exited')
+          logger.info({ terminalId, viewerId, attempt }, 'terminal exited')
           exited = true
           onExitRef.current?.()
+        } else if (message.type === 'superseded') {
+          // Only honor this on the live socket: a stale socket we already
+          // replaced (e.g. mid-reconnect) must not stop the viewer that owns the
+          // current connection. The PTY is still alive — don't call onExit (that
+          // closes the tab); just stop so we don't reconnect into a war.
+          if (socket === next) {
+            logger.info(
+              { terminalId, viewerId, attempt },
+              'terminal superseded by another viewer; yielding',
+            )
+            yielded = true
+            stopHeartbeat()
+          }
         }
       }
       next.onerror = () => {
-        logger.warn({ terminalId, attempt }, 'terminal socket error')
+        logger.warn({ terminalId, viewerId, attempt }, 'terminal socket error')
       }
       next.onclose = (event) => {
         if (socket === next) {
           logger.info(
             {
               terminalId,
+              viewerId,
               attempt,
               code: event.code,
               reason: event.reason,
@@ -260,6 +288,7 @@ export function Terminal({
 
     return () => {
       disposed = true
+      logger.info({ terminalId, viewerId }, 'terminal viewer disposed')
       stopHeartbeat()
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
@@ -274,7 +303,9 @@ export function Terminal({
       term.dispose()
       refitRef.current = null
     }
-  }, [terminalId])
+    // `viewerId` is stable for the life of this component instance, so listing it
+    // never reconnects the socket; it is here only to satisfy exhaustive-deps.
+  }, [terminalId, viewerId])
 
   // When this tab becomes active again, refit after layout settles in case the
   // window was resized while it was hidden.

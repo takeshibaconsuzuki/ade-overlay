@@ -241,8 +241,9 @@ function registerTerminalSocket(
     if (!terminalId) {
       return
     }
+    const viewerId = viewerIdFromUrl(request.url)
     wss.handleUpgrade(request, socket, head, (ws) => {
-      chat.attachTerminal(terminalId, ws)
+      chat.attachTerminal(terminalId, ws, viewerId)
     })
   })
 
@@ -273,4 +274,21 @@ function terminalIdFromUrl(url: string | undefined): string | null {
   }
   const id = pathname.slice(prefix.length, -suffix.length)
   return id.length > 0 && !id.includes('/') ? decodeURIComponent(id) : null
+}
+
+/**
+ * Read the renderer's `viewer` query param off a terminal socket upgrade URL.
+ * The renderer stamps a per-mount id there so server-side socket logs can be
+ * joined to the exact `Terminal` component instance that opened the connection —
+ * the only way to tell one reconnecting viewer from two dueling ones.
+ */
+function viewerIdFromUrl(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined
+  }
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('viewer') ?? undefined
+  } catch {
+    return undefined
+  }
 }

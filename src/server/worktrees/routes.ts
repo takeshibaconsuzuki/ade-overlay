@@ -183,9 +183,22 @@ async function streamWorktreeEvents(
     stream.send(event.type, event)
   }
 
+  // Log the listener count on every add/remove. This is the authoritative,
+  // server-side ledger of worktree-event subscribers: renderer "closing stream"
+  // logs are lost when a window tears down, so without this a leak (count climbs
+  // and never drops) is invisible. A healthy session oscillates as windows open
+  // and close; a steady climb toward WORKTREE_EVENT_MAX_LISTENERS is the tell.
   registry.events.on('worktree-event', onWorktreeEvent)
+  request.log.info(
+    { listeners: registry.events.listenerCount('worktree-event') },
+    'worktree-event listener added',
+  )
   stream.onClose(() => {
     registry.events.off('worktree-event', onWorktreeEvent)
+    request.log.info(
+      { listeners: registry.events.listenerCount('worktree-event') },
+      'worktree-event listener removed',
+    )
   })
 
   stream.send('snapshot', await registry.getSnapshot())

@@ -8,3 +8,5 @@
 - Deterministic color per worktree
 - Text on right side of terminal is cut off
 - Make vscode upgrading text white
+- A prunable worktree cannot be deleted through the app
+- Restyle live chat button

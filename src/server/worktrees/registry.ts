@@ -54,8 +54,22 @@ function creationLogPathFor(worktreeId: string): string {
   return join(getCreationLogsDir(), `${worktreeId}.log`)
 }
 
+/**
+ * Max concurrent `worktree-event` listeners before Node warns of a leak. Each
+ * open window's SSE stream adds one (launcher, worktrees window, chat, and one
+ * per editor window) on top of the two long-lived service listeners (chats,
+ * editor), so a normal multi-window session legitimately exceeds Node's default
+ * of 10. This is a generous ceiling that still flags a genuine leak (a missing
+ * `off()` would climb past it), paired with the add/remove logging in
+ * `streamWorktreeEvents` so the live count is auditable even when it stays under
+ * the cap.
+ */
+const WORKTREE_EVENT_MAX_LISTENERS = 64
+
 export class WorktreeRegistry {
-  readonly events = new EventEmitter()
+  readonly events = new EventEmitter().setMaxListeners(
+    WORKTREE_EVENT_MAX_LISTENERS,
+  )
 
   private readonly repositories = new Map<string, TrackedRepository>()
   private readonly creationJobs = new Map<string, CreationJob>()
@@ -520,7 +534,21 @@ export class WorktreeRegistry {
           WORKTREE_DIRTY_ERROR_CODE,
         )
       }
-      throw error
+      // A prunable worktree — its `.git` link is gone but git still tracks the
+      // path — can't be removed by `git worktree remove`, even with --force
+      // ("validation failed, cannot remove working tree: '<path>/.git' does not
+      // exist"). `git worktree prune` is the only thing that clears it, so fall
+      // back to it; otherwise the row is permanently undeletable (and the path
+      // stays blocked, so it can't be recreated either).
+      if (worktree.isPrunable || isPrunableWorktreeError(error)) {
+        await runGit(worktree.mainWorktreePath, ['worktree', 'prune'], this.log)
+        this.log.info(
+          { worktreeId, path: worktree.path },
+          'pruned worktree after remove failed',
+        )
+      } else {
+        throw error
+      }
     }
 
     let branchDeleted = false
@@ -925,6 +953,17 @@ function getBranchName(branch?: string): string | undefined {
 function isDirtyWorktreeError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return /use --force/i.test(message)
+}
+
+/**
+ * Detect git's refusal to remove a worktree whose `.git` link is missing, e.g.
+ * "validation failed, cannot remove working tree: '<path>/.git' does not exist".
+ * This is the prunable case `git worktree remove` can't handle — only `prune`
+ * can — so it's a backstop for when the snapshot's `isPrunable` flag is stale.
+ */
+function isPrunableWorktreeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /cannot remove working tree/i.test(message)
 }
 
 /**

@@ -67,9 +67,17 @@ export const CHAT_HISTORY_PATH = '/chats/history'
 export const CHAT_TERMINALS_PATH = '/chats/terminals'
 export const CHAT_COMMAND_STREAM_PATH = '/chats/commands'
 
-/** WebSocket path attaching a renderer xterm to a server-hosted PTY. */
-export function chatTerminalSocketPath(terminalId: string): string {
-  return `${CHAT_TERMINALS_PATH}/${terminalId}/socket`
+/**
+ * WebSocket path attaching a renderer xterm to a server-hosted PTY. The optional
+ * `viewerId` is the renderer's per-mount viewer id; passing it lets the server
+ * correlate its socket logs to the exact `Terminal` instance that connected.
+ */
+export function chatTerminalSocketPath(
+  terminalId: string,
+  viewerId?: string,
+): string {
+  const path = `${CHAT_TERMINALS_PATH}/${terminalId}/socket`
+  return viewerId ? `${path}?viewer=${encodeURIComponent(viewerId)}` : path
 }
 
 /** Route template (Fastify param form) for the terminal WebSocket. */
@@ -106,3 +114,8 @@ export type ChatTerminalServerMessage =
   | { type: 'output'; data: string }
   | { type: 'exit'; code: number | null }
   | { type: 'pong' }
+  // Sent to a viewer right before the server evicts its socket because a newer
+  // viewer attached to the same terminal. Distinct from `exit` (the PTY is still
+  // alive, now owned by the other viewer): it tells this viewer to stop, without
+  // reconnecting, so two viewers can't ping-pong supersede each other forever.
+  | { type: 'superseded' }

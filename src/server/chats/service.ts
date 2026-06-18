@@ -123,8 +123,8 @@ export class ChatService {
     return this.terminals.list(worktreeId)
   }
 
-  attachTerminal(terminalId: string, socket: WebSocket): void {
-    this.terminals.attach(terminalId, socket)
+  attachTerminal(terminalId: string, socket: WebSocket, viewerId?: string): void {
+    this.terminals.attach(terminalId, socket, viewerId)
   }
 
   private ensureChatApp(): void {

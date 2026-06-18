@@ -52,6 +52,13 @@ type TerminalRecord = {
   bufferBytes: number
   // At most one renderer views a terminal at a time; a fresh attach replaces it.
   socket: WebSocket | null
+  // Identity of the currently-attached socket, so supersede/detach logs can name
+  // exactly which connection was evicted. Paired 1:1 with `socket`.
+  socketId: string | null
+  // The renderer viewer (a single mounted Terminal component) that owns the
+  // current socket. Sent by the renderer on the WS URL so both ends of a single
+  // connection can be joined in a post-mortem.
+  viewerId: string | null
 }
 
 export type CreateTerminalOptions = {
@@ -130,6 +137,8 @@ export class TerminalManager {
       buffer: [],
       bufferBytes: 0,
       socket: null,
+      socketId: null,
+      viewerId: null,
     }
     this.terminals.set(id, record)
 
@@ -171,23 +180,47 @@ export class TerminalManager {
    * Attach a renderer WebSocket to a terminal: replay the buffered output, then
    * stream live I/O. A new attach supersedes any previous viewer.
    */
-  attach(terminalId: string, socket: WebSocket): void {
+  attach(terminalId: string, socket: WebSocket, viewerId?: string): void {
+    const socketId = randomUUID().slice(0, 8)
     const record = this.terminals.get(terminalId)
     if (!record) {
       // Unknown/closed terminal: tell the client it's gone and close.
+      this.log.info(
+        { terminalId, socketId, viewerId },
+        'chat terminal socket attached to missing terminal',
+      )
       send(socket, { type: 'exit', code: null })
       socket.close()
       return
     }
 
-    // Replace any prior viewer so only one socket receives output.
+    // Replace any prior viewer so only one socket receives output. Capture the
+    // evicted socket's identity first: a perpetual reconnect war shows up here as
+    // two viewers repeatedly superseding each other, which is invisible unless
+    // each eviction names exactly which socket/viewer it kicked.
     const superseded = !!record.socket && record.socket !== socket
+    const supersededSocketId = superseded ? record.socketId : null
+    const supersededViewerId = superseded ? record.viewerId : null
     if (superseded) {
+      // Tell the evicted viewer it lost the terminal *before* closing, so it
+      // stops instead of treating the close as a dropped connection and
+      // reconnecting — which would supersede us right back, forever.
+      send(record.socket, { type: 'superseded' })
       record.socket?.close()
     }
     record.socket = socket
+    record.socketId = socketId
+    record.viewerId = viewerId ?? null
     this.log.info(
-      { terminalId, superseded, status: record.status },
+      {
+        terminalId,
+        socketId,
+        viewerId,
+        superseded,
+        supersededSocketId,
+        supersededViewerId,
+        status: record.status,
+      },
       'chat terminal socket attached',
     )
 
@@ -223,16 +256,30 @@ export class TerminalManager {
     })
 
     socket.on('close', () => {
-      if (record.socket === socket) {
+      // Only the *current* owner clears the record: a superseded socket's close
+      // fires after the slot was already handed to its replacement, so logging
+      // `wasOwner:false` distinguishes "the viewer left" from "we evicted it".
+      const wasOwner = record.socket === socket
+      if (wasOwner) {
         record.socket = null
-        this.log.info({ terminalId }, 'chat terminal socket detached')
+        record.socketId = null
+        record.viewerId = null
       }
+      this.log.info(
+        { terminalId, socketId, viewerId, wasOwner },
+        'chat terminal socket detached',
+      )
     })
     socket.on('error', (error) => {
       if (record.socket === socket) {
         record.socket = null
+        record.socketId = null
+        record.viewerId = null
       }
-      this.log.warn({ err: error, terminalId }, 'chat terminal socket error')
+      this.log.warn(
+        { err: error, terminalId, socketId, viewerId },
+        'chat terminal socket error',
+      )
     })
   }
 

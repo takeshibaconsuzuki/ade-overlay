@@ -87,6 +87,12 @@ function toSerializable(fields: unknown): Record<string, unknown> {
   }
 }
 
+// A per-renderer-boot id. Shipped renderer logs are re-emitted server-side under
+// the main process pid, so without this every window collapses into one
+// indistinguishable source. Binding it lets a post-mortem separate lines by the
+// window/renderer that produced them.
+const RENDERER_ID = crypto.randomUUID().slice(0, 8)
+
 export const logger: Logger = pino({
   name: 'renderer',
   level: import.meta.env.DEV ? 'debug' : 'info',
@@ -101,7 +107,10 @@ export const logger: Logger = pino({
           time: logEvent.ts,
           msg: (hasFields ? second : first) as string | undefined,
           fields: hasFields ? toSerializable(first) : undefined,
-          bindings: Object.assign({}, ...(logEvent.bindings ?? [])),
+          bindings: Object.assign(
+            { renderer: RENDERER_ID },
+            ...(logEvent.bindings ?? []),
+          ),
         })
       },
     },
