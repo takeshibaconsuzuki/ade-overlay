@@ -1,7 +1,10 @@
 - Synthetic data dir worktree
-- Codex chats still live after terminating
 - Stop vscode servers
 - Live chat buttons
-- Codex historical chats
+- Codex support in chat app
 - Closing laptop and resuming leaves dead terminal
 - Historical chat refresh frequency
+- Make worktree name and chat status more opaque
+- Deterministic color per worktree
+- Text on right side of terminal is cut off
+- Make vscode upgrading text white

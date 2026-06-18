@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "test": "npm run test:playwright",
+    "test:playwright": "node --import tsx --test tests/**/*.test.ts",
     "package:mac": "node scripts/package-mac.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

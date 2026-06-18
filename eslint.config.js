@@ -157,6 +157,7 @@ export default tseslint.config(
       'openapi-ts.config.ts',
       'scripts/**/*.mjs',
       'scripts/**/*.ts',
+      'tests/**/*.ts',
       'src/main/**/*.ts',
       'src/preload/**/*.ts',
       'src/server/**/*.ts',
