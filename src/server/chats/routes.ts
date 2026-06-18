@@ -287,7 +287,9 @@ function viewerIdFromUrl(url: string | undefined): string | undefined {
     return undefined
   }
   try {
-    return new URL(url, 'http://localhost').searchParams.get('viewer') ?? undefined
+    return (
+      new URL(url, 'http://localhost').searchParams.get('viewer') ?? undefined
+    )
   } catch {
     return undefined
   }
