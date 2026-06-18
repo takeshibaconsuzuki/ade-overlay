@@ -13,6 +13,7 @@
 - `npm run format`: format with Prettier.
 - `npm run client:generate`: regenerate `src/api/server/generated/`.
 - `npm run upgrade`: update dependencies with exact pinned versions.
+- `npm run test`
 
 ## Architecture
 
