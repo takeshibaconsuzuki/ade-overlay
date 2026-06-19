@@ -1,0 +1,9 @@
+- Normalize paths returned by `git worktree list`.
+- Compute worktree display names on the server.
+- Discover the VS Code CLI path on Windows.
+- Use `execa`; Node shell quoting is unreliable.
+- Dormant launcher must be non-focusable.
+- Set launcher dormant before opening/focusing another window.
+- Use `show` + `moveTop` + temporary always-on-top for Windows focus.
+- Create worktrees popup hidden, then show via the focus helper.
+- Record server focus intent when emitting `showEditor`/`showChat`.

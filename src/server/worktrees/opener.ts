@@ -29,9 +29,19 @@ export class WorktreeOpener {
 
   private foreground(role: AdeAppRole): void {
     if (role === ADE_APP_ROLE.chat) {
-      this.chat.focusChat()
+      this.focusChat()
       return
     }
+    this.focusEditor()
+  }
+
+  focusEditor(): void {
     this.editor.showEditor()
+    this.focus.recordFocused(ADE_APP_ROLE.editor)
+  }
+
+  focusChat(target?: { providerId: string; chatId: string }): void {
+    this.chat.focusChat(target)
+    this.focus.recordFocused(ADE_APP_ROLE.chat)
   }
 }

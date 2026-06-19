@@ -88,9 +88,12 @@ test('tracks a real git repository and streams a worktree snapshot', async () =>
   assert.equal(added.status(), 200)
   const addedBody = (await added.json()) as {
     repository: { mainWorktreePath: string }
-    snapshot: { worktrees: Array<{ path: string; branchName?: string }> }
+    snapshot: {
+      worktrees: Array<{ name: string; path: string; branchName?: string }>
+    }
   }
   assert.equal(addedBody.repository.mainWorktreePath, repoPath)
+  assert.equal(addedBody.snapshot.worktrees[0].name, 'repo')
   assert.equal(addedBody.snapshot.worktrees[0].path, repoPath)
 
   const branches = await api.post('/repositories/branches', {
@@ -101,10 +104,11 @@ test('tracks a real git repository and streams a worktree snapshot', async () =>
 
   const snapshot = await readFirstSseEvent<{
     repositories: Array<{ mainWorktreePath: string }>
-    worktrees: Array<{ path: string; branchName?: string }>
+    worktrees: Array<{ name: string; path: string; branchName?: string }>
   }>('/worktrees')
   assert.equal(snapshot.event, 'snapshot')
   assert.equal(snapshot.data.repositories[0].mainWorktreePath, repoPath)
+  assert.equal(snapshot.data.worktrees[0].name, 'repo')
   assert.equal(snapshot.data.worktrees[0].branchName, 'main')
 })
 

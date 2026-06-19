@@ -7,6 +7,7 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
+import { ADE_APP_ROLE } from '../../api/server/appFocus'
 import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BASE_PATH,
@@ -38,6 +39,7 @@ import {
   WORKTREE_CREATION_LOGS_OPEN_PATH,
   WorktreeIdParams,
 } from '../../api/server/worktrees'
+import { type AppFocusService } from '../appFocus/service'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
 import { type WorktreeRegistry } from '../worktrees/registry'
@@ -46,11 +48,12 @@ import { EditorService } from './service'
 type EditorRouteOptions = {
   registry: WorktreeRegistry
   editor: EditorService
+  focus: AppFocusService
 }
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { registry, editor }: EditorRouteOptions,
+  { registry, editor, focus }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
@@ -117,6 +120,7 @@ export function registerEditorRoutes(
     handler: async (request) => {
       const response = await editor.revealEditor(request.body.worktreeId)
       editor.showEditor()
+      focus.recordFocused(ADE_APP_ROLE.editor)
       return response
     },
   })

@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { execa } from 'execa'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import { EDITOR_BASE_PATH } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
@@ -77,7 +78,7 @@ function spawnCodeServeWeb(
   serverDataDir: string,
   codeCliPath: string,
 ): ChildProcess {
-  return spawn(
+  const child = execa(
     codeCliPath,
     [
       'serve-web',
@@ -108,6 +109,11 @@ function spawnCodeServeWeb(
       },
     },
   )
+  child.catch(() => {
+    // Startup failures are reported by waitForVscodePort()/waitForSpawnError().
+    // Later exits are handled by EditorService's process lifecycle listeners.
+  })
+  return child
 }
 
 async function resolveVscodeCliPath(): Promise<string> {
@@ -123,12 +129,14 @@ async function resolveVscodeCliPath(): Promise<string> {
     )
   }
 
-  const pathCode = await findExecutableOnPath('code')
-  if (pathCode) {
-    return pathCode
+  for (const command of getVscodeCliBasenames()) {
+    const pathCode = await findExecutableOnPath(command)
+    if (pathCode) {
+      return pathCode
+    }
   }
 
-  for (const candidate of getMacVscodeCliCandidates()) {
+  for (const candidate of getVscodeCliCandidates()) {
     if (await isExecutable(candidate)) {
       return candidate
     }
@@ -136,7 +144,7 @@ async function resolveVscodeCliPath(): Promise<string> {
 
   throw new HttpError(
     500,
-    'Could not find the VS Code CLI. Install Visual Studio Code in /Applications or set VSCODE_CLI_PATH to the code executable.',
+    'Could not find the VS Code CLI. Install Visual Studio Code or set VSCODE_CLI_PATH to the code executable.',
   )
 }
 
@@ -155,28 +163,61 @@ async function findExecutableOnPath(command: string): Promise<string | null> {
   return null
 }
 
-function getMacVscodeCliCandidates(): string[] {
-  if (process.platform !== 'darwin') {
-    return []
+function getVscodeCliBasenames(): string[] {
+  if (process.platform === 'win32') {
+    return ['code.cmd', 'code.exe', 'code.com', 'code.bat']
   }
 
-  return [
-    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
-    '/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
-    '/Applications/VSCodium.app/Contents/Resources/app/bin/codium',
-    join(
-      homedir(),
-      'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
-    ),
-    join(
-      homedir(),
-      'Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
-    ),
-    join(
-      homedir(),
-      'Applications/VSCodium.app/Contents/Resources/app/bin/codium',
-    ),
-  ]
+  return ['code']
+}
+
+function getVscodeCliCandidates(): string[] {
+  if (process.platform === 'win32') {
+    return [
+      join(
+        homedir(),
+        'AppData',
+        'Local',
+        'Programs',
+        'Microsoft VS Code',
+        'bin',
+        'code.cmd',
+      ),
+      join(
+        homedir(),
+        'AppData',
+        'Local',
+        'Programs',
+        'Microsoft VS Code Insiders',
+        'bin',
+        'code-insiders.cmd',
+      ),
+      'C:\\Program Files\\Microsoft VS Code\\bin\\code.cmd',
+      'C:\\Program Files\\Microsoft VS Code Insiders\\bin\\code-insiders.cmd',
+    ]
+  }
+
+  if (process.platform === 'darwin') {
+    return [
+      '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+      '/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
+      '/Applications/VSCodium.app/Contents/Resources/app/bin/codium',
+      join(
+        homedir(),
+        'Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+      ),
+      join(
+        homedir(),
+        'Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
+      ),
+      join(
+        homedir(),
+        'Applications/VSCodium.app/Contents/Resources/app/bin/codium',
+      ),
+    ]
+  }
+
+  return []
 }
 
 async function isExecutable(path: string): Promise<boolean> {

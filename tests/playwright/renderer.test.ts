@@ -36,6 +36,7 @@ const worktreeSnapshot = {
   worktrees: [
     {
       worktreeId: 'aaaaaaaaaaaa',
+      name: 'project',
       path: '/repos/project',
       mainWorktreePath: '/repos/project',
       isMain: true,
@@ -50,6 +51,7 @@ const worktreeSnapshot = {
     },
     {
       worktreeId: 'bbbbbbbbbbbb',
+      name: 'project-feature',
       path: '/repos/project-feature',
       mainWorktreePath: '/repos/project',
       isMain: false,
@@ -64,6 +66,7 @@ const worktreeSnapshot = {
     },
     {
       worktreeId: 'cccccccccccc',
+      name: 'project-failed',
       path: '/repos/project-failed',
       mainWorktreePath: '/repos/project',
       isMain: false,
@@ -74,6 +77,21 @@ const worktreeSnapshot = {
       creationState: 'failed',
       creationError: 'Bootstrap failed',
       hasCreationLogs: true,
+      isOpenable: true,
+    },
+    {
+      worktreeId: 'dddddddddddd',
+      name: 'project-windows',
+      path: 'C:\\repos\\project-windows',
+      mainWorktreePath: '/repos/project',
+      isMain: false,
+      branch: 'refs/heads/feature/windows',
+      branchName: 'feature/windows',
+      isBare: false,
+      isDetached: false,
+      isPrunable: false,
+      creationState: 'ready',
+      hasCreationLogs: false,
       isOpenable: true,
     },
   ],
@@ -186,6 +204,9 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
   )
 
   await search.fill('')
+  await page
+    .getByRole('option', { name: /project-windows feature\/windows/ })
+    .waitFor()
   const row = page.getByRole('option', { name: /project-feature/ })
   await row.getByRole('button', { name: 'Worktree actions' }).click()
   await page
@@ -336,6 +357,7 @@ async function handleApiRoute(route: Route): Promise<void> {
       worktree: {
         ...worktreeSnapshot.worktrees[1],
         worktreeId: 'dddddddddddd',
+        name: 'project-feature-my-change',
         path: (body as { worktreePath?: string }).worktreePath,
       },
     })

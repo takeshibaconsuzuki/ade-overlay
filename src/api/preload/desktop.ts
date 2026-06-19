@@ -17,6 +17,8 @@ export interface DesktopApi {
   chooseFiles(options: ChooseFilesOptions): Promise<string[]>
   /** Opens the worktrees window (focusing it if already open). */
   openWorktreesWindow(): Promise<void>
+  /** Drops the launcher back to its dormant, non-interactive state. */
+  setLauncherDormant(): Promise<void>
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow(): Promise<void>
 }

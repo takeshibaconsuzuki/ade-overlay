@@ -1,6 +1,7 @@
 import { app, BrowserWindow, globalShortcut } from 'electron'
 import { logger } from '../../server/logger'
 import { loadRenderer, webPreferences } from '../browser'
+import { focusWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'main' })
 
@@ -34,10 +35,12 @@ let launcherState: LauncherState = 'active'
  */
 function applyLauncherState(window: BrowserWindow, state: LauncherState): void {
   if (state === 'dormant') {
+    window.setFocusable(false)
     window.setOpacity(DORMANT_OPACITY)
     window.setIgnoreMouseEvents(true, { forward: true })
     window.showInactive()
   } else {
+    window.setFocusable(true)
     window.setOpacity(1)
     window.setIgnoreMouseEvents(false)
     // Bring the launcher forward and give it keyboard focus so it is ready to
@@ -63,6 +66,10 @@ function setLauncherState(state: LauncherState): void {
 /** Toggles the launcher between active and dormant. */
 function toggleLauncherState(): void {
   setLauncherState(launcherState === 'active' ? 'dormant' : 'active')
+}
+
+export function setLauncherDormant(): void {
+  setLauncherState('dormant')
 }
 
 /**
@@ -122,9 +129,10 @@ let worktreesWindow: BrowserWindow | null = null
  * Opens the worktrees window, focusing the existing one if it is already open.
  */
 export function openWorktreesWindow(): void {
+  setLauncherState('dormant')
+
   if (worktreesWindow && !worktreesWindow.isDestroyed()) {
-    worktreesWindow.show()
-    worktreesWindow.focus()
+    focusWindowOnCurrentWorkspace(worktreesWindow)
     return
   }
 
@@ -132,6 +140,7 @@ export function openWorktreesWindow(): void {
     width: 900,
     height: 600,
     backgroundColor: WINDOW_BACKGROUND,
+    show: false,
     webPreferences: webPreferences(),
   })
 
@@ -145,4 +154,5 @@ export function openWorktreesWindow(): void {
 
   worktreesWindow = window
   loadRenderer(window, 'worktrees')
+  focusWindowOnCurrentWorkspace(window)
 }

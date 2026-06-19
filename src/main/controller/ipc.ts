@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { openWorktreesWindow } from './index'
+import { openWorktreesWindow, setLauncherDormant } from './index'
 import { CONTROLLER_IPC_CHANNELS } from './ipc-channels'
 
 /**
@@ -10,5 +10,8 @@ import { CONTROLLER_IPC_CHANNELS } from './ipc-channels'
 export function registerControllerIpcHandlers(): void {
   ipcMain.handle(CONTROLLER_IPC_CHANNELS.openWorktreesWindow, () => {
     openWorktreesWindow()
+  })
+  ipcMain.handle(CONTROLLER_IPC_CHANNELS.setLauncherDormant, () => {
+    setLauncherDormant()
   })
 }

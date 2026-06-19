@@ -2,7 +2,7 @@ import type { Worktree } from './worktrees'
 
 /** The worktree directory name, used as the primary label. */
 export function worktreeName(worktree: Worktree): string {
-  return worktree.path.split('/').pop() || worktree.path
+  return worktree.name
 }
 
 /** The branch the worktree is on, used as the secondary label. */

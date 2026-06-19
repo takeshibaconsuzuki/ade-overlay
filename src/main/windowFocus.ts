@@ -32,11 +32,18 @@ export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
   }
 
   window.show()
+  if (process.platform === 'win32') {
+    window.moveTop()
+    window.setAlwaysOnTop(true)
+  }
   window.focus()
   // `show`/`focus` target the window; `app.focus({ steal: true })` makes the
-  // spawned role process itself the active macOS app so keyboard input goes to
-  // that role instead of staying with the launcher/controller app.
+  // spawned role process itself the active app so keyboard input goes to that
+  // role instead of staying with the launcher/controller app.
   app.focus({ steal: true })
+  if (process.platform === 'win32') {
+    window.setAlwaysOnTop(false)
+  }
 
   if (process.platform === 'darwin') {
     const existingTimer = workspaceVisibilityTimers.get(window)

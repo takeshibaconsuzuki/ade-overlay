@@ -1,5 +1,4 @@
 import { request, type ClientRequest } from 'node:http'
-import { basename } from 'node:path'
 import {
   BrowserWindow,
   dialog,
@@ -15,7 +14,6 @@ import {
   WorktreeEvent,
   worktreeOpenPath,
   WORKTREES_PATH,
-  type Worktree,
   type WorktreeEvent as WorktreeEventType,
 } from '../../api/server/worktrees'
 
@@ -203,7 +201,7 @@ function handleWorktreeEvent(
       body: event.worktree.path,
       dialogType: 'info',
       log,
-      title: `Worktree created: ${worktreeName(event.worktree)}`,
+      title: `Worktree created: ${event.worktree.name}`,
       worktreeId: event.worktree.worktreeId,
     })
     return
@@ -243,7 +241,7 @@ function handleWorktreeEvent(
     body: worktree.creationError ?? worktree.path,
     dialogType: 'error',
     log,
-    title: `Worktree creation failed: ${worktreeName(worktree)}`,
+    title: `Worktree creation failed: ${worktree.name}`,
     worktreeId: worktree.worktreeId,
   })
 }
@@ -421,8 +419,4 @@ async function post(path: string, body?: unknown): Promise<void> {
       `POST ${path} failed with ${response.status}: ${await response.text()}`,
     )
   }
-}
-
-function worktreeName(worktree: Worktree): string {
-  return basename(worktree.path) || worktree.branchName || worktree.worktreeId
 }

@@ -14,6 +14,9 @@ const desktop: DesktopApi = {
   /** Opens the worktrees window (focusing it if already open). */
   openWorktreesWindow: (): Promise<void> =>
     ipcRenderer.invoke(CONTROLLER_IPC_CHANNELS.openWorktreesWindow),
+  /** Drops the launcher back to its dormant, non-interactive state. */
+  setLauncherDormant: (): Promise<void> =>
+    ipcRenderer.invoke(CONTROLLER_IPC_CHANNELS.setLauncherDormant),
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow: (): Promise<void> =>
     ipcRenderer.invoke(MAIN_IPC_CHANNELS.closeWindow),

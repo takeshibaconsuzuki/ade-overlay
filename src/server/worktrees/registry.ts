@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { createWriteStream } from 'node:fs'
 import { appendFile, mkdir, rm } from 'node:fs/promises'
 import { platform } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import Mustache from 'mustache'
 import { WORKTREE_DIRTY_ERROR_CODE } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
@@ -884,6 +884,7 @@ function toPublicWorktree(
 ): Worktree {
   return {
     worktreeId: createWorktreeId(worktree.path),
+    name: getWorktreeName(worktree.path, getBranchName(worktree.branch)),
     path: worktree.path,
     mainWorktreePath: worktree.mainWorktreePath,
     isMain: worktree.path === worktree.mainWorktreePath,
@@ -905,12 +906,14 @@ function toJobWorktree(
   job: CreationJob,
   creationState: WorktreeCreationState,
 ): Worktree {
+  const branchName = job.newBranch ?? job.baseBranch
   return {
     worktreeId: job.worktreeId,
+    name: getWorktreeName(job.canonicalPath, branchName),
     path: job.canonicalPath,
     mainWorktreePath: job.mainWorktreePath,
     isMain: false,
-    branchName: job.newBranch ?? job.baseBranch,
+    branchName,
     isBare: false,
     isDetached: false,
     isPrunable: false,
@@ -919,6 +922,10 @@ function toJobWorktree(
     hasCreationLogs: true,
     isOpenable: false,
   }
+}
+
+function getWorktreeName(path: string, branchName?: string): string {
+  return basename(path) || branchName || path
 }
 
 async function initializeCreationLog(
