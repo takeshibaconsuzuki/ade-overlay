@@ -26,6 +26,7 @@ export function createSseStream<
     headers.vary = 'Origin'
   }
   reply.raw.writeHead(200, headers)
+  reply.raw.flushHeaders()
 
   const cleanups: Array<() => void> = []
   const keepAlive = setInterval(() => {

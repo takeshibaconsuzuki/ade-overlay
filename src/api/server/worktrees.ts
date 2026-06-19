@@ -194,7 +194,7 @@ export const DismissCreationErrorResponse = z.object({
 export const OpenWorktreeResponse = z.object({
   worktreeId: WorktreeId,
   url: z.string(),
-  alreadyStarted: z.boolean(),
+  editorAlreadyStarted: z.boolean(),
 })
 
 export const ErrorResponse = z.object({

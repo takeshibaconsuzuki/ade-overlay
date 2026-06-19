@@ -5,18 +5,22 @@ import { SERVER_ORIGIN } from '../../api/server/config'
 import {
   EDITOR_COMMAND_ACK_PATH,
   EDITOR_COMMAND_STREAM_PATH,
-  EditorCommand,
+  EDITOR_READY_PATH,
+  EditorCommandSseEvents,
   type EditorCommand as EditorCommandType,
 } from '../../api/server/editor'
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
+import { connectSseClient } from '../sse'
 import { focusWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'editor' })
 
 let window: BrowserWindow | null = null
 let reconnectTimer: NodeJS.Timeout | null = null
+let commandStreamReady: Promise<void> | null = null
 let activeWorktreeId: string | null = null
+let readyPosted = false
 const views = new Map<string, WebContentsView>()
 
 export function createWindow(): BrowserWindow {
@@ -58,70 +62,61 @@ body{display:grid;place-items:center}
   )
   window.maximize()
 
-  connectEditorCommandStream()
+  void connectEditorCommandStream().catch(() => undefined)
   return window
 }
 
-function connectEditorCommandStream(): void {
+function connectEditorCommandStream(): Promise<void> {
+  if (commandStreamReady) {
+    return commandStreamReady
+  }
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
 
   const requestUrl = new URL(EDITOR_COMMAND_STREAM_PATH, SERVER_ORIGIN)
-  const commandRequest = request(requestUrl, (response) => {
-    response.setEncoding('utf8')
-    let buffer = ''
-    response.on('data', (chunk: string) => {
-      buffer += chunk
-      let delimiterIndex = buffer.indexOf('\n\n')
-      while (delimiterIndex >= 0) {
-        const rawEvent = buffer.slice(0, delimiterIndex)
-        buffer = buffer.slice(delimiterIndex + 2)
-        handleStreamEvent(rawEvent)
-        delimiterIndex = buffer.indexOf('\n\n')
-      }
+  commandStreamReady = new Promise<void>((resolve, reject) => {
+    let opened = false
+    connectSseClient({
+      log,
+      onEnd: () => {
+        commandStreamReady = null
+        if (!opened) {
+          reject(new Error('editor command stream ended before opening'))
+        }
+        scheduleReconnect()
+      },
+      onError: (error) => {
+        commandStreamReady = null
+        if (!opened) {
+          reject(error)
+        }
+        log.warn({ err: error }, 'editor command stream failed')
+        scheduleReconnect()
+      },
+      onMessage: (message) => handleEditorCommand(message.data),
+      onOpen: (response) => {
+        if ((response.statusCode ?? 500) >= 400) {
+          const error = new Error('editor command stream rejected')
+          commandStreamReady = null
+          log.warn(
+            { statusCode: response.statusCode },
+            'editor command stream rejected',
+          )
+          reject(error)
+          return
+        }
+        opened = true
+        resolve()
+        void postReadyIfPossible()
+      },
+      schemas: EditorCommandSseEvents,
+      stream: 'editor-command',
+      url: requestUrl,
     })
-    response.on('end', scheduleReconnect)
   })
-
-  commandRequest.on('error', (error) => {
-    log.warn({ err: error }, 'editor command stream failed')
-    scheduleReconnect()
-  })
-  commandRequest.end()
-}
-
-function handleStreamEvent(rawEvent: string): void {
-  const lines = rawEvent.split('\n')
-  const event = lines
-    .find((line) => line.startsWith('event:'))
-    ?.slice('event:'.length)
-    .trim()
-  const data = lines
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice('data:'.length).trim())
-    .join('\n')
-
-  if (!data) {
-    return
-  }
-
-  try {
-    const result = EditorCommand.safeParse(JSON.parse(data))
-    if (!result.success) {
-      log.error({ err: result.error, data }, 'invalid editor command')
-      return
-    }
-    const command = result.data
-    if (event && event !== command.type) {
-      log.warn({ event, command }, 'editor command event mismatch')
-      return
-    }
-    handleEditorCommand(command)
-  } catch (error) {
-    log.error({ err: error, data }, 'failed to parse editor command')
-  }
+  return commandStreamReady
 }
 
 function handleEditorCommand(command: EditorCommandType): void {
@@ -163,7 +158,7 @@ function handleEditorCommand(command: EditorCommandType): void {
 }
 
 function switchWorktree(
-  command: Extract<EditorCommand, { type: 'switch' }>,
+  command: Extract<EditorCommandType, { type: 'switch' }>,
 ): void {
   if (!window) {
     window = createWindow()
@@ -195,8 +190,56 @@ function bringForward(): void {
   focusWindowOnCurrentWorkspace(window)
 }
 
+async function postReadyIfPossible(): Promise<void> {
+  if (readyPosted || !commandStreamReady) {
+    return
+  }
+  const streamReady = commandStreamReady
+  try {
+    await streamReady
+  } catch {
+    return
+  }
+  if (streamReady !== commandStreamReady || readyPosted) {
+    return
+  }
+
+  const launchId = process.env.ADE_EDITOR_LAUNCH_ID
+  if (!launchId) {
+    log.warn('editor launch id is missing; readiness not posted')
+    return
+  }
+
+  readyPosted = true
+  const body = JSON.stringify({ launchId })
+  const readyRequest = request(
+    new URL(EDITOR_READY_PATH, SERVER_ORIGIN),
+    {
+      headers: {
+        'content-length': Buffer.byteLength(body).toString(),
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    },
+    (response) => {
+      if ((response.statusCode ?? 500) >= 400) {
+        log.warn(
+          { launchId, statusCode: response.statusCode },
+          'editor readiness rejected',
+        )
+      }
+      response.resume()
+    },
+  )
+  readyRequest.on('error', (error) => {
+    readyPosted = false
+    log.warn({ err: error, launchId }, 'failed to post editor readiness')
+  })
+  readyRequest.end(body)
+}
+
 function getOrCreateWorktreeView(
-  command: Extract<EditorCommand, { type: 'switch' }>,
+  command: Extract<EditorCommandType, { type: 'switch' }>,
 ): WebContentsView {
   const existing = views.get(command.worktreeId)
   if (existing) {
@@ -317,6 +360,6 @@ function scheduleReconnect(): void {
   }
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    connectEditorCommandStream()
+    void connectEditorCommandStream().catch(() => undefined)
   }, 1000)
 }

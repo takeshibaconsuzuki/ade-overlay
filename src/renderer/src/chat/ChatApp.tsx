@@ -8,12 +8,7 @@ import {
   Text,
 } from '@radix-ui/themes'
 import { useCallback, useEffect, useState } from 'react'
-import {
-  CHAT_COMMAND_STREAM_PATH,
-  CHAT_STATUS,
-  ChatCommandSseEvents,
-} from '../../../api/server/chats'
-import { SERVER_ORIGIN } from '../../../api/server/config'
+import { CHAT_STATUS, type ChatCommand } from '../../../api/server/chats'
 import {
   createTerminal,
   historicalChats,
@@ -32,7 +27,6 @@ import {
   type TerminalDescriptor,
 } from '../hooks/useTerminalStream'
 import { logger } from '../logger'
-import { parseSsePayload } from '../sse'
 import styles from './ChatApp.module.css'
 import { Terminal } from './Terminal'
 
@@ -94,25 +88,21 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     }
   }, [worktreeId])
 
-  // Listen for `show` commands carrying a target chat (a live chat clicked from
-  // another window, e.g. the launcher). The server resolves and stamps the
-  // terminal id, so the renderer never joins chats to terminals itself.
+  // Electron main is the sole /chats/commands consumer. It validates commands
+  // and forwards targeted show commands here after this handler is installed.
   useEffect(() => {
-    const source = new EventSource(
-      `${SERVER_ORIGIN}${CHAT_COMMAND_STREAM_PATH}`,
-    )
-    source.addEventListener('show', (event) => {
-      const data = parseSsePayload(
-        ChatCommandSseEvents,
-        'show',
-        event.data,
-        'chat-command',
-      )
-      if (data && 'terminalId' in data) {
-        setActiveId(data.terminalId)
+    if (!window.desktop) {
+      return undefined
+    }
+    const unsubscribe = window.desktop.onChatCommand((command: ChatCommand) => {
+      if (command.type === 'show' && 'terminalId' in command) {
+        setActiveId(command.terminalId)
       }
     })
-    return () => source.close()
+    void window.desktop.chatRendererReady().catch((error: unknown) => {
+      logger.error({ err: error }, 'failed to signal chat renderer readiness')
+    })
+    return unsubscribe
   }, [])
 
   // Clicking a live chat asks the server to switch to its worktree and focus the

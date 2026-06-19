@@ -225,7 +225,7 @@ export type OpenWorktreeResponses = {
     200: {
         worktreeId: string;
         url: string;
-        alreadyStarted: boolean;
+        editorAlreadyStarted: boolean;
     };
 };
 

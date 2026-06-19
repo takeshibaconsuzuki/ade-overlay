@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   CHAT_PROVIDER,
@@ -18,6 +19,12 @@ import { type TerminalService } from '../terminals/service'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { type ChatRegistry } from './registry'
 
+type ReadyWaiter = {
+  launchId: string
+  promise: Promise<boolean>
+  complete: (ready: boolean) => void
+}
+
 /**
  * Coordinates the chat Electron role (a separate app, like the editor) and the
  * server-hosted terminals it displays. Mirrors {@link EditorService} for app
@@ -29,8 +36,9 @@ export class ChatService {
   readonly commands = new EventEmitter()
 
   private chatProcess: ChildProcess | null = null
-  private chatClientCount = 0
-  private lastCommand: ChatCommand | null = null
+  private launchId: string | null = null
+  private readyLaunchId: string | null = null
+  private readyWaiter: ReadyWaiter | null = null
   private shuttingDown = false
 
   private readonly onWorktreeEvent = (event: WorktreeEvent): void => {
@@ -59,29 +67,37 @@ export class ChatService {
     this.worktrees.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
 
-  getLastCommand(): ChatCommand | null {
-    return this.lastCommand
-  }
-
-  registerChatClient(): () => void {
-    this.chatClientCount += 1
-    let registered = true
-    return () => {
-      if (!registered) {
-        return
-      }
-      registered = false
-      this.chatClientCount = Math.max(0, this.chatClientCount - 1)
-    }
-  }
-
-  /** Ensure the chat app is running without changing foreground focus. */
-  openChat(): void {
+  /**
+   * Ensure the chat app is running and has installed its command handler,
+   * without changing foreground focus.
+   */
+  async openChat(): Promise<void> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
-    this.lastCommand = null
-    this.ensureChatApp()
+    const launchId = this.ensureChatAppProcess()
+    if (this.readyLaunchId === launchId) {
+      return
+    }
+
+    const ready = await this.waitForChatReady(launchId)
+    if (!ready) {
+      this.log.warn({ launchId }, 'chat app readiness timed out')
+    }
+  }
+
+  markReady(launchId: string): boolean {
+    if (launchId !== this.launchId) {
+      this.log.warn(
+        { launchId, currentLaunchId: this.launchId },
+        'ignoring stale chat readiness',
+      )
+      return false
+    }
+    this.readyLaunchId = launchId
+    this.resolveReadyWaiter(launchId, true)
+    this.log.info({ launchId }, 'chat app ready')
+    return true
   }
 
   focusChat(target?: { providerId: string; chatId: string }): void {
@@ -158,17 +174,27 @@ export class ChatService {
     })
   }
 
-  private ensureChatApp(): void {
-    if (this.chatClientCount > 0) {
-      return
-    }
+  private ensureChatAppProcess(): string {
     if (this.chatProcess && isChildAlive(this.chatProcess)) {
-      return
+      if (!this.launchId) {
+        this.launchId = randomUUID()
+      }
+      return this.launchId
     }
 
+    const launchId = randomUUID()
+    if (this.launchId) {
+      this.resolveReadyWaiter(this.launchId, false)
+    }
+    this.launchId = launchId
+    this.readyLaunchId = null
     const child = spawn(roleExecutablePath('chat'), roleLaunchArgs('chat'), {
       detached: true,
-      env: { ...process.env, ADE_LOG_SOURCE: 'chat' },
+      env: {
+        ...process.env,
+        ADE_CHAT_LAUNCH_ID: launchId,
+        ADE_LOG_SOURCE: 'chat',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     child.unref()
@@ -184,11 +210,55 @@ export class ChatService {
     child.on('exit', (code, signal) => {
       if (this.chatProcess === child) {
         this.chatProcess = null
+        if (this.launchId === launchId) {
+          this.launchId = null
+          this.readyLaunchId = null
+        }
+        this.resolveReadyWaiter(launchId, false)
       }
       this.log.info({ code, signal }, 'chat app exited')
     })
     this.chatProcess = child
-    this.log.info({ pid: child.pid }, 'chat app launched')
+    this.log.info({ launchId, pid: child.pid }, 'chat app launched')
+    return launchId
+  }
+
+  private waitForChatReady(launchId: string): Promise<boolean> {
+    if (this.readyLaunchId === launchId) {
+      return Promise.resolve(true)
+    }
+    if (this.readyWaiter?.launchId === launchId) {
+      return this.readyWaiter.promise
+    }
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
+
+    let complete: (ready: boolean) => void = () => undefined
+    const timeout = setTimeout(() => {
+      if (this.readyWaiter?.launchId === launchId) {
+        this.readyWaiter = null
+      }
+      complete(false)
+    }, 5_000)
+    const promise = new Promise<boolean>((resolve) => {
+      complete = (ready) => {
+        clearTimeout(timeout)
+        resolve(ready)
+      }
+    })
+
+    this.readyWaiter = { launchId, promise, complete }
+    return promise
+  }
+
+  private resolveReadyWaiter(launchId: string, ready: boolean): void {
+    if (this.readyWaiter?.launchId !== launchId) {
+      return
+    }
+    const waiter = this.readyWaiter
+    this.readyWaiter = null
+    waiter.complete(ready)
   }
 
   private handleWorktreeEvent(event: WorktreeEvent): void {
@@ -213,7 +283,6 @@ export class ChatService {
   }
 
   private emitCommand(command: ChatCommand): void {
-    this.lastCommand = command
     this.commands.emit('command', command)
   }
 
@@ -223,6 +292,9 @@ export class ChatService {
     this.worktrees.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.terminals.events.off('terminal-snapshot', this.onTerminalSnapshot)
     this.commands.removeAllListeners()
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
 
     const chatProcess = this.chatProcess
     this.chatProcess = null

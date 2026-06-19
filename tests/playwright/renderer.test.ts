@@ -373,14 +373,16 @@ async function handleApiRoute(route: Route): Promise<void> {
     path.match(/^\/worktrees\/[^/]+\/open$/) ||
     path === '/showEditor'
   ) {
-    const worktreeId =
-      path === '/showEditor'
-        ? (body as { worktreeId?: string }).worktreeId
-        : path.split('/')[2]
+    const isShowEditor = path === '/showEditor'
+    const worktreeId = isShowEditor
+      ? (body as { worktreeId?: string }).worktreeId
+      : path.split('/')[2]
     await json(route, {
       worktreeId,
       url: 'http://bbbbbbbbbbbb.localhost:3000/__ade-overlay/editor-bootstrap',
-      alreadyStarted: true,
+      ...(isShowEditor
+        ? { alreadyStarted: true }
+        : { editorAlreadyStarted: true }),
     })
   } else if (path === '/chats/live' && request.method() === 'GET') {
     await sse(route, 'snapshot', chatSnapshot)

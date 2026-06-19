@@ -61,10 +61,12 @@ export const CHAT_STREAM_PATH = '/chats/live'
  *   - `GET /chats/live` streams live chat status.
  *   - `GET /chats/history` lists a worktree's historical (on-disk) sessions.
  *   - `GET /chats/commands` is the SSE stream the chat process listens to.
+ *   - `POST /chats/ready` is a hidden app-internal readiness signal.
  */
 export const CHAT_SHOW_PATH = '/showChat'
 export const CHAT_HISTORY_PATH = '/chats/history'
 export const CHAT_COMMAND_STREAM_PATH = '/chats/commands'
+export const CHAT_READY_PATH = '/chats/ready'
 
 export const ChatStatus = z.enum([
   CHAT_STATUS.dormant,
@@ -150,6 +152,14 @@ export const ChatHistoryQuery = z.object({
 export const ChatCommandStreamResponse = z
   .string()
   .describe('Server-sent chat window commands.')
+
+export const ChatReadyRequest = z.strictObject({
+  launchId: z.string().min(1),
+})
+
+export const ChatReadyResponse = z.object({
+  ok: z.boolean(),
+})
 
 /**
  * Commands streamed to the chat Electron process over the SSE command stream.

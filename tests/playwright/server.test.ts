@@ -10,7 +10,10 @@ import {
   type APIRequestContext,
 } from 'playwright'
 import { APP_FOCUS_PATH } from '../../src/api/server/appFocus'
-import { CHAT_HOOKS_PATH } from '../../src/api/server/chats'
+import {
+  CHAT_COMMAND_STREAM_PATH,
+  CHAT_HOOKS_PATH,
+} from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
@@ -179,6 +182,26 @@ test('maps provider hooks into live chat snapshots', async () => {
   ])
 })
 
+test('opens chat command stream before any command is emitted', async () => {
+  const controller = new AbortController()
+  try {
+    const response = await promiseWithTimeout(
+      fetch(`${baseUrl}${CHAT_COMMAND_STREAM_PATH}`, {
+        signal: controller.signal,
+      }),
+      1_000,
+      `Timed out opening ${CHAT_COMMAND_STREAM_PATH}`,
+    )
+    assert.equal(response.status, 200)
+    assert.match(
+      response.headers.get('content-type') ?? '',
+      /^text\/event-stream\b/,
+    )
+  } finally {
+    controller.abort()
+  }
+})
+
 async function createGitRepository(): Promise<string> {
   const repoPath = join(tempDir, 'repo')
   await execFileAsync('git', ['init', '--initial-branch=main', repoPath])
@@ -282,12 +305,20 @@ async function readWithTimeout<T>(
   timeoutMs: number,
   message: string,
 ): Promise<ReadableStreamReadResult<T>> {
+  return promiseWithTimeout(reader.read(), timeoutMs, message)
+}
+
+function promiseWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(message))
     }, timeoutMs)
 
-    reader.read().then(
+    promise.then(
       (result) => {
         clearTimeout(timer)
         resolve(result)
