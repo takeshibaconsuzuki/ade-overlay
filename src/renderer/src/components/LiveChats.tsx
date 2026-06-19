@@ -1,5 +1,4 @@
 import {
-  Badge,
   Box,
   Card,
   ScrollArea,
@@ -9,7 +8,7 @@ import {
   Tooltip,
 } from '@radix-ui/themes'
 import { CHAT_STATUS, type ChatStatus } from '../../../api/server/chats'
-import { formatTimestamp } from '../format'
+import { formatShortAge } from '../format'
 import type { Chat } from '../hooks/useChatStream'
 import { HBox, VBox } from './Box'
 import styles from './LiveChats.module.css'
@@ -94,7 +93,7 @@ function ChatRow({
           <ChatStatusDot status={chat.status} />
         </HBox>
         <VBox className={styles.text} flexGrow="1" gap="1">
-          <HBox gap="2" align="center" justify="between">
+          <HBox>
             {chat.title ? (
               <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
                 {chat.title}
@@ -104,21 +103,21 @@ function ChatRow({
                 <Text size="2">Loading</Text>
               </Skeleton>
             )}
-            <Text size="1" color="gray" style={{ flexShrink: 0 }}>
-              {formatTimestamp(chat.updatedAt)}
-            </Text>
           </HBox>
-          <HBox gap="2" align="center">
+          <HBox>
             {worktreeName ? (
-              <Badge
+              <Text
                 size="1"
                 color="gray"
-                variant="soft"
-                style={{ flexShrink: 0 }}
               >
                 {worktreeName}
-              </Badge>
-            ) : null}
+              </Text>
+            ) : <></>}
+            <Text size="1" color="gray">
+              {formatShortAge(chat.updatedAt)}
+            </Text>
+          </HBox>
+          <HBox>
             {secondary ? (
               <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
                 {secondary}

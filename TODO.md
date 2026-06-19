@@ -7,5 +7,4 @@
 - Deterministic color per worktree
 - Text on right side of terminal is cut off
 - Make vscode upgrading text white
-- Restyle live chat button
 - Open chat window on open chat app
