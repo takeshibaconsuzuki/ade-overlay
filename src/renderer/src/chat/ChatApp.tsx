@@ -22,7 +22,7 @@ import {
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
-import { worktreeName } from '../controller/worktreeLabels'
+import { worktreeColor, worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
 import { formatTimestamp } from '../format'
 import { useChatStream, type Chat } from '../hooks/useChatStream'
@@ -181,7 +181,16 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     ? activeId
     : (worktreeTerminals[0]?.terminalId ?? null)
 
-  const headerTitle = worktree ? `Chat · ${worktreeName(worktree)}` : title
+  const headerTitle = worktree ? (
+    <>
+      Chat ·{' '}
+      <Text style={{ color: worktreeColor(worktreeName(worktree)) }}>
+        {worktreeName(worktree)}
+      </Text>
+    </>
+  ) : (
+    title
+  )
 
   return (
     <VBox gap="0" height="100vh">
