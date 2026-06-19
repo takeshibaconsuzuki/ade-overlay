@@ -84,8 +84,8 @@ export function createWindow(): void {
     webPreferences: webPreferences(),
   })
 
-  // Keep the launcher above everything, including other always-on-top windows
-  // and full-screen apps, and make it follow the user across every space.
+  // Keep the launcher above everything, including macOS full-screen apps, and
+  // make it follow the user across Spaces.
   window.setAlwaysOnTop(true, 'screen-saver')
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 

@@ -6,6 +6,7 @@ import { SERVER_ORIGIN } from '../../api/server/config'
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
 import { loadRenderer, webPreferences } from '../browser'
+import { focusWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'chat' })
 
@@ -93,8 +94,7 @@ function bringForward(): void {
   if (!window || window.isDestroyed()) {
     window = createWindow()
   }
-  window.show()
-  window.focus()
+  focusWindowOnCurrentWorkspace(window)
 }
 
 function scheduleReconnect(): void {

@@ -10,5 +10,3 @@
 - Restyle live chat button
 - Open chat window on open chat app
 - Reload config.json
-- 'w' and 'c' drag back to original space.
-- if editor is on the current space and you press 'c', it focuses the editor rather than the chat. inconsistent

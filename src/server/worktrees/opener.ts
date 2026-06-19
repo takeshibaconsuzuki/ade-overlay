@@ -12,11 +12,14 @@ export class WorktreeOpener {
 
   async openWorktree(
     worktreeId: string,
+    { focus = true }: { focus?: boolean } = {},
   ): ReturnType<EditorService['openWorktreeEditor']> {
     const foregroundRole = this.getForegroundRole()
     const response = await this.editor.openWorktreeEditor(worktreeId)
     this.chat.openChat()
-    this.foreground(foregroundRole)
+    if (focus) {
+      this.foreground(foregroundRole)
+    }
     return response
   }
 

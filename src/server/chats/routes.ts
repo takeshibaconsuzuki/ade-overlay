@@ -99,7 +99,7 @@ export function registerChatRoutes(
       },
     },
     handler: async (request) => {
-      await opener.openWorktree(request.body.worktreeId)
+      await opener.openWorktree(request.body.worktreeId, { focus: false })
       chat.focusChat(
         'providerId' in request.body
           ? {

@@ -10,6 +10,7 @@ import {
 } from '../../api/server/editor'
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
+import { focusWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'editor' })
 
@@ -191,11 +192,7 @@ function bringForward(): void {
   if (!window) {
     return
   }
-  if (window.isMinimized()) {
-    window.restore()
-  }
-  window.show()
-  window.focus()
+  focusWindowOnCurrentWorkspace(window)
 }
 
 function getOrCreateWorktreeView(
