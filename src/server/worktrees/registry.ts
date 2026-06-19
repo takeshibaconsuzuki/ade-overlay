@@ -16,7 +16,8 @@ import {
   type WorktreeEvent,
   type WorktreeSnapshot,
 } from '../../api/server/worktrees'
-import { type AppConfigStore } from '../appConfig'
+import { type AppConfigService } from '../config/service'
+import { type AppConfig } from '../config/store'
 import { getCreationLogsDir } from '../dataDir'
 import { HttpError } from '../errors'
 import { canonicalizePath, normalizePath, precanonicalizePath } from '../paths'
@@ -75,10 +76,11 @@ export class WorktreeRegistry {
   private readonly creationJobs = new Map<string, CreationJob>()
   private selectedWorktreeId: string | undefined
   private persistRepositoriesTail = Promise.resolve()
+  private applyConfigTail = Promise.resolve()
 
   constructor(
     private readonly log: Logger,
-    private readonly appConfig?: AppConfigStore,
+    private readonly appConfig?: AppConfigService,
     // Invoked once a worktree exists on disk, before bootstrap, so agentic
     // coding systems are wired up to call back into the server.
     private readonly configureWorktree?: (worktree: {
@@ -101,26 +103,22 @@ export class WorktreeRegistry {
       return
     }
 
-    const config = await this.appConfig.read()
-    this.repositories.clear()
-    this.selectedWorktreeId = config.selectedWorktreeId
+    await this.applyAppConfig(await this.appConfig.read(), {
+      emit: false,
+      message: 'repositories loaded',
+    })
+  }
 
-    for (const repository of config.repositories) {
-      const mainWorktreePath = normalizePath(repository.mainWorktreePath)
-      this.repositories.set(mainWorktreePath, {
-        mainWorktreePath,
-        worktreePathTemplate: repository.worktreePathTemplate,
-        bootstrapCommand: repository.bootstrapCommand,
+  async reloadConfig(config: AppConfig): Promise<void> {
+    const apply = this.applyConfigTail.then(async () => {
+      await this.persistRepositoriesTail
+      await this.applyAppConfig(config, {
+        emit: true,
+        message: 'worktree config reloaded',
       })
-    }
-
-    this.log.info(
-      {
-        configPath: this.appConfig.configPath,
-        repositoryCount: this.repositories.size,
-      },
-      'repositories loaded',
-    )
+    })
+    this.applyConfigTail = apply.catch(() => undefined)
+    await apply
   }
 
   async addRepository(
@@ -750,6 +748,60 @@ export class WorktreeRegistry {
 
     await write
   }
+
+  private async applyAppConfig(
+    config: AppConfig,
+    {
+      emit,
+      message,
+    }: {
+      emit: boolean
+      message: string
+    },
+  ): Promise<void> {
+    if (!this.appConfig) {
+      return
+    }
+
+    const repositories = new Map<string, TrackedRepository>()
+    for (const repository of config.repositories) {
+      const mainWorktreePath = normalizePath(repository.mainWorktreePath)
+      repositories.set(mainWorktreePath, {
+        mainWorktreePath,
+        worktreePathTemplate: repository.worktreePathTemplate,
+        bootstrapCommand: repository.bootstrapCommand,
+      })
+    }
+
+    const changed =
+      this.selectedWorktreeId !== config.selectedWorktreeId ||
+      !repositoriesEqual(this.repositories, repositories)
+
+    this.repositories.clear()
+    for (const [mainWorktreePath, repository] of repositories) {
+      this.repositories.set(mainWorktreePath, repository)
+    }
+    this.selectedWorktreeId = config.selectedWorktreeId
+
+    for (const [worktreeId, job] of this.creationJobs) {
+      if (!this.repositories.has(job.mainWorktreePath)) {
+        this.creationJobs.delete(worktreeId)
+        await this.removeCreationLog(job)
+      }
+    }
+
+    this.log.info(
+      {
+        configPath: this.appConfig.configPath,
+        repositoryCount: this.repositories.size,
+      },
+      message,
+    )
+
+    if (emit && changed) {
+      this.events.emit('worktree-snapshot', await this.getSnapshot())
+    }
+  }
 }
 
 type TrackedRepository = Repository & {
@@ -761,6 +813,29 @@ function toPublicRepository(repository: TrackedRepository): Repository {
     mainWorktreePath: repository.mainWorktreePath,
     bootstrapCommand: repository.bootstrapCommand,
   }
+}
+
+function repositoriesEqual(
+  left: ReadonlyMap<string, TrackedRepository>,
+  right: ReadonlyMap<string, TrackedRepository>,
+): boolean {
+  if (left.size !== right.size) {
+    return false
+  }
+
+  for (const [mainWorktreePath, leftRepository] of left) {
+    const rightRepository = right.get(mainWorktreePath)
+    if (
+      !rightRepository ||
+      leftRepository.worktreePathTemplate !==
+        rightRepository.worktreePathTemplate ||
+      leftRepository.bootstrapCommand !== rightRepository.bootstrapCommand
+    ) {
+      return false
+    }
+  }
+
+  return true
 }
 
 function renderWorktreePathTemplate(

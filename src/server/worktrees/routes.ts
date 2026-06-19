@@ -33,6 +33,7 @@ import {
   WorktreeSseEvents,
   WorktreeStreamResponse,
   type WorktreeEvent,
+  type WorktreeSnapshot,
 } from '../../api/server/worktrees'
 import { createSseStream } from '../sse'
 import { type WorktreeOpener } from './opener'
@@ -217,6 +218,9 @@ async function streamWorktreeEvents(
   const onWorktreeEvent = (event: WorktreeEvent): void => {
     stream.send(event.type, event)
   }
+  const onWorktreeSnapshot = (snapshot: WorktreeSnapshot): void => {
+    stream.send('snapshot', snapshot)
+  }
 
   // Log the listener count on every add/remove. This is the authoritative,
   // server-side ledger of worktree-event subscribers: renderer "closing stream"
@@ -224,14 +228,22 @@ async function streamWorktreeEvents(
   // and never drops) is invisible. A healthy session oscillates as windows open
   // and close; a steady climb toward WORKTREE_EVENT_MAX_LISTENERS is the tell.
   registry.events.on('worktree-event', onWorktreeEvent)
+  registry.events.on('worktree-snapshot', onWorktreeSnapshot)
   request.log.info(
-    { listeners: registry.events.listenerCount('worktree-event') },
+    {
+      listeners: registry.events.listenerCount('worktree-event'),
+      snapshotListeners: registry.events.listenerCount('worktree-snapshot'),
+    },
     'worktree-event listener added',
   )
   stream.onClose(() => {
     registry.events.off('worktree-event', onWorktreeEvent)
+    registry.events.off('worktree-snapshot', onWorktreeSnapshot)
     request.log.info(
-      { listeners: registry.events.listenerCount('worktree-event') },
+      {
+        listeners: registry.events.listenerCount('worktree-event'),
+        snapshotListeners: registry.events.listenerCount('worktree-snapshot'),
+      },
       'worktree-event listener removed',
     )
   })

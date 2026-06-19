@@ -1,8 +1,8 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
 import { promisify } from 'node:util'
 import {
@@ -12,6 +12,7 @@ import {
 import { APP_FOCUS_PATH } from '../../src/api/server/appFocus'
 import { CHAT_HOOKS_PATH } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
 
 const execFileAsync = promisify(execFile)
@@ -107,6 +108,40 @@ test('tracks a real git repository and streams a worktree snapshot', async () =>
   assert.equal(snapshot.data.worktrees[0].branchName, 'main')
 })
 
+test('reloads tracked repositories when config.json changes', async () => {
+  const repoPath = await createGitRepository()
+  const stream = await openSseStream('/worktrees')
+
+  try {
+    const initial = await stream.next<{
+      repositories: Array<{ mainWorktreePath: string }>
+    }>()
+    assert.equal(initial.event, 'snapshot')
+    assert.deepEqual(initial.data.repositories, [])
+
+    const configPath = getAppConfigPath()
+    await mkdir(dirname(configPath), { recursive: true })
+    await writeFile(
+      configPath,
+      `${JSON.stringify({
+        repositories: [{ mainWorktreePath: repoPath }],
+      })}\n`,
+      'utf8',
+    )
+
+    const reloaded = await stream.next<{
+      repositories: Array<{ mainWorktreePath: string }>
+      worktrees: Array<{ path: string; branchName?: string }>
+    }>()
+    assert.equal(reloaded.event, 'snapshot')
+    assert.equal(reloaded.data.repositories[0].mainWorktreePath, repoPath)
+    assert.equal(reloaded.data.worktrees[0].path, repoPath)
+    assert.equal(reloaded.data.worktrees[0].branchName, 'main')
+  } finally {
+    stream.close()
+  }
+})
+
 test('maps provider hooks into live chat snapshots', async () => {
   const hook = await api.post(
     `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
@@ -162,30 +197,15 @@ async function createGitRepository(): Promise<string> {
 async function readFirstSseEvent<T>(
   path: string,
 ): Promise<{ event: string | null; data: T }> {
-  const controller = new AbortController()
-  const response = await fetch(`${baseUrl}${path}`, {
-    signal: controller.signal,
-  })
-  assert.equal(response.status, 200)
-  assert.ok(response.body)
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
+  const stream = await openSseStream(path)
   try {
-    while (!buffer.includes('\n\n')) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-      buffer += decoder.decode(value, { stream: true })
-    }
+    return await stream.next<T>()
   } finally {
-    controller.abort()
-    reader.releaseLock()
+    stream.close()
   }
+}
 
-  const rawEvent = buffer.slice(0, buffer.indexOf('\n\n'))
+function parseSseEvent<T>(rawEvent: string): { event: string | null; data: T } {
   const event =
     rawEvent
       .split('\n')
@@ -199,4 +219,83 @@ async function readFirstSseEvent<T>(
     .join('\n')
   assert.ok(data)
   return { event, data: JSON.parse(data) as T }
+}
+
+async function openSseStream(path: string): Promise<{
+  next: <T>() => Promise<{ event: string | null; data: T }>
+  close: () => void
+}> {
+  const controller = new AbortController()
+  const response = await fetch(`${baseUrl}${path}`, {
+    signal: controller.signal,
+  })
+  assert.equal(response.status, 200)
+  assert.ok(response.body)
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let closed = false
+
+  return {
+    next: async <T>() => {
+      while (!closed) {
+        const eventEnd = buffer.indexOf('\n\n')
+        if (eventEnd >= 0) {
+          const rawEvent = buffer.slice(0, eventEnd)
+          buffer = buffer.slice(eventEnd + 2)
+          return parseSseEvent<T>(rawEvent)
+        }
+
+        const { done, value } = await readWithTimeout(
+          reader,
+          5_000,
+          `Timed out waiting for ${path} SSE event`,
+        )
+        if (done) {
+          break
+        }
+        buffer += decoder.decode(value, { stream: true })
+      }
+
+      throw new Error(`SSE stream closed before ${path} event arrived`)
+    },
+    close: () => {
+      if (closed) {
+        return
+      }
+      closed = true
+      void reader.cancel().catch(() => undefined)
+      controller.abort()
+      try {
+        reader.releaseLock()
+      } catch {
+        // Closing an aborted fetch can leave the reader mid-error; cleanup is
+        // best-effort in tests because the controller already owns teardown.
+      }
+    },
+  }
+}
+
+async function readWithTimeout<T>(
+  reader: ReadableStreamDefaultReader<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<ReadableStreamReadResult<T>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message))
+    }, timeoutMs)
+
+    reader.read().then(
+      (result) => {
+        clearTimeout(timer)
+        resolve(result)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }

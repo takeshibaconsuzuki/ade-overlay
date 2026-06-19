@@ -10,7 +10,10 @@ import {
   type EditorSwitchCommand,
 } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
-import { type WorktreeEvent } from '../../api/server/worktrees'
+import {
+  type WorktreeEvent,
+  type WorktreeSnapshot,
+} from '../../api/server/worktrees'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
@@ -50,6 +53,12 @@ export class EditorService {
     })
   }
 
+  private readonly onWorktreeSnapshot = (snapshot: WorktreeSnapshot): void => {
+    void this.closeUntrackedWorktrees(snapshot).catch((error: unknown) => {
+      this.log.error({ err: error }, 'editor snapshot lifecycle cleanup failed')
+    })
+  }
+
   constructor(
     private readonly registry: WorktreeRegistry,
     private readonly log: Logger,
@@ -62,6 +71,7 @@ export class EditorService {
     }) => Promise<void>,
   ) {
     this.registry.events.on('worktree-event', this.onWorktreeEvent)
+    this.registry.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
 
   getReplayCommands(): EditorCommand[] {
@@ -362,19 +372,25 @@ export class EditorService {
     }
 
     if (event.type === 'repository-removed') {
-      const liveWorktreeIds = new Set(
-        event.snapshot.worktrees.map((worktree) => worktree.worktreeId),
-      )
-      const trackedWorktreeIds = new Set([
-        ...this.sessions.keys(),
-        ...this.pendingSessions.keys(),
-      ])
-      await Promise.all(
-        [...trackedWorktreeIds]
-          .filter((worktreeId) => !liveWorktreeIds.has(worktreeId))
-          .map((worktreeId) => this.closeWorktree(worktreeId)),
-      )
+      await this.closeUntrackedWorktrees(event.snapshot)
     }
+  }
+
+  private async closeUntrackedWorktrees(
+    snapshot: WorktreeSnapshot,
+  ): Promise<void> {
+    const liveWorktreeIds = new Set(
+      snapshot.worktrees.map((worktree) => worktree.worktreeId),
+    )
+    const trackedWorktreeIds = new Set([
+      ...this.sessions.keys(),
+      ...this.pendingSessions.keys(),
+    ])
+    await Promise.all(
+      [...trackedWorktreeIds]
+        .filter((worktreeId) => !liveWorktreeIds.has(worktreeId))
+        .map((worktreeId) => this.closeWorktree(worktreeId)),
+    )
   }
 
   async closeWorktree(worktreeId: string): Promise<void> {
@@ -454,6 +470,7 @@ export class EditorService {
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     this.registry.events.off('worktree-event', this.onWorktreeEvent)
+    this.registry.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.commands.removeAllListeners()
     this.sessionStatusEvents.removeAllListeners()
     for (const resolve of this.pendingCommandAcks.values()) {

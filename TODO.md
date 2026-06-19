@@ -9,4 +9,3 @@
 - Make vscode upgrading text white
 - Restyle live chat button
 - Open chat window on open chat app
-- Reload config.json

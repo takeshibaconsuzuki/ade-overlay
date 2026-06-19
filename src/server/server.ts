@@ -10,7 +10,6 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod'
 import { OPENAPI_PATH, SERVER_HOST, SERVER_PORT } from '../api/server/config'
-import { AppConfigStore } from './appConfig'
 import { registerAppFocusRoutes } from './appFocus/routes'
 import { AppFocusService } from './appFocus/service'
 import { ClaudeChatProvider } from './chats/providers/claude'
@@ -18,6 +17,11 @@ import { CodexChatProvider } from './chats/providers/codex'
 import { ChatRegistry } from './chats/registry'
 import { registerChatRoutes } from './chats/routes'
 import { ChatService } from './chats/service'
+import {
+  APP_CONFIG_EVENT,
+  AppConfigService,
+  type AppConfigReloadedEvent,
+} from './config/service'
 import { registerEditorRoutes } from './editor/routes'
 import { EditorService } from './editor/service'
 import { getStatusCode, HttpError } from './errors'
@@ -39,7 +43,9 @@ export function createServer() {
   const server = serverBase as typeof serverBase & {
     destroyActiveConnections: () => void
   }
-  const appConfig = new AppConfigStore(server.log.child({ service: 'config' }))
+  const appConfig = new AppConfigService(
+    server.log.child({ service: 'config' }),
+  )
   const chatRegistry = new ChatRegistry(
     server.log.child({ service: 'chats' }),
     [
@@ -75,6 +81,11 @@ export function createServer() {
   )
   const worktreeOpener = new WorktreeOpener(editor, chatService, appFocus)
   const activeSockets = new Set<Socket>()
+  const onAppConfigReloaded = (event: AppConfigReloadedEvent): void => {
+    void worktreeRegistry.reloadConfig(event.config).catch((error: unknown) => {
+      server.log.warn({ err: error }, 'failed to apply app config reload')
+    })
+  }
 
   server.server.on('connection', (socket) => {
     activeSockets.add(socket)
@@ -90,12 +101,16 @@ export function createServer() {
   }
 
   server.addHook('onClose', async () => {
+    appConfig.events.off(APP_CONFIG_EVENT.configReloaded, onAppConfigReloaded)
+    appConfig.shutdown()
     await editor.shutdown()
     await chatService.shutdown()
     terminalService.shutdown()
   })
   server.addHook('onReady', async () => {
     await worktreeRegistry.loadRepositories()
+    appConfig.events.on(APP_CONFIG_EVENT.configReloaded, onAppConfigReloaded)
+    await appConfig.startWatching()
   })
 
   server.setValidatorCompiler(validatorCompiler)

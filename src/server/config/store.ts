@@ -1,8 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { z } from 'zod/v4'
-import { type Logger } from '../api/server/logger'
-import { getAppDataDir } from './dataDir'
+import { type Logger } from '../../api/server/logger'
+import { getAppDataDir } from '../dataDir'
 
 const RepositoryConfig = z.object({
   mainWorktreePath: z.string().min(1),

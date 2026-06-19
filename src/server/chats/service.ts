@@ -7,7 +7,10 @@ import {
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import { type Terminal } from '../../api/server/terminals'
-import { type WorktreeEvent } from '../../api/server/worktrees'
+import {
+  type WorktreeEvent,
+  type WorktreeSnapshot,
+} from '../../api/server/worktrees'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
@@ -34,6 +37,10 @@ export class ChatService {
     this.handleWorktreeEvent(event)
   }
 
+  private readonly onWorktreeSnapshot = (snapshot: WorktreeSnapshot): void => {
+    this.closeUntrackedTerminals(snapshot)
+  }
+
   private readonly onTerminalSnapshot = (): void => {
     this.registry.notifyTerminalsChanged()
   }
@@ -49,6 +56,7 @@ export class ChatService {
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
+    this.worktrees.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
 
   getLastCommand(): ChatCommand | null {
@@ -189,13 +197,17 @@ export class ChatService {
       return
     }
     if (event.type === 'repository-removed') {
-      const liveWorktreeIds = new Set(
-        event.snapshot.worktrees.map((worktree) => worktree.worktreeId),
-      )
-      for (const terminal of this.terminals.list()) {
-        if (!liveWorktreeIds.has(terminal.worktreeId)) {
-          this.terminals.closeForWorktree(terminal.worktreeId)
-        }
+      this.closeUntrackedTerminals(event.snapshot)
+    }
+  }
+
+  private closeUntrackedTerminals(snapshot: WorktreeSnapshot): void {
+    const liveWorktreeIds = new Set(
+      snapshot.worktrees.map((worktree) => worktree.worktreeId),
+    )
+    for (const terminal of this.terminals.list()) {
+      if (!liveWorktreeIds.has(terminal.worktreeId)) {
+        this.terminals.closeForWorktree(terminal.worktreeId)
       }
     }
   }
@@ -208,6 +220,7 @@ export class ChatService {
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     this.worktrees.events.off('worktree-event', this.onWorktreeEvent)
+    this.worktrees.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.terminals.events.off('terminal-snapshot', this.onTerminalSnapshot)
     this.commands.removeAllListeners()
 
