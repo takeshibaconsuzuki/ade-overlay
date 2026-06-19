@@ -17,7 +17,10 @@ export function formatTimestamp(value: number): string {
  * would crowd out the content; pair it with {@link formatTimestamp} in a
  * tooltip for the exact time.
  */
-export function formatShortAge(value: number, now: number = Date.now()): string {
+export function formatShortAge(
+  value: number,
+  now: number = Date.now(),
+): string {
   if (!value) {
     return ''
   }

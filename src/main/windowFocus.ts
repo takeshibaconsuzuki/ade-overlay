@@ -25,10 +25,7 @@ export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
     // To focus a role window without making macOS switch back to the Space
     // where that window was last assigned, we temporarily make it visible
     // everywhere.
-    window.setVisibleOnAllWorkspaces(
-      true,
-      VISIBLE_ON_CURRENT_WORKSPACE_OPTIONS,
-    )
+    window.setVisibleOnAllWorkspaces(true, VISIBLE_ON_CURRENT_WORKSPACE_OPTIONS)
   }
 
   window.show()

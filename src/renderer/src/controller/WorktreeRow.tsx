@@ -11,7 +11,7 @@ import { CircleAlert, Ellipsis } from 'lucide-react'
 import type { EditorSessionStatusValue } from '../../../api/server/editor'
 import { HBox, VBox } from '../components/Box'
 import type { SearchableItemProps } from '../hooks/useSearchableList'
-import { worktreeBranch, worktreeName } from './worktreeLabels'
+import { worktreeBranch, worktreeColor, worktreeName } from './worktreeLabels'
 import styles from './WorktreeRow.module.css'
 import type { Worktree } from './worktrees'
 
@@ -65,7 +65,12 @@ export function WorktreeRow({
 
       <VBox flexGrow="1" minWidth="0" gap="1">
         <HBox justify="start">
-          <Text size="2" weight="medium" title={worktree.path}>
+          <Text
+            size="2"
+            weight="medium"
+            style={{ color: worktreeColor(worktreeName(worktree)) }}
+            title={worktree.path}
+          >
             {worktreeName(worktree)}
           </Text>
           {isMain && <Badge color="gray">main</Badge>}

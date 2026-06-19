@@ -4,7 +4,7 @@ import { showChat, showEditor } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
 import { Titlebar } from '../components/Titlebar'
-import { worktreeName } from '../controller/worktreeLabels'
+import { worktreeColor, worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
 import { useChatStream, type Chat } from '../hooks/useChatStream'
 import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
@@ -150,11 +150,21 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       >
         <Button
           size="3"
+          variant="surface"
+          color="gray"
           title={currentWorktree?.path}
           onClick={handleOpenWorktrees}
         >
           <HBox justify="start" width="100%">
-            <Text as="span" truncate>
+            <Text
+              as="span"
+              truncate
+              style={
+                currentWorktree
+                  ? { color: worktreeColor(worktreesButtonText) }
+                  : undefined
+              }
+            >
               {worktreesButtonText}
             </Text>
           </HBox>

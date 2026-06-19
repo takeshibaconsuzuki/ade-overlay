@@ -8,7 +8,11 @@ import styles from './Titlebar.module.css'
  * A simple titlebar surface with a close action routed through the privileged
  * desktop bridge.
  */
-export function Titlebar({ title }: { title: string }): React.JSX.Element {
+export function Titlebar({
+  title,
+}: {
+  title: React.ReactNode
+}): React.JSX.Element {
   const handleClose = useCallback(async (): Promise<void> => {
     await window.desktop?.closeWindow()
   }, [])

@@ -8,6 +8,7 @@ import {
   Tooltip,
 } from '@radix-ui/themes'
 import { CHAT_STATUS, type ChatStatus } from '../../../api/server/chats'
+import { worktreeColor } from '../controller/worktreeLabels'
 import { formatShortAge } from '../format'
 import type { Chat } from '../hooks/useChatStream'
 import { HBox, VBox } from './Box'
@@ -106,13 +107,12 @@ function ChatRow({
           </HBox>
           <HBox>
             {worktreeName ? (
-              <Text
-                size="1"
-                color="gray"
-              >
+              <Text size="1" style={{ color: worktreeColor(worktreeName) }}>
                 {worktreeName}
               </Text>
-            ) : <></>}
+            ) : (
+              <></>
+            )}
             <Text size="1" color="gray">
               {formatShortAge(chat.updatedAt)}
             </Text>
