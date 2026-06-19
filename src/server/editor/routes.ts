@@ -238,6 +238,24 @@ async function proxyWorktreeRequest(
   }
 }
 
+// VS Code `serve-web` renders status pages (e.g. its "Upgrading…" notice) whose
+// text inherits the document color. Against our dark editor background that text
+// is unreadable, so we force inherited text white on proxied HTML documents.
+const EDITOR_TEXT_STYLE =
+  '<style>/* ADE: keep serve-web status text (e.g. "Upgrading…") legible */body{color:red!important}</style>'
+
+function injectEditorStyles(html: string): string {
+  const headCloseIndex = html.indexOf('</head>')
+  if (headCloseIndex === -1) {
+    return EDITOR_TEXT_STYLE + html
+  }
+  return (
+    html.slice(0, headCloseIndex) +
+    EDITOR_TEXT_STYLE +
+    html.slice(headCloseIndex)
+  )
+}
+
 function proxyHttpRequest(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -249,6 +267,8 @@ function proxyHttpRequest(
   delete headers['keep-alive']
   delete headers['transfer-encoding']
   delete headers.upgrade
+  // Ask upstream for an uncompressed body so we can inject styles into HTML.
+  delete headers['accept-encoding']
 
   const upstream = httpRequest(
     {
@@ -259,12 +279,41 @@ function proxyHttpRequest(
       headers,
     },
     (upstreamResponse) => {
-      reply.raw.writeHead(
-        upstreamResponse.statusCode ?? 502,
-        upstreamResponse.statusMessage,
-        upstreamResponse.headers,
-      )
-      upstreamResponse.pipe(reply.raw)
+      const isHtmlDocument =
+        request.raw.method === 'GET' &&
+        (upstreamResponse.headers['content-type'] ?? '')
+          .toLowerCase()
+          .includes('text/html')
+      if (!isHtmlDocument) {
+        reply.raw.writeHead(
+          upstreamResponse.statusCode ?? 502,
+          upstreamResponse.statusMessage,
+          upstreamResponse.headers,
+        )
+        upstreamResponse.pipe(reply.raw)
+        return
+      }
+
+      // Buffer the HTML so we can inject our stylesheet and restate its length.
+      const chunks: Buffer[] = []
+      upstreamResponse.on('data', (chunk: Buffer) => chunks.push(chunk))
+      upstreamResponse.on('error', () => reply.raw.destroy())
+      upstreamResponse.on('end', () => {
+        const body = Buffer.from(
+          injectEditorStyles(Buffer.concat(chunks).toString('utf8')),
+          'utf8',
+        )
+        const responseHeaders = { ...upstreamResponse.headers }
+        delete responseHeaders['content-encoding']
+        delete responseHeaders['transfer-encoding']
+        responseHeaders['content-length'] = String(body.byteLength)
+        reply.raw.writeHead(
+          upstreamResponse.statusCode ?? 502,
+          upstreamResponse.statusMessage,
+          responseHeaders,
+        )
+        reply.raw.end(body)
+      })
     },
   )
 
