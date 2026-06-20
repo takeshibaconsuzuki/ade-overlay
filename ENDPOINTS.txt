@@ -28,6 +28,7 @@ type Worktree = {
   worktreeId: string
   path: string
   mainWorktreePath: string
+  isMain: boolean
   head?: string
   branch?: string
   branchName?: string
@@ -58,6 +59,7 @@ type WorktreeEvent =
 type EditorCommand =
   | { type: 'switch'; worktreeId: string; url: string }
   | { type: 'show' }
+  | { type: 'focus' }
   | { type: 'close'; commandId: string; worktreeId: string }
   | { type: 'open-file'; worktreeId: string; url: string; filePath: string }
 
@@ -89,6 +91,7 @@ type ChatSession = {
   providerId: string
   worktreeId: string
   title?: string
+  description?: string
   updatedAt: number
 }
 
@@ -211,6 +214,12 @@ editorCommandAcks({
 }):
   { ok: true }
 
+// POST /editor/ready
+editorReady({
+  launchId: string
+}):
+  { ok: boolean }
+
 // GET|HEAD /__ade-overlay/editor-bootstrap
 editorBootstrap():
   string
@@ -242,7 +251,11 @@ historicalChats({
 
 // GET /chats/commands
 chatCommands():
-  Sse<{ type: 'show'; providerId?: string; chatId?: string }>
+  Sse<
+    | { type: 'show' }
+    | { type: 'focus' }
+    | { type: 'focus'; providerId: string; chatId: string; terminalId: string }
+  >
 
 Chats Hidden/Internal
 ---------------------
@@ -252,6 +265,12 @@ chatHook({
   providerId: string
   worktreeId?: string
   body: Record<string, unknown>
+}):
+  { ok: boolean }
+
+// POST /chats/ready
+chatReady({
+  launchId: string
 }):
   { ok: boolean }
 
