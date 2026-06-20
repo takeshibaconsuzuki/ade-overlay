@@ -1,23 +1,24 @@
+import { Badge, Card, ScrollArea, Skeleton, Text } from '@radix-ui/themes'
 import {
-  Box,
-  Card,
-  ScrollArea,
-  Skeleton,
-  Spinner,
-  Text,
-  Tooltip,
-} from '@radix-ui/themes'
-import { CHAT_STATUS, type ChatStatus } from '../../../api/server/chats'
+  CHAT_STATUS,
+  chatProviderLabel,
+  parseChatProviderId,
+  type ChatStatus,
+} from '../../../api/server/chats'
 import { worktreeColor } from '../controller/worktreeLabels'
 import { formatShortAge } from '../format'
 import type { Chat } from '../hooks/useChatStream'
-import { HBox, VBox } from './Box'
+import { Grid, HBox, VBox } from './Box'
 import styles from './LiveChats.module.css'
+import { StatusIndicator, type StatusIndicatorState } from './StatusIndicator'
 
-const STATUS_DOT: Record<ChatStatus, { className: string; label: string }> = {
-  [CHAT_STATUS.busy]: { className: styles.dotBusy, label: 'Working' },
-  [CHAT_STATUS.idle]: { className: styles.dotIdle, label: 'Waiting for you' },
-  [CHAT_STATUS.dormant]: { className: styles.dotDormant, label: 'Ended' },
+const CHAT_STATUS_INDICATOR: Record<
+  ChatStatus,
+  { state: StatusIndicatorState; label: string }
+> = {
+  [CHAT_STATUS.busy]: { state: 'busy', label: 'Working' },
+  [CHAT_STATUS.idle]: { state: 'ok', label: 'Waiting for you' },
+  [CHAT_STATUS.dormant]: { state: 'neutral', label: 'Ended' },
 }
 
 /**
@@ -89,60 +90,59 @@ function ChatRow({
       disabled={disabled}
       onClick={onSelect ? () => onSelect(chat) : undefined}
     >
-      <HBox p="2">
-        <HBox width="32px" flexShrink="0" justify="center">
+      <Grid
+        columns="16px minmax(0, 1fr)"
+        gapX="2"
+        gapY="1"
+        align="center"
+        p="2"
+      >
+        <HBox gridColumn="1" gridRow="1" justify="center">
           <ChatStatusDot status={chat.status} />
         </HBox>
-        <VBox className={styles.text} flexGrow="1" gap="1">
-          <HBox>
-            {chat.title ? (
-              <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
-                {chat.title}
-              </Text>
-            ) : (
-              <Skeleton>
-                <Text size="2">Loading</Text>
-              </Skeleton>
-            )}
-          </HBox>
-          <HBox>
-            {worktreeName ? (
-              <Text size="1" style={{ color: worktreeColor(worktreeName) }}>
-                {worktreeName}
-              </Text>
-            ) : (
-              <></>
-            )}
-            <Text size="1" color="gray">
-              {formatShortAge(chat.updatedAt)}
+        <HBox gridColumn="2" minWidth="0">
+          {chat.title ? (
+            <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
+              {chat.title}
             </Text>
-          </HBox>
-          <HBox>
-            {secondary ? (
-              <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
-                {secondary}
-              </Text>
-            ) : null}
-          </HBox>
-        </VBox>
-      </HBox>
+          ) : (
+            <Skeleton>
+              <Text size="2">Loading</Text>
+            </Skeleton>
+          )}
+          <Text size="1" color="gray">
+            {formatShortAge(chat.updatedAt)}
+          </Text>
+        </HBox>
+        <HBox gridColumn="2" minWidth="0">
+          {secondary ? (
+            <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
+              {secondary}
+            </Text>
+          ) : (
+            <Skeleton>
+              <Text size="1">Loading</Text>
+            </Skeleton>
+          )}
+        </HBox>
+        <HBox gridColumn="2" minWidth="0" justify="start">
+          {worktreeName ? (
+            <Text size="1" style={{ color: worktreeColor(worktreeName) }}>
+              {worktreeName}
+            </Text>
+          ) : (
+            <></>
+          )}
+          <Badge size="1" variant="soft" radius="full" color="gray">
+            {chatProviderLabel(parseChatProviderId(chat.providerId))}
+          </Badge>
+        </HBox>
+      </Grid>
     </button>
   )
 }
 
 function ChatStatusDot({ status }: { status: ChatStatus }): React.JSX.Element {
-  const { className, label } = STATUS_DOT[status]
-  if (status === CHAT_STATUS.busy) {
-    return (
-      <Tooltip content={label}>
-        <Spinner />
-      </Tooltip>
-    )
-  }
-
-  return (
-    <Tooltip content={label}>
-      <Box aria-label={label} className={`${styles.dot} ${className}`} />
-    </Tooltip>
-  )
+  const { state, label } = CHAT_STATUS_INDICATOR[status]
+  return <StatusIndicator state={state} label={label} />
 }

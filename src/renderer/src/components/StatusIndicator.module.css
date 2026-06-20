@@ -1,0 +1,22 @@
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotOk {
+  background-color: var(--grass-9);
+}
+
+.dotNeutral {
+  background-color: var(--gray-7);
+}
+
+/* Muted so a working row reads as quietly active rather than alarming. */
+.spinner {
+  color: var(--gray-9);
+}
+
+.error {
+  color: var(--red-9);
+}

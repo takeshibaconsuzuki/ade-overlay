@@ -1,4 +1,9 @@
-import { Flex, type FlexProps } from '@radix-ui/themes'
+import {
+  Flex,
+  Grid as RadixGrid,
+  type FlexProps,
+  type GridProps,
+} from '@radix-ui/themes'
 import { forwardRef } from 'react'
 
 /**
@@ -29,5 +34,16 @@ export const VBox = forwardRef<HTMLDivElement, FlexProps>(
     return (
       <Flex ref={ref} direction="column" justify="between" gap="2" {...props} />
     )
+  },
+)
+
+/**
+ * A CSS {@link Grid}. Forwards every Grid prop, including the `columns`/`rows`
+ * track templates and per-child `gridColumn`/`gridRow` placement, so callers
+ * describe a layout once instead of hand-writing grid CSS.
+ */
+export const Grid = forwardRef<HTMLDivElement, GridProps>(
+  function Grid(props, ref) {
+    return <RadixGrid ref={ref} gap="2" {...props} />
   },
 )
