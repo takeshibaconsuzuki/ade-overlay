@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
-  CHAT_PROVIDER,
+  DEFAULT_CHAT_PROVIDER,
   type ChatCommand,
   type ChatSession,
 } from '../../api/server/chats'
@@ -61,6 +61,13 @@ export class ChatService {
   ) {
     this.registry.setTerminalResolver((providerId, chatId) =>
       this.terminals.terminalIdForSession(providerId, chatId),
+    )
+    this.registry.setTerminalSessionBinder((providerId, worktreeId, chatId) =>
+      this.terminals.bindSessionToUnboundTerminal(
+        providerId,
+        worktreeId,
+        chatId,
+      ),
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
@@ -147,7 +154,7 @@ export class ChatService {
       throw new HttpError(503, 'Chat service is shutting down')
     }
     const worktree = await this.worktrees.getWorktreeById(options.worktreeId)
-    const providerId = options.providerId ?? CHAT_PROVIDER.claude
+    const providerId = options.providerId ?? DEFAULT_CHAT_PROVIDER
     const launch = this.registry.getLaunch(providerId, options.resumeSessionId)
     if (!launch) {
       throw new HttpError(400, `Unknown chat provider: ${providerId}`)

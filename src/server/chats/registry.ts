@@ -39,6 +39,11 @@ export class ChatRegistry {
     providerId: string,
     chatId: string,
   ) => string | undefined = () => undefined
+  private bindTerminalSession: (
+    providerId: string,
+    worktreeId: string,
+    chatId: string,
+  ) => string | undefined = () => undefined
 
   constructor(
     private readonly log: Logger,
@@ -94,6 +99,9 @@ export class ChatRegistry {
 
     const chatKey = `${providerId}:${update.chatId}`
     const previous = this.chats.get(chatKey)
+    if (update.worktreeId) {
+      this.bindTerminalSession(providerId, update.worktreeId, update.chatId)
+    }
     const chat: Chat = {
       chatId: update.chatId,
       providerId,
@@ -225,6 +233,21 @@ export class ChatRegistry {
     resolve: (providerId: string, chatId: string) => string | undefined,
   ): void {
     this.resolveTerminalId = resolve
+  }
+
+  /**
+   * Providers like Codex only reveal a fresh session id after the CLI starts.
+   * Bind that first hook back to the server-owned terminal when there is one
+   * unambiguous unbound terminal for the same provider and worktree.
+   */
+  setTerminalSessionBinder(
+    bind: (
+      providerId: string,
+      worktreeId: string,
+      chatId: string,
+    ) => string | undefined,
+  ): void {
+    this.bindTerminalSession = bind
   }
 
   /**

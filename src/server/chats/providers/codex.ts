@@ -1,9 +1,16 @@
-import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   CHAT_HOOKS_PATH,
-  CHAT_PROVIDER,
+  CHAT_PROVIDER_ID,
   CHAT_STATUS,
   type ChatStatus,
 } from '../../../api/server/chats'
@@ -40,7 +47,7 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
 
 export class CodexChatProvider implements ChatProvider {
-  readonly id = CHAT_PROVIDER.codex
+  readonly id = CHAT_PROVIDER_ID.codex
 
   private readonly marker = `${CHAT_HOOKS_PATH}/${this.id}`
 
@@ -111,7 +118,7 @@ export class CodexChatProvider implements ChatProvider {
    * `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Each file's first
    * line is a `session_meta` record carrying the session `id` and the `cwd` it
    * ran in. We read only that head line to attribute a session to a worktree,
-   * then read the matched files in full for a title.
+   * then read matched files in full for titles and use file mtimes for sorting.
    */
   async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
     const root = join(homedir(), '.codex', 'sessions')
@@ -129,11 +136,14 @@ export class CodexChatProvider implements ChatProvider {
         if (!meta || meta.cwd !== worktree.path) {
           return null
         }
-        const details = await readTranscriptDetails(filePath)
+        const [details, info] = await Promise.all([
+          readTranscriptDetails(filePath),
+          stat(filePath),
+        ])
         return {
           sessionId: meta.id,
           title: details.title,
-          updatedAt: meta.updatedAt,
+          updatedAt: info.mtimeMs,
         }
       }),
     )
@@ -202,6 +212,8 @@ async function readTranscriptDetails(
 
   let firstUserMessage: string | undefined
   let lastUserMessage: string | undefined
+  let firstFallbackUserMessage: string | undefined
+  let lastFallbackUserMessage: string | undefined
   for (const line of contents.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) {
@@ -214,25 +226,27 @@ async function readTranscriptDetails(
     } catch {
       continue
     }
-    if (!isRecord(entry) || entry.type !== 'event_msg') {
+    if (!isRecord(entry)) {
       continue
     }
 
-    const payload = isRecord(entry.payload) ? entry.payload : undefined
-    if (payload?.type !== 'user_message') {
-      continue
-    }
-
-    const text = firstLine(asString(payload.message))
+    const text = codexEventUserMessageText(entry)
     if (text) {
       firstUserMessage ??= text
       lastUserMessage = text
+      continue
+    }
+
+    const fallbackText = codexResponseUserMessageText(entry)
+    if (fallbackText) {
+      firstFallbackUserMessage ??= fallbackText
+      lastFallbackUserMessage = fallbackText
     }
   }
 
   return {
-    title: firstUserMessage,
-    description: lastUserMessage,
+    title: firstUserMessage ?? firstFallbackUserMessage,
+    description: lastUserMessage ?? lastFallbackUserMessage,
   }
 }
 
@@ -263,26 +277,16 @@ async function collectJsonlFiles(root: string): Promise<string[]> {
 
 /**
  * Read just the first line of a rollout file and parse its `session_meta`.
- * Returns the session id, the cwd it ran in, and a sort timestamp (epoch ms).
+ * Returns the session id and the cwd it ran in.
  */
 async function readSessionMeta(
   filePath: string,
-): Promise<{ id: string; cwd: string; updatedAt: number } | null> {
-  let head: string
-  try {
-    const handle = await open(filePath, 'r')
-    try {
-      const buffer = Buffer.alloc(16_384)
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-      head = buffer.toString('utf8', 0, bytesRead)
-    } finally {
-      await handle.close()
-    }
-  } catch {
+): Promise<{ id: string; cwd: string } | null> {
+  const firstLineText = await readFirstLine(filePath)
+  if (!firstLineText) {
     return null
   }
 
-  const firstLineText = head.split('\n', 1)[0]
   let entry: unknown
   try {
     entry = JSON.parse(firstLineText)
@@ -300,9 +304,104 @@ async function readSessionMeta(
     return null
   }
 
-  const timestamp = asString(payload?.timestamp ?? entry.timestamp)
-  const parsed = timestamp ? Date.parse(timestamp) : Number.NaN
-  return { id, cwd, updatedAt: Number.isNaN(parsed) ? 0 : parsed }
+  return { id, cwd }
+}
+
+async function readFirstLine(filePath: string): Promise<string | null> {
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+  } catch {
+    return null
+  }
+
+  try {
+    const chunks: string[] = []
+    const buffer = Buffer.alloc(64 * 1024)
+    let position = 0
+
+    while (true) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        buffer.length,
+        position,
+      )
+      if (bytesRead === 0) {
+        return chunks.length > 0 ? chunks.join('') : null
+      }
+
+      const chunk = buffer.toString('utf8', 0, bytesRead)
+      const newline = chunk.indexOf('\n')
+      if (newline !== -1) {
+        chunks.push(chunk.slice(0, newline))
+        return chunks.join('')
+      }
+
+      chunks.push(chunk)
+      position += bytesRead
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+function codexEventUserMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'event_msg') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'user_message') {
+      return firstLine(asString(payload.message))
+    }
+  }
+
+  return undefined
+}
+
+function codexResponseUserMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'response_item') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'message' && payload.role === 'user') {
+      return userPromptLine(contentText(payload.content))
+    }
+  }
+
+  return undefined
+}
+
+function userPromptLine(value: string | undefined): string | undefined {
+  const line = firstLine(value)
+  if (
+    !line ||
+    line.startsWith('<turn_aborted>') ||
+    line.startsWith('# AGENTS.md')
+  ) {
+    return undefined
+  }
+  return line
+}
+
+function contentText(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const parts = value
+    .map((part) => {
+      if (!isRecord(part)) {
+        return undefined
+      }
+      return asString(part.text)
+    })
+    .filter((part): part is string => part !== undefined)
+
+  return parts.length > 0 ? parts.join('\n') : undefined
 }
 
 function firstLine(value: string | undefined): string | undefined {

@@ -110,6 +110,37 @@ export class TerminalManager {
     return undefined
   }
 
+  bindSessionToUnboundTerminal(
+    providerId: string,
+    worktreeId: string,
+    sessionId: string,
+  ): string | undefined {
+    const existing = this.terminalIdForSession(providerId, sessionId)
+    if (existing) {
+      return existing
+    }
+
+    const candidates = [...this.terminals.values()].filter(
+      (record) =>
+        record.status === 'running' &&
+        record.providerId === providerId &&
+        record.worktreeId === worktreeId &&
+        !record.sessionId,
+    )
+    if (candidates.length !== 1) {
+      return undefined
+    }
+
+    const [record] = candidates
+    record.sessionId = sessionId
+    this.log.info(
+      { terminalId: record.id, providerId, worktreeId, sessionId },
+      'chat terminal bound to provider session',
+    )
+    this.onChange()
+    return record.id
+  }
+
   create(options: CreateTerminalOptions): Terminal {
     const id = randomUUID()
     const target = withUserEnvironment(options.command, options.args)

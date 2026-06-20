@@ -254,9 +254,10 @@ test('chat app shows live terminals and resumes historical sessions', async () =
 
   await page.goto(`${rendererUrl}/#chat`)
   await page.getByRole('button', { name: /claude.*live-ses/ }).waitFor()
-  await page.getByRole('button', { name: 'New chat' }).click()
+  await page.getByRole('radio', { name: 'Codex' }).click()
+  await page.getByRole('button', { name: 'New Codex chat' }).click()
   await page.getByRole('tab', { name: 'Historical' }).click()
-  await page.getByRole('button', { name: /Past fix/ }).click()
+  await page.getByRole('button', { name: /Codex plan/ }).click()
 
   await page.waitForFunction(() => {
     const creates = window.__apiCalls.filter(
@@ -273,8 +274,16 @@ test('chat app shows live terminals and resumes historical sessions', async () =
     'bbbbbbbbbbbb',
   )
   assert.equal(
+    (terminalCreates[0].body as { providerId?: string }).providerId,
+    'codex',
+  )
+  assert.equal(
     (terminalCreates[1].body as { resumeSessionId?: string }).resumeSessionId,
-    'history-1',
+    'codex-history',
+  )
+  assert.equal(
+    (terminalCreates[1].body as { providerId?: string }).providerId,
+    'codex',
   )
 
   await page.close()
@@ -399,6 +408,13 @@ async function handleApiRoute(route: Route): Promise<void> {
           worktreeId: 'bbbbbbbbbbbb',
           title: 'Past fix',
           updatedAt: Date.parse('2026-06-18T10:00:00Z'),
+        },
+        {
+          sessionId: 'codex-history',
+          providerId: 'codex',
+          worktreeId: 'bbbbbbbbbbbb',
+          title: 'Codex plan',
+          updatedAt: Date.parse('2026-06-18T09:00:00Z'),
         },
       ],
     })

@@ -37,12 +37,33 @@ export const CHAT_EVENT_TYPES: readonly ChatEventType[] =
   Object.values(CHAT_EVENT_TYPE)
 
 /** Stable identifiers for each supported agentic coding system. */
-export const CHAT_PROVIDER = {
+export const CHAT_PROVIDER_ID = {
   claude: 'claude',
   codex: 'codex',
 } as const
 
-export type ChatProviderId = (typeof CHAT_PROVIDER)[keyof typeof CHAT_PROVIDER]
+export type ChatProviderId =
+  (typeof CHAT_PROVIDER_ID)[keyof typeof CHAT_PROVIDER_ID]
+
+export const CHAT_PROVIDERS = [
+  { id: CHAT_PROVIDER_ID.claude, label: 'Claude' },
+  { id: CHAT_PROVIDER_ID.codex, label: 'Codex' },
+] as const satisfies ReadonlyArray<{ id: ChatProviderId; label: string }>
+
+export const DEFAULT_CHAT_PROVIDER = CHAT_PROVIDER_ID.claude
+
+export function chatProviderLabel(providerId: ChatProviderId): string {
+  return (
+    CHAT_PROVIDERS.find((provider) => provider.id === providerId)?.label ??
+    providerId
+  )
+}
+
+export function parseChatProviderId(value: string): ChatProviderId {
+  return value === CHAT_PROVIDER_ID.codex
+    ? CHAT_PROVIDER_ID.codex
+    : DEFAULT_CHAT_PROVIDER
+}
 
 /**
  * Base path agentic coding systems POST hook events to. The concrete provider

@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   CHAT_HOOKS_PATH,
-  CHAT_PROVIDER,
+  CHAT_PROVIDER_ID,
   CHAT_STATUS,
   type ChatStatus,
 } from '../../../api/server/chats'
@@ -50,7 +50,7 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
 
 export class ClaudeChatProvider implements ChatProvider {
-  readonly id = CHAT_PROVIDER.claude
+  readonly id = CHAT_PROVIDER_ID.claude
 
   // Marker substring identifying a hook command we own, so re-configuring a
   // worktree replaces our group instead of stacking duplicates.

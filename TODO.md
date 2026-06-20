@@ -1,5 +1,4 @@
 - Synthetic data dir worktree
 - Stop vscode servers
-- Codex support in chat app
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque

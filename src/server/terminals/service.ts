@@ -22,6 +22,18 @@ export class TerminalService {
     return this.manager.terminalIdForSession(providerId, sessionId)
   }
 
+  bindSessionToUnboundTerminal(
+    providerId: string,
+    worktreeId: string,
+    sessionId: string,
+  ): string | undefined {
+    return this.manager.bindSessionToUnboundTerminal(
+      providerId,
+      worktreeId,
+      sessionId,
+    )
+  }
+
   create(options: {
     worktreeId: string
     providerId: string

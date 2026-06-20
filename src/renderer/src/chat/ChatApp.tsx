@@ -4,11 +4,20 @@ import {
   Card,
   Code,
   ScrollArea,
+  SegmentedControl,
   Tabs,
   Text,
 } from '@radix-ui/themes'
 import { useCallback, useEffect, useState } from 'react'
-import { CHAT_STATUS, type ChatCommand } from '../../../api/server/chats'
+import {
+  CHAT_PROVIDERS,
+  CHAT_STATUS,
+  chatProviderLabel,
+  DEFAULT_CHAT_PROVIDER,
+  parseChatProviderId,
+  type ChatCommand,
+  type ChatProviderId,
+} from '../../../api/server/chats'
 import {
   createTerminal,
   historicalChats,
@@ -67,6 +76,9 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
 
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [newChatProviderId, setNewChatProviderId] = useState<ChatProviderId>(
+    DEFAULT_CHAT_PROVIDER,
+  )
 
   // Historical sessions are read from disk (git), so they load separately and
   // only feed the Historical tab; a slow read never delays terminal display.
@@ -193,17 +205,32 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
           minHeight="0"
           style={{ borderRight: '1px solid var(--gray-4)' }}
         >
-          <Box p="3">
+          <VBox gap="2" p="3">
+            <SegmentedControl.Root
+              value={newChatProviderId}
+              onValueChange={(value) =>
+                setNewChatProviderId(parseChatProviderId(value))
+              }
+              disabled={!worktreeId}
+            >
+              {CHAT_PROVIDERS.map((provider) => (
+                <SegmentedControl.Item key={provider.id} value={provider.id}>
+                  {provider.label}
+                </SegmentedControl.Item>
+              ))}
+            </SegmentedControl.Root>
             <Button
               size="2"
               variant="solid"
-              onClick={() => void startTerminal({})}
+              onClick={() =>
+                void startTerminal({ providerId: newChatProviderId })
+              }
               disabled={!worktreeId}
               style={{ width: '100%' }}
             >
-              New chat
+              New {chatProviderLabel(newChatProviderId)} chat
             </Button>
-          </Box>
+          </VBox>
           <Tabs.Root defaultValue="live" className={styles.tabs}>
             <Tabs.List className={styles.tabsList}>
               <Tabs.Trigger value="live">Live</Tabs.Trigger>

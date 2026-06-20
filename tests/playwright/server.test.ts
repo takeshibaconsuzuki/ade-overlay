@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
@@ -15,8 +15,10 @@ import {
   CHAT_HOOKS_PATH,
 } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import { CodexChatProvider } from '../../src/server/chats/providers/codex'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
+import { TerminalManager } from '../../src/server/terminals/manager'
 
 const execFileAsync = promisify(execFile)
 
@@ -180,6 +182,105 @@ test('maps provider hooks into live chat snapshots', async () => {
       updatedAt: snapshot.data.chats[0].updatedAt,
     },
   ])
+})
+
+test('binds an unbound chat terminal to its provider session', () => {
+  let changeCount = 0
+  const manager = new TerminalManager(
+    { info() {}, warn() {}, debug() {}, error() {} } as never,
+    () => {
+      changeCount += 1
+    },
+  )
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-1', {
+    id: 'terminal-1',
+    worktreeId: 'worktree-1',
+    providerId: 'codex',
+    status: 'running',
+  })
+
+  assert.equal(
+    manager.bindSessionToUnboundTerminal('codex', 'worktree-1', 'session-1'),
+    'terminal-1',
+  )
+  assert.equal(manager.terminalIdForSession('codex', 'session-1'), 'terminal-1')
+  assert.equal(changeCount, 1)
+
+  assert.equal(
+    manager.bindSessionToUnboundTerminal('codex', 'worktree-1', 'session-1'),
+    'terminal-1',
+  )
+  assert.equal(changeCount, 1)
+})
+
+test('lists Codex sessions with large session metadata records', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const sessionPath = join(
+    home,
+    '.codex',
+    'sessions',
+    '2026',
+    '06',
+    '19',
+    'rollout-large-meta.jsonl',
+  )
+  await mkdir(dirname(sessionPath), { recursive: true })
+  await mkdir(worktreePath, { recursive: true })
+
+  const sessionId = 'codex-large-session'
+  const meta = {
+    timestamp: '2026-06-20T01:20:12.000Z',
+    type: 'session_meta',
+    payload: {
+      id: sessionId,
+      timestamp: '2026-06-20T01:20:12.000Z',
+      cwd: worktreePath,
+      base_instructions: { text: 'x'.repeat(40_000) },
+    },
+  }
+  const message = {
+    timestamp: '2026-06-20T01:20:13.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'user_message',
+      message: 'hello from codex history',
+    },
+  }
+  await writeFile(
+    sessionPath,
+    `${JSON.stringify(meta)}\n${JSON.stringify(message)}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const provider = new CodexChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never)
+
+    const sessions = await provider.listSessions({
+      worktreeId: 'x',
+      path: worktreePath,
+    })
+    assert.equal(sessions.length, 1)
+    assert.equal(sessions[0].sessionId, sessionId)
+    assert.equal(sessions[0].title, 'hello from codex history')
+    assert.equal(sessions[0].updatedAt, (await stat(sessionPath)).mtimeMs)
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = originalHome
+    }
+  }
 })
 
 test('opens chat command stream before any command is emitted', async () => {
