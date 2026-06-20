@@ -1,26 +1,34 @@
 import { ADE_APP_ROLE, type AdeAppRole } from '../../api/server/appFocus'
+import { type OpenWorktreeResponse } from '../../api/server/worktrees'
 import { type AppFocusService } from '../appFocus/service'
 import { type ChatService } from '../chats/service'
 import { type EditorService } from '../editor/service'
+import { type WorktreeRegistry } from './registry'
 
 export class WorktreeOpener {
   constructor(
     private readonly editor: EditorService,
     private readonly chat: ChatService,
     private readonly focus: AppFocusService,
+    private readonly registry: WorktreeRegistry,
   ) {}
 
   async openWorktree(
     worktreeId: string,
     { focus = true }: { focus?: boolean } = {},
-  ): ReturnType<EditorService['openWorktreeEditor']> {
+  ): Promise<OpenWorktreeResponse> {
     const foregroundRole = this.getForegroundRole()
-    const response = await this.editor.openWorktreeEditor(worktreeId)
-    this.chat.openChat()
+    await this.registry.selectWorktree(worktreeId)
+    const response = await this.editor.openWorktree(worktreeId)
+    await this.chat.openChat()
     if (focus) {
       this.foreground(foregroundRole)
     }
-    return response
+    return {
+      worktreeId: response.worktreeId,
+      url: response.url,
+      editorAlreadyStarted: response.alreadyStarted,
+    }
   }
 
   private getForegroundRole(): AdeAppRole {
@@ -36,7 +44,7 @@ export class WorktreeOpener {
   }
 
   focusEditor(): void {
-    this.editor.showEditor()
+    this.editor.focusEditor()
     this.focus.recordFocused(ADE_APP_ROLE.editor)
   }
 

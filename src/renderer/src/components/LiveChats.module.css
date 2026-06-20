@@ -36,27 +36,3 @@
   cursor: default;
   opacity: 0.5;
 }
-
-/* Allow the title/description column to shrink inside the flex row so the
- * truncated `Text` can render its ellipsis instead of forcing the row wider. */
-.text {
-  min-width: 0;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.dotBusy {
-  background-color: var(--amber-9);
-}
-
-.dotIdle {
-  background-color: var(--grass-9);
-}
-
-.dotDormant {
-  background-color: var(--gray-7);
-}

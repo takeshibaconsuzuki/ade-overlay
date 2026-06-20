@@ -9,6 +9,13 @@ const bootstrapTemplateSource = resolve(
   'src/server/editor/bootstrap.html',
 )
 const bootstrapTemplateOutput = resolve(projectRoot, 'out/main/bootstrap.html')
+const hookScriptFiles = [
+  'hook-forwarder.cjs',
+  'hook-wrapper.cmd',
+  'hook-wrapper.sh',
+]
+const hookScriptsSourceDir = resolve(projectRoot, 'src/server/chats')
+const hookScriptsOutputDir = resolve(projectRoot, 'out/main')
 
 /** Per-role dock icons the main process hands to `app.dock.setIcon`. */
 const DOCK_ICON_ROLES = ['controller', 'chat', 'editor']
@@ -23,6 +30,18 @@ export default defineConfig({
         closeBundle() {
           mkdirSync(dirname(bootstrapTemplateOutput), { recursive: true })
           copyFileSync(bootstrapTemplateSource, bootstrapTemplateOutput)
+        },
+      },
+      {
+        name: 'copy-chat-hook-scripts',
+        closeBundle() {
+          mkdirSync(hookScriptsOutputDir, { recursive: true })
+          for (const file of hookScriptFiles) {
+            copyFileSync(
+              resolve(hookScriptsSourceDir, file),
+              resolve(hookScriptsOutputDir, file),
+            )
+          }
         },
       },
       {

@@ -1,21 +1,33 @@
-import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   CHAT_HOOKS_PATH,
-  CHAT_PROVIDER,
+  CHAT_PROVIDER_ID,
   CHAT_STATUS,
   type ChatStatus,
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { type Logger } from '../../../api/server/logger'
 import {
+  ensureHookForwarderWrapper,
+  hookForwardCommand,
+} from '../hookForwarder'
+import {
   type ChatDetails,
   type ChatHookContext,
   type ChatLaunch,
   type ChatProvider,
-  type ChatSessionSummary,
   type ChatStatusUpdate,
+  type HistoricalChat,
   type WorktreeRef,
 } from './types'
 
@@ -25,7 +37,6 @@ import {
  * local hook sink.
  */
 const HOOK_STATUS: Record<string, ChatStatus> = {
-  SessionStart: CHAT_STATUS.idle,
   UserPromptSubmit: CHAT_STATUS.busy,
   PreToolUse: CHAT_STATUS.busy,
   PermissionRequest: CHAT_STATUS.idle,
@@ -39,10 +50,28 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
 
+/**
+ * Codex hook payloads only carry the latest prompt, not assistant text. Re-read
+ * the transcript after events that may have appended a visible assistant update
+ * so the live description follows the conversation instead of staying pinned to
+ * the last prompt.
+ */
+const HOOK_REFRESH_DESCRIPTION = new Set([
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PermissionRequest',
+  'Stop',
+])
+
+// Read at most this many bytes from the end of a transcript when refreshing the
+// live description; the latest entries we need sit at the very end of the file.
+const TRANSCRIPT_TAIL_BYTES = 64 * 1024
+
 export class CodexChatProvider implements ChatProvider {
-  readonly id = CHAT_PROVIDER.codex
+  readonly id = CHAT_PROVIDER_ID.codex
 
   private readonly marker = `${CHAT_HOOKS_PATH}/${this.id}`
+  private readonly wrapperMarker = `ade-overlay-chat-hook-${this.id}`
 
   constructor(private readonly log: Logger) {}
 
@@ -59,13 +88,21 @@ export class CodexChatProvider implements ChatProvider {
       // No (or unreadable) existing hooks file -- start from an empty object.
     }
 
+    const hookEndpoint = new URL(`${SERVER_ORIGIN}${this.marker}`)
+    const wrapperPath = await ensureHookForwarderWrapper(
+      this.id,
+      hookEndpoint.toString(),
+    )
     const hooks = isRecord(config.hooks) ? { ...config.hooks } : {}
     for (const event of HOOK_EVENTS) {
       const existing = Array.isArray(hooks[event])
         ? (hooks[event] as unknown[])
         : []
       const preserved = existing.filter((group) => !this.isManagedGroup(group))
-      hooks[event] = [...preserved, { hooks: [this.hook(worktree.worktreeId)] }]
+      hooks[event] = [
+        ...preserved,
+        { hooks: [this.hook(worktree.worktreeId, wrapperPath)] },
+      ]
     }
 
     const next = { ...config, hooks }
@@ -79,7 +116,7 @@ export class CodexChatProvider implements ChatProvider {
     context: ChatHookContext,
   ): ChatStatusUpdate | null {
     const eventName = asString(payload.hook_event_name)
-    const chatId = asString(payload.session_id)
+    const chatId = this.hookChatId(payload)
     if (!eventName || !chatId) {
       return null
     }
@@ -98,12 +135,26 @@ export class CodexChatProvider implements ChatProvider {
       chatId,
       status,
       description,
+      refreshDescription: HOOK_REFRESH_DESCRIPTION.has(eventName),
       worktreeId: context.worktreeId,
     }
   }
 
+  hookChatId(payload: Record<string, unknown>): string | undefined {
+    // Codex's native session id is the chat's identity for us.
+    return asString(payload.session_id)
+  }
+
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails> {
     return readTranscriptDetails(asStringOrNull(payload.transcript_path))
+  }
+
+  async resolveDescription(
+    payload: Record<string, unknown>,
+  ): Promise<string | undefined> {
+    return readTranscriptTailDescription(
+      asStringOrNull(payload.transcript_path),
+    )
   }
 
   /**
@@ -111,9 +162,10 @@ export class CodexChatProvider implements ChatProvider {
    * `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Each file's first
    * line is a `session_meta` record carrying the session `id` and the `cwd` it
    * ran in. We read only that head line to attribute a session to a worktree,
-   * then read the matched files in full for a title.
+   * then read matched files in full for details and use file mtimes for sorting.
+   * The session id is the chat id we expose.
    */
-  async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
+  async listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]> {
     const root = join(homedir(), '.codex', 'sessions')
 
     let files: string[]
@@ -124,52 +176,47 @@ export class CodexChatProvider implements ChatProvider {
     }
 
     const metas = await Promise.all(
-      files.map(async (filePath): Promise<ChatSessionSummary | null> => {
+      files.map(async (filePath): Promise<HistoricalChat | null> => {
         const meta = await readSessionMeta(filePath)
         if (!meta || meta.cwd !== worktree.path) {
           return null
         }
-        const details = await readTranscriptDetails(filePath)
+        const [details, info] = await Promise.all([
+          readTranscriptDetails(filePath),
+          stat(filePath),
+        ])
         return {
-          sessionId: meta.id,
+          chatId: meta.id,
           title: details.title,
-          updatedAt: meta.updatedAt,
+          description: details.description,
+          updatedAt: info.mtimeMs,
         }
       }),
     )
 
     return metas
-      .filter((session): session is ChatSessionSummary => session !== null)
+      .filter((chat): chat is HistoricalChat => chat !== null)
       .sort((left, right) => right.updatedAt - left.updatedAt)
   }
 
-  resumeLaunch(sessionId: string): ChatLaunch {
-    return { command: 'codex', args: ['resume', sessionId], sessionId }
+  resumeLaunch(chatId: string): ChatLaunch {
+    // Codex resumes by its native session id, which is our chat id.
+    return { command: 'codex', args: ['resume', chatId], chatId }
   }
 
   newLaunch(): ChatLaunch {
     return { command: 'codex', args: [] }
   }
 
-  private hook(worktreeId: string): {
+  private hook(
+    worktreeId: string,
+    wrapperPath: string,
+  ): {
     type: 'command'
     command: string
     timeout: number
   } {
-    const url = new URL(`${SERVER_ORIGIN}${this.marker}`)
-    url.searchParams.set('worktreeId', worktreeId)
-    const script = [
-      'import sys,urllib.request',
-      'data=sys.stdin.buffer.read()',
-      'req=urllib.request.Request(sys.argv[1],data=data,headers={"Content-Type":"application/json"},method="POST")',
-      'urllib.request.urlopen(req,timeout=1).read()',
-    ].join(';')
-
-    return {
-      type: 'command',
-      command: `/usr/bin/env python3 -c ${shellQuote(script)} ${shellQuote(url.toString())} >/dev/null 2>&1 || true`,
-      timeout: 5,
-    }
+    return hookForwardCommand(wrapperPath, worktreeId)
   }
 
   private isManagedGroup(group: unknown): boolean {
@@ -181,7 +228,8 @@ export class CodexChatProvider implements ChatProvider {
         isRecord(hook) &&
         hook.type === 'command' &&
         typeof hook.command === 'string' &&
-        hook.command.includes(this.marker),
+        (hook.command.includes(this.marker) ||
+          hook.command.includes(this.wrapperMarker)),
     )
   }
 }
@@ -201,38 +249,102 @@ async function readTranscriptDetails(
   }
 
   let firstUserMessage: string | undefined
-  let lastUserMessage: string | undefined
+  let description: string | undefined
+  let firstFallbackUserMessage: string | undefined
   for (const line of contents.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) {
+    const entry = parseTranscriptLine(line)
+    if (!entry) {
       continue
     }
 
-    let entry: unknown
-    try {
-      entry = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (!isRecord(entry) || entry.type !== 'event_msg') {
-      continue
-    }
-
-    const payload = isRecord(entry.payload) ? entry.payload : undefined
-    if (payload?.type !== 'user_message') {
-      continue
-    }
-
-    const text = firstLine(asString(payload.message))
+    const text = codexEventUserMessageText(entry)
     if (text) {
       firstUserMessage ??= text
-      lastUserMessage = text
+      description = text
+      continue
+    }
+
+    const agentText = codexEventAgentMessageText(entry)
+    if (agentText) {
+      description = agentText
+      continue
+    }
+
+    const fallbackText = codexResponseUserMessageText(entry)
+    if (fallbackText) {
+      firstFallbackUserMessage ??= fallbackText
+      description = fallbackText
+      continue
+    }
+
+    const fallbackAgentText = codexResponseAssistantMessageText(entry)
+    if (fallbackAgentText) {
+      description = fallbackAgentText
     }
   }
 
   return {
-    title: firstUserMessage,
-    description: lastUserMessage,
+    title: firstUserMessage ?? firstFallbackUserMessage,
+    description,
+  }
+}
+
+/**
+ * Refresh just the live description by reading only the tail of the transcript:
+ * the latest visible assistant text or genuine user prompt sits near the end of
+ * the file, so we avoid re-reading the whole session on every hook. Returns
+ * `undefined` when the file is missing/unreadable or holds nothing usable.
+ */
+async function readTranscriptTailDescription(
+  transcriptPath: string | undefined,
+): Promise<string | undefined> {
+  if (!transcriptPath) {
+    return undefined
+  }
+
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(transcriptPath, 'r')
+    const { size } = await handle.stat()
+    const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES)
+    const length = size - start
+    if (length === 0) {
+      return undefined
+    }
+
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buffer, 0, length, start)
+    let lines = buffer.toString('utf8', 0, bytesRead).split('\n')
+    const clipped = start > 0
+    if (clipped) {
+      lines = lines.slice(1)
+    }
+
+    let description: string | undefined
+    for (const line of lines) {
+      const entry = parseTranscriptLine(line)
+      if (!entry) {
+        continue
+      }
+      description =
+        codexEventDescriptionText(entry) ??
+        codexResponseDescriptionText(entry) ??
+        description
+    }
+
+    if (description !== undefined) {
+      return description
+    }
+    if (!clipped) {
+      return undefined
+    }
+    // The tail held no usable text and may have clipped the entry we need (e.g.
+    // a final message longer than the tail window); fall back to a full read.
+    return (await readTranscriptDetails(transcriptPath)).description
+  } catch {
+    return undefined
+  } finally {
+    await handle?.close()
   }
 }
 
@@ -263,26 +375,16 @@ async function collectJsonlFiles(root: string): Promise<string[]> {
 
 /**
  * Read just the first line of a rollout file and parse its `session_meta`.
- * Returns the session id, the cwd it ran in, and a sort timestamp (epoch ms).
+ * Returns the session id and the cwd it ran in.
  */
 async function readSessionMeta(
   filePath: string,
-): Promise<{ id: string; cwd: string; updatedAt: number } | null> {
-  let head: string
-  try {
-    const handle = await open(filePath, 'r')
-    try {
-      const buffer = Buffer.alloc(16_384)
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-      head = buffer.toString('utf8', 0, bytesRead)
-    } finally {
-      await handle.close()
-    }
-  } catch {
+): Promise<{ id: string; cwd: string } | null> {
+  const firstLineText = await readFirstLine(filePath)
+  if (!firstLineText) {
     return null
   }
 
-  const firstLineText = head.split('\n', 1)[0]
   let entry: unknown
   try {
     entry = JSON.parse(firstLineText)
@@ -300,9 +402,163 @@ async function readSessionMeta(
     return null
   }
 
-  const timestamp = asString(payload?.timestamp ?? entry.timestamp)
-  const parsed = timestamp ? Date.parse(timestamp) : Number.NaN
-  return { id, cwd, updatedAt: Number.isNaN(parsed) ? 0 : parsed }
+  return { id, cwd }
+}
+
+function parseTranscriptLine(
+  line: string,
+): Record<string, unknown> | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return undefined
+  }
+
+  let entry: unknown
+  try {
+    entry = JSON.parse(trimmed)
+  } catch {
+    return undefined
+  }
+
+  return isRecord(entry) ? entry : undefined
+}
+
+async function readFirstLine(filePath: string): Promise<string | null> {
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+  } catch {
+    return null
+  }
+
+  try {
+    const chunks: string[] = []
+    const buffer = Buffer.alloc(64 * 1024)
+    let position = 0
+
+    while (true) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        buffer.length,
+        position,
+      )
+      if (bytesRead === 0) {
+        return chunks.length > 0 ? chunks.join('') : null
+      }
+
+      const chunk = buffer.toString('utf8', 0, bytesRead)
+      const newline = chunk.indexOf('\n')
+      if (newline !== -1) {
+        chunks.push(chunk.slice(0, newline))
+        return chunks.join('')
+      }
+
+      chunks.push(chunk)
+      position += bytesRead
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+function codexEventUserMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'event_msg') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'user_message') {
+      return firstLine(asString(payload.message))
+    }
+  }
+
+  return undefined
+}
+
+function codexEventAgentMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'event_msg') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'agent_message') {
+      return firstLine(asString(payload.message))
+    }
+  }
+
+  return undefined
+}
+
+function codexEventDescriptionText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  return codexEventUserMessageText(entry) ?? codexEventAgentMessageText(entry)
+}
+
+function codexResponseUserMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'response_item') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'message' && payload.role === 'user') {
+      return userPromptLine(contentText(payload.content))
+    }
+  }
+
+  return undefined
+}
+
+function codexResponseAssistantMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'response_item') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'message' && payload.role === 'assistant') {
+      return firstLine(contentText(payload.content))
+    }
+  }
+
+  return undefined
+}
+
+function codexResponseDescriptionText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  return (
+    codexResponseUserMessageText(entry) ??
+    codexResponseAssistantMessageText(entry)
+  )
+}
+
+function userPromptLine(value: string | undefined): string | undefined {
+  const line = firstLine(value)
+  if (
+    !line ||
+    line.startsWith('<turn_aborted>') ||
+    line.startsWith('# AGENTS.md')
+  ) {
+    return undefined
+  }
+  return line
+}
+
+function contentText(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const parts = value
+    .map((part) => {
+      if (!isRecord(part)) {
+        return undefined
+      }
+      return asString(part.text)
+    })
+    .filter((part): part is string => part !== undefined)
+
+  return parts.length > 0 ? parts.join('\n') : undefined
 }
 
 function firstLine(value: string | undefined): string | undefined {
@@ -323,8 +579,4 @@ function asStringOrNull(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`
 }

@@ -79,7 +79,12 @@ export function createServer() {
     terminalService,
     server.log.child({ service: 'chat' }),
   )
-  const worktreeOpener = new WorktreeOpener(editor, chatService, appFocus)
+  const worktreeOpener = new WorktreeOpener(
+    editor,
+    chatService,
+    appFocus,
+    worktreeRegistry,
+  )
   const activeSockets = new Set<Socket>()
   const onAppConfigReloaded = (event: AppConfigReloadedEvent): void => {
     void worktreeRegistry.reloadConfig(event.config).catch((error: unknown) => {
@@ -144,7 +149,7 @@ export function createServer() {
     registerEditorRoutes(instance, {
       registry: worktreeRegistry,
       editor,
-      focus: appFocus,
+      opener: worktreeOpener,
     })
     registerChatRoutes(instance, chatRegistry, chatService, worktreeOpener)
     registerTerminalRoutes(instance, terminalService, chatService)

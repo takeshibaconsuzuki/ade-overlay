@@ -9,6 +9,7 @@ export const EDITOR_COMMAND_ACK_PATH = '/editorCommandAcks'
 export const EDITOR_EXTENSION_COMMAND_STREAM_PATH = '/editorExtensionCommands'
 export const EDITOR_SESSION_STREAM_PATH = '/editorSessions'
 export const EDITOR_SHOW_PATH = '/showEditor'
+export const EDITOR_READY_PATH = `${EDITOR_BASE_PATH}/ready`
 
 export type EditorSwitchCommand = {
   type: 'switch'
@@ -18,6 +19,10 @@ export type EditorSwitchCommand = {
 
 export type EditorShowCommand = {
   type: 'show'
+}
+
+export type EditorFocusCommand = {
+  type: 'focus'
 }
 
 export type EditorCloseCommand = {
@@ -36,6 +41,7 @@ export type EditorOpenFileCommand = {
 export type EditorCommand =
   | EditorSwitchCommand
   | EditorShowCommand
+  | EditorFocusCommand
   | EditorCloseCommand
   | EditorOpenFileCommand
 
@@ -47,6 +53,10 @@ export const EditorSwitchCommand = z.object({
 
 export const EditorShowCommand = z.object({
   type: z.literal('show'),
+})
+
+export const EditorFocusCommand = z.object({
+  type: z.literal('focus'),
 })
 
 export const EditorCloseCommand = z.object({
@@ -65,6 +75,7 @@ export const EditorOpenFileCommand = z.object({
 export const EditorCommand = z.discriminatedUnion('type', [
   EditorSwitchCommand,
   EditorShowCommand,
+  EditorFocusCommand,
   EditorCloseCommand,
   EditorOpenFileCommand,
 ])
@@ -72,6 +83,7 @@ export const EditorCommand = z.discriminatedUnion('type', [
 export const EditorCommandSseEvents = defineSseEvents({
   switch: EditorSwitchCommand,
   show: EditorShowCommand,
+  focus: EditorFocusCommand,
   close: EditorCloseCommand,
   'open-file': EditorOpenFileCommand,
 })
@@ -143,6 +155,14 @@ export const EditorCommandAckResponse = z.object({
   ok: z.literal(true),
 })
 
+export const EditorReadyRequest = z.strictObject({
+  launchId: z.string().min(1),
+})
+
+export const EditorReadyResponse = z.object({
+  ok: z.boolean(),
+})
+
 export const OpenCreationLogsResponse = z.object({
   ok: z.literal(true),
 })
@@ -151,6 +171,8 @@ export { ErrorResponse }
 
 export type EditorCommandAckRequest = z.infer<typeof EditorCommandAckRequest>
 export type EditorCommandAckResponse = z.infer<typeof EditorCommandAckResponse>
+export type EditorReadyRequest = z.infer<typeof EditorReadyRequest>
+export type EditorReadyResponse = z.infer<typeof EditorReadyResponse>
 export type EditorExtensionCommandQuery = z.infer<
   typeof EditorExtensionCommandQuery
 >

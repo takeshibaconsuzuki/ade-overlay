@@ -1,9 +1,6 @@
 - Synthetic data dir worktree
 - Stop vscode servers
-- Codex support in chat app
-- Closing laptop and resuming leaves dead terminal
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque
-- Text on right side of terminal is cut off
-- Make vscode upgrading text white
-- Open chat window on open chat app
+- Live-chat focus rewrites app config every time
+- Notify when a chat becomes idle

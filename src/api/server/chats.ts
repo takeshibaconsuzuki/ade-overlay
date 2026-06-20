@@ -37,12 +37,33 @@ export const CHAT_EVENT_TYPES: readonly ChatEventType[] =
   Object.values(CHAT_EVENT_TYPE)
 
 /** Stable identifiers for each supported agentic coding system. */
-export const CHAT_PROVIDER = {
+export const CHAT_PROVIDER_ID = {
   claude: 'claude',
   codex: 'codex',
 } as const
 
-export type ChatProviderId = (typeof CHAT_PROVIDER)[keyof typeof CHAT_PROVIDER]
+export type ChatProviderId =
+  (typeof CHAT_PROVIDER_ID)[keyof typeof CHAT_PROVIDER_ID]
+
+export const CHAT_PROVIDERS = [
+  { id: CHAT_PROVIDER_ID.claude, label: 'Claude' },
+  { id: CHAT_PROVIDER_ID.codex, label: 'Codex' },
+] as const satisfies ReadonlyArray<{ id: ChatProviderId; label: string }>
+
+export const DEFAULT_CHAT_PROVIDER = CHAT_PROVIDER_ID.claude
+
+export function chatProviderLabel(providerId: ChatProviderId): string {
+  return (
+    CHAT_PROVIDERS.find((provider) => provider.id === providerId)?.label ??
+    providerId
+  )
+}
+
+export function parseChatProviderId(value: string): ChatProviderId {
+  return value === CHAT_PROVIDER_ID.codex
+    ? CHAT_PROVIDER_ID.codex
+    : DEFAULT_CHAT_PROVIDER
+}
 
 /**
  * Base path agentic coding systems POST hook events to. The concrete provider
@@ -59,12 +80,14 @@ export const CHAT_STREAM_PATH = '/chats/live'
  * (`src/api/server/editor.ts`):
  *   - `POST /showChat` spawns + brings the chat app forward.
  *   - `GET /chats/live` streams live chat status.
- *   - `GET /chats/history` lists a worktree's historical (on-disk) sessions.
+ *   - `GET /chats/history` lists a worktree's historical (on-disk) chats.
  *   - `GET /chats/commands` is the SSE stream the chat process listens to.
+ *   - `POST /chats/ready` is a hidden app-internal readiness signal.
  */
 export const CHAT_SHOW_PATH = '/showChat'
 export const CHAT_HISTORY_PATH = '/chats/history'
 export const CHAT_COMMAND_STREAM_PATH = '/chats/commands'
+export const CHAT_READY_PATH = '/chats/ready'
 
 export const ChatStatus = z.enum([
   CHAT_STATUS.dormant,
@@ -116,16 +139,8 @@ export const ChatHookResponse = z.object({
   ok: z.boolean(),
 })
 
-export const ChatSession = z.object({
-  sessionId: z.string(),
-  providerId: z.string(),
-  worktreeId: z.string(),
-  title: z.string().optional(),
-  updatedAt: z.number(),
-})
-
 export const ChatHistoryResponse = z.object({
-  sessions: z.array(ChatSession),
+  chats: z.array(Chat),
 })
 
 export const ChatShowRequest = z.union([
@@ -151,46 +166,63 @@ export const ChatCommandStreamResponse = z
   .string()
   .describe('Server-sent chat window commands.')
 
+export const ChatReadyRequest = z.strictObject({
+  launchId: z.string().min(1),
+})
+
+export const ChatReadyResponse = z.object({
+  ok: z.boolean(),
+})
+
 /**
  * Commands streamed to the chat Electron process over the SSE command stream.
- * `show` brings the already-spawned chat window forward. When it carries a
- * target chat (a live chat clicked from another window, e.g. the launcher), the
- * server includes the resolved terminal id for the renderer to select.
+ * `show` reveals the already-spawned chat window. `focus` brings it forward.
+ * When `focus` carries a target chat (a live chat clicked from another window,
+ * e.g. the launcher), the server includes the resolved terminal id for the
+ * renderer to select.
  */
-export type ChatShowCommand =
+export type ChatShowCommand = {
+  type: 'show'
+}
+
+export type ChatFocusCommand =
   | {
-      type: 'show'
+      type: 'focus'
     }
   | {
-      type: 'show'
+      type: 'focus'
       providerId: string
       chatId: string
       terminalId: string
     }
 
-export type ChatCommand = ChatShowCommand
+export type ChatCommand = ChatShowCommand | ChatFocusCommand
 
-export const ChatShowCommand = z.union([
+export const ChatShowCommand = z.strictObject({
+  type: z.literal('show'),
+})
+
+export const ChatFocusCommand = z.union([
   z.strictObject({
-    type: z.literal('show'),
+    type: z.literal('focus'),
   }),
   z.strictObject({
-    type: z.literal('show'),
+    type: z.literal('focus'),
     providerId: z.string().min(1),
     chatId: z.string().min(1),
     terminalId: z.string().min(1),
   }),
 ])
 
-export const ChatCommand = ChatShowCommand
+export const ChatCommand = z.union([ChatShowCommand, ChatFocusCommand])
 
 export const ChatCommandSseEvents = defineSseEvents({
-  show: ChatCommand,
+  show: ChatShowCommand,
+  focus: ChatFocusCommand,
 })
 
 export type Chat = z.infer<typeof Chat>
 export type ChatSnapshot = z.infer<typeof ChatSnapshot>
 export type ChatEvent = z.infer<typeof ChatEvent>
-export type ChatSession = z.infer<typeof ChatSession>
 export type ChatSseEvents = typeof ChatSseEvents
 export type ChatCommandSseEvents = typeof ChatCommandSseEvents

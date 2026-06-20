@@ -7,7 +7,6 @@ import {
   type EditorCommand,
   type EditorSessionStatus,
   type EditorSessionStatusValue,
-  type EditorSwitchCommand,
 } from '../../api/server/editor'
 import { type Logger } from '../../api/server/logger'
 import {
@@ -29,6 +28,12 @@ type EditorSession = {
   url: string
 }
 
+type ReadyWaiter = {
+  launchId: string
+  promise: Promise<boolean>
+  complete: (ready: boolean) => void
+}
+
 export class EditorService {
   readonly commands = new EventEmitter()
   readonly sessionStatusEvents = new EventEmitter()
@@ -38,9 +43,10 @@ export class EditorService {
   private readonly sessionStatuses = new Map<string, EditorSessionStatusValue>()
   private readonly lastSwitchTimes = new Map<string, string>()
   private editorProcess: ChildProcess | null = null
+  private launchId: string | null = null
+  private readyLaunchId: string | null = null
+  private readyWaiter: ReadyWaiter | null = null
   private editorClientCount = 0
-  private lastCommand: EditorCommand | null = null
-  private lastSwitchCommand: EditorSwitchCommand | null = null
   // Last file requested per worktree, replayed when the helper extension
   // (re)connects so a cold session start never misses the open.
   private readonly lastOpenFile = new Map<string, string>()
@@ -74,13 +80,6 @@ export class EditorService {
     this.registry.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
 
-  getReplayCommands(): EditorCommand[] {
-    return [this.lastSwitchCommand, this.lastCommand].filter(
-      (command, index, commands): command is EditorCommand =>
-        command !== null && commands.indexOf(command) === index,
-    )
-  }
-
   registerEditorClient(): () => void {
     this.editorClientCount += 1
     let registered = true
@@ -93,31 +92,17 @@ export class EditorService {
     }
   }
 
-  /** Open a worktree in the editor, making it the globally selected worktree. */
-  async openWorktreeEditor(worktreeId: string): Promise<{
+  /** Open a worktree in the editor. */
+  async openWorktree(worktreeId: string): Promise<{
     worktreeId: string
     url: string
     alreadyStarted: boolean
   }> {
-    return this.switchEditorTo(worktreeId, { select: true })
-  }
-
-  /**
-   * Bring the editor forward on a worktree without changing the globally
-   * selected worktree — for "show the editor" actions (the launcher's `w` key)
-   * that should focus the window, not switch the worktree the user is in.
-   */
-  async revealEditor(worktreeId: string): Promise<{
-    worktreeId: string
-    url: string
-    alreadyStarted: boolean
-  }> {
-    return this.switchEditorTo(worktreeId, { select: false })
+    return this.switchEditorTo(worktreeId)
   }
 
   private async switchEditorTo(
     worktreeId: string,
-    { select }: { select: boolean },
   ): Promise<{ worktreeId: string; url: string; alreadyStarted: boolean }> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
@@ -125,21 +110,16 @@ export class EditorService {
     const alreadyStarted = this.hasLiveSession(worktreeId)
     this.recordSwitch(worktreeId)
     const session = await this.ensureSession(worktreeId)
-    if (select) {
-      await this.registry.selectWorktree(worktreeId)
-    }
-    this.ensureEditorApp()
+    await this.ensureEditorAppReady()
 
-    const command: EditorSwitchCommand = {
+    const command: EditorCommand = {
       type: 'switch',
       worktreeId,
       url: session.url,
     }
     this.emitCommand(command)
-    this.log.info(
-      { worktreeId, url: session.url, select },
-      'editor switch emitted',
-    )
+    this.log.info({ worktreeId, url: session.url }, 'editor switch emitted')
+    this.showEditor()
 
     return { worktreeId, url: session.url, alreadyStarted }
   }
@@ -149,13 +129,18 @@ export class EditorService {
     this.log.info('editor show emitted')
   }
 
+  focusEditor(): void {
+    this.emitCommand({ type: 'focus' })
+    this.log.info('editor focus emitted')
+  }
+
   async openFile(worktreeId: string, filePath: string): Promise<void> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
     this.lastOpenFile.set(worktreeId, filePath)
     const session = await this.ensureSession(worktreeId)
-    this.ensureEditorApp()
+    await this.ensureEditorAppReady()
     this.emitCommand({
       type: 'open-file',
       worktreeId,
@@ -325,14 +310,20 @@ export class EditorService {
     }
   }
 
-  private ensureEditorApp(): void {
-    if (this.editorClientCount > 0) {
-      return
-    }
+  private ensureEditorApp(): string {
     if (this.editorProcess && isChildAlive(this.editorProcess)) {
-      return
+      if (!this.launchId) {
+        this.launchId = randomUUID()
+      }
+      return this.launchId
     }
 
+    const launchId = randomUUID()
+    if (this.launchId) {
+      this.resolveReadyWaiter(this.launchId, false)
+    }
+    this.launchId = launchId
+    this.readyLaunchId = null
     const child = spawn(
       roleExecutablePath('editor'),
       roleLaunchArgs('editor'),
@@ -341,7 +332,11 @@ export class EditorService {
         // ADE_LOG_SOURCE makes the editor process ship its logs to POST /logs
         // (see src/server/logger), so all Electron logging stays centralized in
         // the server's stream rather than its own discarded stdout.
-        env: { ...process.env, ADE_LOG_SOURCE: 'editor' },
+        env: {
+          ...process.env,
+          ADE_EDITOR_LAUNCH_ID: launchId,
+          ADE_LOG_SOURCE: 'editor',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
@@ -358,11 +353,81 @@ export class EditorService {
     child.on('exit', (code, signal) => {
       if (this.editorProcess === child) {
         this.editorProcess = null
+        if (this.launchId === launchId) {
+          this.launchId = null
+          this.readyLaunchId = null
+        }
+        this.resolveReadyWaiter(launchId, false)
       }
       this.log.info({ code, signal }, 'editor app exited')
     })
     this.editorProcess = child
-    this.log.info({ pid: child.pid }, 'editor app launched')
+    this.log.info({ launchId, pid: child.pid }, 'editor app launched')
+    return launchId
+  }
+
+  private async ensureEditorAppReady(): Promise<void> {
+    const launchId = this.ensureEditorApp()
+    if (this.readyLaunchId === launchId) {
+      return
+    }
+
+    const ready = await this.waitForEditorReady(launchId)
+    if (!ready) {
+      this.log.warn({ launchId }, 'editor app readiness timed out')
+    }
+  }
+
+  markReady(launchId: string): boolean {
+    if (launchId !== this.launchId) {
+      this.log.warn(
+        { launchId, currentLaunchId: this.launchId },
+        'ignoring stale editor readiness',
+      )
+      return false
+    }
+    this.readyLaunchId = launchId
+    this.resolveReadyWaiter(launchId, true)
+    this.log.info({ launchId }, 'editor app ready')
+    return true
+  }
+
+  private waitForEditorReady(launchId: string): Promise<boolean> {
+    if (this.readyLaunchId === launchId) {
+      return Promise.resolve(true)
+    }
+    if (this.readyWaiter?.launchId === launchId) {
+      return this.readyWaiter.promise
+    }
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
+
+    let complete: (ready: boolean) => void = () => undefined
+    const timeout = setTimeout(() => {
+      if (this.readyWaiter?.launchId === launchId) {
+        this.readyWaiter = null
+      }
+      complete(false)
+    }, 5_000)
+    const promise = new Promise<boolean>((resolve) => {
+      complete = (ready) => {
+        clearTimeout(timeout)
+        resolve(ready)
+      }
+    })
+
+    this.readyWaiter = { launchId, promise, complete }
+    return promise
+  }
+
+  private resolveReadyWaiter(launchId: string, ready: boolean): void {
+    if (this.readyWaiter?.launchId !== launchId) {
+      return
+    }
+    const waiter = this.readyWaiter
+    this.readyWaiter = null
+    waiter.complete(ready)
   }
 
   private async handleWorktreeEvent(event: WorktreeEvent): Promise<void> {
@@ -436,15 +501,6 @@ export class EditorService {
   }
 
   private emitCommand(command: EditorCommand): void {
-    if (command.type === 'switch') {
-      this.lastSwitchCommand = command
-    } else if (
-      command.type === 'close' &&
-      this.lastSwitchCommand?.worktreeId === command.worktreeId
-    ) {
-      this.lastSwitchCommand = null
-    }
-    this.lastCommand = command
     this.commands.emit('command', command)
   }
 
@@ -473,6 +529,9 @@ export class EditorService {
     this.registry.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.commands.removeAllListeners()
     this.sessionStatusEvents.removeAllListeners()
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
     for (const resolve of this.pendingCommandAcks.values()) {
       resolve()
     }

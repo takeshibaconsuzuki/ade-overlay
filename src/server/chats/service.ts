@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
-  CHAT_PROVIDER,
+  DEFAULT_CHAT_PROVIDER,
+  type Chat,
   type ChatCommand,
-  type ChatSession,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import { type Terminal } from '../../api/server/terminals'
@@ -14,9 +15,21 @@ import {
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
-import { type TerminalService } from '../terminals/service'
+import { type TerminalChange, type TerminalService } from '../terminals/service'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { type ChatRegistry } from './registry'
+
+type ReadyWaiter = {
+  launchId: string
+  promise: Promise<boolean>
+  complete: (ready: boolean) => void
+}
+
+type ChatTerminalBinding = {
+  providerId: string
+  worktreeId: string
+  chatId?: string
+}
 
 /**
  * Coordinates the chat Electron role (a separate app, like the editor) and the
@@ -29,9 +42,12 @@ export class ChatService {
   readonly commands = new EventEmitter()
 
   private chatProcess: ChildProcess | null = null
-  private chatClientCount = 0
-  private lastCommand: ChatCommand | null = null
+  private launchId: string | null = null
+  private readyLaunchId: string | null = null
+  private readyWaiter: ReadyWaiter | null = null
   private shuttingDown = false
+  private readonly terminalBindings = new Map<string, ChatTerminalBinding>()
+  private readonly chatTerminals = new Map<string, string>()
 
   private readonly onWorktreeEvent = (event: WorktreeEvent): void => {
     this.handleWorktreeEvent(event)
@@ -45,6 +61,10 @@ export class ChatService {
     this.registry.notifyTerminalsChanged()
   }
 
+  private readonly onTerminalChange = (event: TerminalChange): void => {
+    this.handleTerminalChange(event)
+  }
+
   constructor(
     private readonly registry: ChatRegistry,
     private readonly worktrees: WorktreeRegistry,
@@ -52,49 +72,69 @@ export class ChatService {
     private readonly log: Logger,
   ) {
     this.registry.setTerminalResolver((providerId, chatId) =>
-      this.terminals.terminalIdForSession(providerId, chatId),
+      this.terminalIdForChat(providerId, chatId),
+    )
+    this.registry.setTerminalSessionBinder(
+      (providerId, worktreeId, chatId, hookAncestorPids) =>
+        this.bindChatToTerminal(
+          providerId,
+          worktreeId,
+          chatId,
+          hookAncestorPids,
+        ),
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
+    this.terminals.events.on('terminal-change', this.onTerminalChange)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
     this.worktrees.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
 
-  getLastCommand(): ChatCommand | null {
-    return this.lastCommand
-  }
-
-  registerChatClient(): () => void {
-    this.chatClientCount += 1
-    let registered = true
-    return () => {
-      if (!registered) {
-        return
-      }
-      registered = false
-      this.chatClientCount = Math.max(0, this.chatClientCount - 1)
-    }
-  }
-
-  /** Ensure the chat app is running without changing foreground focus. */
-  openChat(): void {
+  /**
+   * Ensure the chat app is running and has installed its command handler,
+   * without changing foreground focus.
+   */
+  async openChat(): Promise<void> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
-    this.lastCommand = null
-    this.ensureChatApp()
+    const launchId = this.ensureChatAppProcess()
+    if (this.readyLaunchId === launchId) {
+      this.showChat()
+      return
+    }
+
+    const ready = await this.waitForChatReady(launchId)
+    if (!ready) {
+      this.log.warn({ launchId }, 'chat app readiness timed out')
+    }
+    this.showChat()
+  }
+
+  markReady(launchId: string): boolean {
+    if (launchId !== this.launchId) {
+      this.log.warn(
+        { launchId, currentLaunchId: this.launchId },
+        'ignoring stale chat readiness',
+      )
+      return false
+    }
+    this.readyLaunchId = launchId
+    this.resolveReadyWaiter(launchId, true)
+    this.log.info({ launchId }, 'chat app ready')
+    return true
   }
 
   focusChat(target?: { providerId: string; chatId: string }): void {
-    let command: ChatCommand = { type: 'show' }
+    let command: ChatCommand = { type: 'focus' }
     if (target) {
-      const terminalId = this.terminals.terminalIdForSession(
+      const terminalId = this.terminalIdForChat(
         target.providerId,
         target.chatId,
       )
       if (terminalId) {
-        command = { type: 'show', ...target, terminalId }
+        command = { type: 'focus', ...target, terminalId }
       } else {
-        this.log.warn(target, 'chat show target has no terminal')
+        this.log.warn(target, 'chat focus target has no terminal')
       }
     }
     this.emitCommand(command)
@@ -103,72 +143,195 @@ export class ChatService {
         chatId: 'chatId' in command ? command.chatId : undefined,
         terminalId: 'terminalId' in command ? command.terminalId : undefined,
       },
-      'chat show emitted',
+      'chat focus emitted',
     )
   }
 
-  /** Historical, on-disk sessions for a worktree, most-recent first. */
-  async listSessions(worktreeId: string): Promise<ChatSession[]> {
-    const worktree = await this.worktrees.getWorktreeById(worktreeId)
-    return this.registry.listSessions(worktree)
+  private showChat(): void {
+    this.emitCommand({ type: 'show' })
+    this.log.info('chat show emitted')
   }
 
-  /** Start a terminal running a new or resumed chat session in the worktree. */
+  private handleTerminalChange(event: TerminalChange): void {
+    if (event.type !== 'removed') {
+      return
+    }
+
+    const binding = this.terminalBindings.get(event.terminal.terminalId)
+    this.terminalBindings.delete(event.terminal.terminalId)
+    if (!binding?.chatId) {
+      return
+    }
+
+    this.chatTerminals.delete(chatKey(binding.providerId, binding.chatId))
+    this.registry.markDormant(binding.providerId, binding.chatId)
+  }
+
+  /** Historical, on-disk chats for a worktree, most-recent first. */
+  async listHistory(worktreeId: string): Promise<Chat[]> {
+    const worktree = await this.worktrees.getWorktreeById(worktreeId)
+    return this.registry.listHistory(worktree)
+  }
+
+  /** Start a terminal running a new or resumed chat in the worktree. */
   async createTerminal(options: {
     worktreeId: string
     providerId?: string
-    resumeSessionId?: string
+    resumeChatId?: string
     title?: string
   }): Promise<Terminal> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
     const worktree = await this.worktrees.getWorktreeById(options.worktreeId)
-    const providerId = options.providerId ?? CHAT_PROVIDER.claude
-    const launch = this.registry.getLaunch(providerId, options.resumeSessionId)
+    const providerId = options.providerId ?? DEFAULT_CHAT_PROVIDER
+    const launch = this.registry.getLaunch(providerId, options.resumeChatId)
     if (!launch) {
       throw new HttpError(400, `Unknown chat provider: ${providerId}`)
     }
-    const sessionId = launch.sessionId ?? options.resumeSessionId
-    if (sessionId) {
-      const existing = this.terminals
-        .list(options.worktreeId)
-        .find(
-          (terminal) =>
-            terminal.providerId === providerId &&
-            terminal.sessionId === sessionId,
-        )
-      if (existing) {
+    const chatId = launch.chatId ?? options.resumeChatId
+    if (chatId) {
+      const existingTerminalId = this.terminalIdForChat(providerId, chatId)
+      const existing = existingTerminalId
+        ? this.terminals
+            .list(options.worktreeId)
+            .find((terminal) => terminal.terminalId === existingTerminalId)
+        : undefined
+      if (existing?.worktreeId === options.worktreeId) {
         return existing
       }
     }
 
-    return this.terminals.create({
+    const preChatCommand = await this.worktrees.getPreChatCommandForWorktree(
+      options.worktreeId,
+    )
+    const terminal = this.terminals.create({
       worktreeId: options.worktreeId,
-      providerId,
-      // Prefer the launch's pinned session id (a resumed id, or a fresh one the
-      // provider named) so the terminal links to its live chat; fall back to the
-      // requested resume id.
-      sessionId,
-      resumed: !!options.resumeSessionId,
-      title: options.title,
+      resumed: !!options.resumeChatId,
+      title: terminalTitle(providerId, chatId, options.title),
       cwd: worktree.path,
       command: launch.command,
       args: launch.args,
+      preChatCommand,
     })
+    this.terminalBindings.set(terminal.terminalId, {
+      providerId,
+      worktreeId: options.worktreeId,
+      chatId,
+    })
+    if (chatId) {
+      this.chatTerminals.set(chatKey(providerId, chatId), terminal.terminalId)
+    }
+    return terminal
   }
 
-  private ensureChatApp(): void {
-    if (this.chatClientCount > 0) {
-      return
+  private terminalIdForChat(
+    providerId: string,
+    chatId: string,
+  ): string | undefined {
+    const terminalId = this.chatTerminals.get(chatKey(providerId, chatId))
+    if (!terminalId) {
+      return undefined
     }
-    if (this.chatProcess && isChildAlive(this.chatProcess)) {
-      return
+    const terminal = this.terminals
+      .list()
+      .find((entry) => entry.terminalId === terminalId)
+    if (!terminal) {
+      this.chatTerminals.delete(chatKey(providerId, chatId))
+      return undefined
+    }
+    return terminalId
+  }
+
+  private bindChatToTerminal(
+    providerId: string,
+    worktreeId: string,
+    chatId: string,
+    hookAncestorPids?: number[],
+  ): string | undefined {
+    const existing = this.terminalIdForChat(providerId, chatId)
+    if (existing) {
+      return existing
     }
 
+    const owned = this.terminals.terminalIdForHookProcess(
+      worktreeId,
+      hookAncestorPids,
+    )
+    if (owned && this.canBindTerminal(owned, providerId, worktreeId)) {
+      this.recordChatBinding(owned, providerId, worktreeId, chatId)
+      this.log.info(
+        { terminalId: owned, providerId, worktreeId, chatId, hookAncestorPids },
+        'chat terminal bound to chat by process ancestry',
+      )
+      this.registry.notifyTerminalsChanged()
+      return owned
+    }
+
+    const candidates = this.terminals
+      .list(worktreeId)
+      .filter((terminal) =>
+        this.canBindTerminal(terminal.terminalId, providerId, worktreeId),
+      )
+    if (candidates.length !== 1) {
+      return undefined
+    }
+
+    const [terminal] = candidates
+    this.recordChatBinding(terminal.terminalId, providerId, worktreeId, chatId)
+    this.log.info(
+      { terminalId: terminal.terminalId, providerId, worktreeId, chatId },
+      'chat terminal bound to chat',
+    )
+    this.registry.notifyTerminalsChanged()
+    return terminal.terminalId
+  }
+
+  private canBindTerminal(
+    terminalId: string,
+    providerId: string,
+    worktreeId: string,
+  ): boolean {
+    const binding = this.terminalBindings.get(terminalId)
+    return (
+      binding !== undefined &&
+      binding.providerId === providerId &&
+      binding.worktreeId === worktreeId &&
+      binding.chatId === undefined
+    )
+  }
+
+  private recordChatBinding(
+    terminalId: string,
+    providerId: string,
+    worktreeId: string,
+    chatId: string,
+  ): void {
+    this.terminalBindings.set(terminalId, { providerId, worktreeId, chatId })
+    this.chatTerminals.set(chatKey(providerId, chatId), terminalId)
+  }
+
+  private ensureChatAppProcess(): string {
+    if (this.chatProcess && isChildAlive(this.chatProcess)) {
+      if (!this.launchId) {
+        this.launchId = randomUUID()
+      }
+      return this.launchId
+    }
+
+    const launchId = randomUUID()
+    if (this.launchId) {
+      this.resolveReadyWaiter(this.launchId, false)
+    }
+    this.launchId = launchId
+    this.readyLaunchId = null
     const child = spawn(roleExecutablePath('chat'), roleLaunchArgs('chat'), {
       detached: true,
-      env: { ...process.env, ADE_LOG_SOURCE: 'chat' },
+      env: {
+        ...process.env,
+        ADE_CHAT_LAUNCH_ID: launchId,
+        ADE_LOG_SOURCE: 'chat',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     child.unref()
@@ -184,11 +347,55 @@ export class ChatService {
     child.on('exit', (code, signal) => {
       if (this.chatProcess === child) {
         this.chatProcess = null
+        if (this.launchId === launchId) {
+          this.launchId = null
+          this.readyLaunchId = null
+        }
+        this.resolveReadyWaiter(launchId, false)
       }
       this.log.info({ code, signal }, 'chat app exited')
     })
     this.chatProcess = child
-    this.log.info({ pid: child.pid }, 'chat app launched')
+    this.log.info({ launchId, pid: child.pid }, 'chat app launched')
+    return launchId
+  }
+
+  private waitForChatReady(launchId: string): Promise<boolean> {
+    if (this.readyLaunchId === launchId) {
+      return Promise.resolve(true)
+    }
+    if (this.readyWaiter?.launchId === launchId) {
+      return this.readyWaiter.promise
+    }
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
+
+    let complete: (ready: boolean) => void = () => undefined
+    const timeout = setTimeout(() => {
+      if (this.readyWaiter?.launchId === launchId) {
+        this.readyWaiter = null
+      }
+      complete(false)
+    }, 5_000)
+    const promise = new Promise<boolean>((resolve) => {
+      complete = (ready) => {
+        clearTimeout(timeout)
+        resolve(ready)
+      }
+    })
+
+    this.readyWaiter = { launchId, promise, complete }
+    return promise
+  }
+
+  private resolveReadyWaiter(launchId: string, ready: boolean): void {
+    if (this.readyWaiter?.launchId !== launchId) {
+      return
+    }
+    const waiter = this.readyWaiter
+    this.readyWaiter = null
+    waiter.complete(ready)
   }
 
   private handleWorktreeEvent(event: WorktreeEvent): void {
@@ -213,7 +420,6 @@ export class ChatService {
   }
 
   private emitCommand(command: ChatCommand): void {
-    this.lastCommand = command
     this.commands.emit('command', command)
   }
 
@@ -222,7 +428,11 @@ export class ChatService {
     this.worktrees.events.off('worktree-event', this.onWorktreeEvent)
     this.worktrees.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.terminals.events.off('terminal-snapshot', this.onTerminalSnapshot)
+    this.terminals.events.off('terminal-change', this.onTerminalChange)
     this.commands.removeAllListeners()
+    if (this.readyWaiter) {
+      this.resolveReadyWaiter(this.readyWaiter.launchId, false)
+    }
 
     const chatProcess = this.chatProcess
     this.chatProcess = null
@@ -230,4 +440,21 @@ export class ChatService {
       await killChildProcessTree(chatProcess, this.log, 'chat app')
     }
   }
+}
+
+function chatKey(providerId: string, chatId: string): string {
+  return `${providerId}:${chatId}`
+}
+
+function terminalTitle(
+  providerId: string,
+  chatId: string | undefined,
+  title: string | undefined,
+): string {
+  if (title) {
+    return title
+  }
+  return chatId
+    ? `${providerId} · ${chatId.slice(0, 8)}`
+    : `New ${providerId} chat`
 }

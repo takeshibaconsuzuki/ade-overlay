@@ -11,6 +11,13 @@ export type ChatStatusUpdate = {
   title?: string
   description?: string
   worktreeId?: string
+  /**
+   * When set, this event may have advanced the conversation with text the live
+   * hook payload doesn't carry (a new user prompt, the assistant's mid-turn
+   * narration, or its final reply), so the registry re-reads the transcript (via
+   * {@link ChatProvider.resolveDescription}) and overwrites the description.
+   */
+  refreshDescription?: boolean
 }
 
 /** Identifies a worktree to configure hooks for. */
@@ -21,9 +28,9 @@ export type WorktreeRef = {
 
 /**
  * Out-of-band context the server knows about a hook call, independent of the
- * payload. `worktreeId` is encoded into the hook URL at configure time, so it
- * authoritatively identifies the worktree the chat belongs to — no need to
- * trust the payload's reported working directory.
+ * payload. `worktreeId` is added to the managed hook request by the wrapper
+ * script, so it authoritatively identifies the worktree the chat belongs to —
+ * no need to trust the payload's reported working directory.
  */
 export type ChatHookContext = {
   worktreeId?: string
@@ -43,6 +50,15 @@ export interface ChatProvider {
 
   /** Merge this server's hook endpoint into the worktree's config files. */
   configureWorktree(worktree: WorktreeRef): Promise<void>
+
+  /**
+   * Extract the provider-scoped chat id from any hook payload, including hooks
+   * that should not create a live chat row. The registry uses this to bind
+   * server-owned terminals as early as possible without treating session startup
+   * itself as meaningful chat activity. A provider may derive this from its own
+   * native session id internally; the abstraction only ever sees the chat id.
+   */
+  hookChatId(payload: Record<string, unknown>): string | undefined
 
   /**
    * Interpret a raw hook payload (plus server-known {@link ChatHookContext})
@@ -65,15 +81,26 @@ export interface ChatProvider {
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails>
 
   /**
-   * List the worktree's historical, on-disk sessions, most-recent first. Read
-   * from the agent's own session store (e.g. Claude Code's project transcripts),
-   * so history survives app restarts and yields resumable session ids.
-   * Best-effort: return an empty list when the store is missing/unreadable.
+   * Resolve just the live description (the latest assistant text, or the latest
+   * user prompt when no reply follows it) from a hook payload. Called on every
+   * event that sets {@link ChatStatusUpdate.refreshDescription}, so it should be
+   * cheap — read only the tail of the transcript, not the whole file. Returns
+   * `undefined` when nothing usable is found.
    */
-  listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]>
+  resolveDescription(
+    payload: Record<string, unknown>,
+  ): Promise<string | undefined>
 
-  /** Command + args to resume an existing session in the worktree's cwd. */
-  resumeLaunch(sessionId: string): ChatLaunch
+  /**
+   * List the worktree's historical, on-disk chats, most-recent first. Read from
+   * the agent's own session store (e.g. Claude Code's project transcripts), so
+   * history survives app restarts and yields resumable chat ids. Best-effort:
+   * return an empty list when the store is missing/unreadable.
+   */
+  listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]>
+
+  /** Command + args to resume an existing chat in the worktree's cwd. */
+  resumeLaunch(chatId: string): ChatLaunch
 
   /** Command + args to start a fresh session in the worktree's cwd. */
   newLaunch(): ChatLaunch
@@ -85,11 +112,12 @@ export type ChatDetails = {
   description?: string
 }
 
-/** A historical session discovered in a provider's on-disk store. */
-export type ChatSessionSummary = {
-  sessionId: string
+/** A historical chat discovered in a provider's on-disk store. */
+export type HistoricalChat = {
+  chatId: string
   title?: string
-  /** Epoch milliseconds of the session's last activity (for sorting). */
+  description?: string
+  /** Epoch milliseconds of the chat's last activity (for sorting). */
   updatedAt: number
 }
 
@@ -98,11 +126,10 @@ export type ChatLaunch = {
   command: string
   args: string[]
   /**
-   * The provider session id this launch will run as, when it can be pinned up
-   * front (resuming a session, or a fresh session the provider lets us name).
-   * Recorded on the terminal so a live chat — keyed by the same id — can be
-   * matched back to its terminal. Absent when the provider only learns its
-   * session id after the process starts.
+   * The chat id this launch will run as, when known up front (normally a resumed
+   * chat). Recorded on the terminal so the live chat with the same id can be
+   * matched back before the first hook lands. Fresh chats usually bind back to
+   * their terminal from hook process metadata.
    */
-  sessionId?: string
+  chatId?: string
 }

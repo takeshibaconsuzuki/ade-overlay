@@ -63,8 +63,6 @@ export const TerminalStatus = z.enum(['running', 'exited'])
 export const Terminal = z.object({
   terminalId: z.string(),
   worktreeId: z.string(),
-  providerId: z.string(),
-  sessionId: z.string().optional(),
   title: z.string().optional(),
   status: TerminalStatus,
 })
@@ -86,7 +84,7 @@ export const TerminalSseEvents = defineSseEvents({
 export const TerminalCreateRequest = z.object({
   worktreeId: z.string().min(1),
   providerId: z.string().optional(),
-  resumeSessionId: z.string().optional(),
+  resumeChatId: z.string().optional(),
   title: z.string().optional(),
 })
 

@@ -13,7 +13,10 @@ const HIDDEN_ON_CURRENT_WORKSPACE_OPTIONS = {
 }
 const workspaceVisibilityTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>()
 
-export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
+export function showWindowOnCurrentWorkspace(
+  window: BrowserWindow,
+  { focus = true }: { focus?: boolean } = {},
+): void {
   if (window.isDestroyed()) {
     return
   }
@@ -28,18 +31,22 @@ export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
     window.setVisibleOnAllWorkspaces(true, VISIBLE_ON_CURRENT_WORKSPACE_OPTIONS)
   }
 
-  window.show()
-  if (process.platform === 'win32') {
-    window.moveTop()
-    window.setAlwaysOnTop(true)
-  }
-  window.focus()
-  // `show`/`focus` target the window; `app.focus({ steal: true })` makes the
-  // spawned role process itself the active app so keyboard input goes to that
-  // role instead of staying with the launcher/controller app.
-  app.focus({ steal: true })
-  if (process.platform === 'win32') {
-    window.setAlwaysOnTop(false)
+  if (focus) {
+    window.show()
+    if (process.platform === 'win32') {
+      window.moveTop()
+      window.setAlwaysOnTop(true)
+    }
+    window.focus()
+    // `show`/`focus` target the window; `app.focus({ steal: true })` makes the
+    // spawned role process itself the active app so keyboard input goes to that
+    // role instead of staying with the launcher/controller app.
+    app.focus({ steal: true })
+    if (process.platform === 'win32') {
+      window.setAlwaysOnTop(false)
+    }
+  } else if (!window.isVisible()) {
+    window.showInactive()
   }
 
   if (process.platform === 'darwin') {
@@ -61,4 +68,8 @@ export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
     }, CURRENT_WORKSPACE_VISIBILITY_MS)
     workspaceVisibilityTimers.set(window, timer)
   }
+}
+
+export function focusWindowOnCurrentWorkspace(window: BrowserWindow): void {
+  showWindowOnCurrentWorkspace(window, { focus: true })
 }

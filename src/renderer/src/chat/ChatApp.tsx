@@ -1,30 +1,37 @@
 import {
+  Badge,
   Box,
   Button,
   Card,
-  Code,
+  DropdownMenu,
+  IconButton,
   ScrollArea,
   Tabs,
   Text,
 } from '@radix-ui/themes'
-import { useCallback, useEffect, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  CHAT_COMMAND_STREAM_PATH,
+  CHAT_PROVIDERS,
   CHAT_STATUS,
-  ChatCommandSseEvents,
+  chatProviderLabel,
+  DEFAULT_CHAT_PROVIDER,
+  parseChatProviderId,
+  type ChatCommand,
+  type ChatProviderId,
 } from '../../../api/server/chats'
-import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
   createTerminal,
   historicalChats,
   showChat,
 } from '../../../api/server/generated'
-import { HBox, VBox } from '../components/Box'
+import { Grid, HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
+import liveChatStyles from '../components/LiveChats.module.css'
 import { Titlebar } from '../components/Titlebar'
 import { worktreeColor, worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
-import { formatTimestamp } from '../format'
+import { formatShortAge } from '../format'
 import { useChatStream, type Chat } from '../hooks/useChatStream'
 import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
 import {
@@ -32,23 +39,14 @@ import {
   type TerminalDescriptor,
 } from '../hooks/useTerminalStream'
 import { logger } from '../logger'
-import { parseSsePayload } from '../sse'
 import styles from './ChatApp.module.css'
 import { Terminal } from './Terminal'
 
-type ChatSession = {
-  sessionId: string
-  providerId: string
-  worktreeId: string
-  title?: string
-  updatedAt: number
-}
-
 /**
- * The chat app: a sidebar of the current worktree's historical sessions and a
- * tabbed area of live terminals. Clicking a session resumes it in a new
- * terminal; "New chat" starts a fresh one. Terminals live in the server, so
- * reopening this window re-lists and re-attaches them.
+ * The chat app: a sidebar of the current worktree's chats (live and historical)
+ * and a tabbed area of live terminals. Clicking a historical chat resumes it in
+ * a new terminal; "New chat" starts a fresh one. Terminals live in the server,
+ * so reopening this window re-lists and re-attaches them.
  */
 export function ChatApp({ title }: { title: string }): React.JSX.Element {
   const worktreeId = useCurrentWorktreeId()
@@ -71,21 +69,26 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   const { chats } = useChatStream()
   const { terminals } = useTerminalStream()
 
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [historyChats, setHistoryChats] = useState<Chat[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [newChatProviderId, setNewChatProviderId] = useState<ChatProviderId>(
+    DEFAULT_CHAT_PROVIDER,
+  )
 
-  // Historical sessions are read from disk (git), so they load separately and
-  // only feed the Historical tab; a slow read never delays terminal display.
+  // Historical chats are read from disk, so they load separately from the live
+  // stream and only on mount / worktree change; a slow read never delays
+  // terminal display. A chat that ends later needs no re-read: the live registry
+  // retains dormant entries, so the overlay below surfaces it reactively.
   useEffect(() => {
     let cancelled = false
     const load = async (): Promise<void> => {
       if (!worktreeId) {
-        setSessions([])
+        setHistoryChats([])
         return
       }
       const history = await historicalChats({ query: { worktreeId } })
       if (!cancelled) {
-        setSessions(history.data?.sessions ?? [])
+        setHistoryChats(history.data?.chats ?? [])
       }
     }
     void load()
@@ -94,25 +97,40 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     }
   }, [worktreeId])
 
-  // Listen for `show` commands carrying a target chat (a live chat clicked from
-  // another window, e.g. the launcher). The server resolves and stamps the
-  // terminal id, so the renderer never joins chats to terminals itself.
+  // The Historical tab is the union of on-disk chats and the live stream's
+  // dormant (ended) chats, overlaid by (providerId, chatId) so the live entry
+  // wins. A currently-running chat carries a non-dormant status and so drops out
+  // of this list — it shows only in the Live tab. Most-recent first.
+  const historyView = useMemo(() => {
+    const byKey = new Map<string, Chat>()
+    for (const chat of historyChats) {
+      byKey.set(`${chat.providerId}:${chat.chatId}`, chat)
+    }
+    for (const chat of chats) {
+      if (chat.worktreeId === worktreeId) {
+        byKey.set(`${chat.providerId}:${chat.chatId}`, chat)
+      }
+    }
+    return [...byKey.values()]
+      .filter((chat) => chat.status === CHAT_STATUS.dormant)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+  }, [historyChats, chats, worktreeId])
+
+  // Electron main is the sole /chats/commands consumer. It validates commands
+  // and forwards targeted focus commands here after this handler is installed.
   useEffect(() => {
-    const source = new EventSource(
-      `${SERVER_ORIGIN}${CHAT_COMMAND_STREAM_PATH}`,
-    )
-    source.addEventListener('show', (event) => {
-      const data = parseSsePayload(
-        ChatCommandSseEvents,
-        'show',
-        event.data,
-        'chat-command',
-      )
-      if (data && 'terminalId' in data) {
-        setActiveId(data.terminalId)
+    if (!window.desktop) {
+      return undefined
+    }
+    const unsubscribe = window.desktop.onChatCommand((command: ChatCommand) => {
+      if (command.type === 'focus' && 'terminalId' in command) {
+        setActiveId(command.terminalId)
       }
     })
-    return () => source.close()
+    void window.desktop.chatRendererReady().catch((error: unknown) => {
+      logger.error({ err: error }, 'failed to signal chat renderer readiness')
+    })
+    return unsubscribe
   }, [])
 
   // Clicking a live chat asks the server to switch to its worktree and focus the
@@ -140,7 +158,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
 
   const startTerminal = async (body: {
     providerId?: string
-    resumeSessionId?: string
+    resumeChatId?: string
     title?: string
   }): Promise<void> => {
     if (!worktreeId) {
@@ -156,11 +174,18 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     setActiveId(data.terminalId)
   }
 
-  const openSession = (session: ChatSession): void => {
+  // Launch a chat with the given provider and remember it as the default for the
+  // split button's primary action.
+  const launchChat = async (providerId: ChatProviderId): Promise<void> => {
+    setNewChatProviderId(providerId)
+    await startTerminal({ providerId })
+  }
+
+  const openHistoricalChat = (chat: Chat): void => {
     void startTerminal({
-      providerId: session.providerId,
-      resumeSessionId: session.sessionId,
-      title: session.title,
+      providerId: chat.providerId,
+      resumeChatId: chat.chatId,
+      title: chat.title,
     })
   }
 
@@ -168,10 +193,6 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   const worktreeTerminals = terminals.filter(
     (terminal) => terminal.worktreeId === worktreeId,
   )
-
-  const liveChatCount = chats.filter(
-    (chat) => chat.status !== CHAT_STATUS.dormant,
-  ).length
 
   // Derive the shown terminal from the list so removing the active tab (e.g. on
   // exit) transparently falls back to another one without juggling `activeId`.
@@ -203,67 +224,96 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
           minHeight="0"
           style={{ borderRight: '1px solid var(--gray-4)' }}
         >
-          <Box p="3">
-            <Button
-              size="2"
-              variant="solid"
-              onClick={() => void startTerminal({})}
-              disabled={!worktreeId}
-              style={{ width: '100%' }}
-            >
-              New chat
-            </Button>
-          </Box>
+          <VBox gap="2" p="3">
+            <HBox gap="0" align="stretch">
+              <Button
+                size="2"
+                variant="solid"
+                onClick={() => void launchChat(newChatProviderId)}
+                disabled={!worktreeId}
+                style={{
+                  flexGrow: 1,
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                }}
+              >
+                New {chatProviderLabel(newChatProviderId)} chat
+              </Button>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  <IconButton
+                    size="2"
+                    variant="solid"
+                    aria-label="Choose chat provider"
+                    disabled={!worktreeId}
+                    style={{
+                      borderTopLeftRadius: 0,
+                      borderBottomLeftRadius: 0,
+                      boxShadow: 'inset 1px 0 0 0 var(--gray-a6)',
+                    }}
+                  >
+                    <ChevronDown size={16} />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  {CHAT_PROVIDERS.map((provider) => (
+                    <DropdownMenu.Item
+                      key={provider.id}
+                      onSelect={() => void launchChat(provider.id)}
+                    >
+                      New {provider.label} chat
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            </HBox>
+          </VBox>
           <Tabs.Root defaultValue="live" className={styles.tabs}>
             <Tabs.List className={styles.tabsList}>
               <Tabs.Trigger value="live">Live</Tabs.Trigger>
               <Tabs.Trigger value="historical">Historical</Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="live" className={styles.tabContent}>
-              {liveChatCount === 0 ? (
-                <Box p="3">
-                  <Text size="1" color="gray">
-                    No live chats.
-                  </Text>
-                </Box>
-              ) : (
-                <VBox p="2" flexGrow="1" minHeight="0">
-                  <LiveChats
-                    chats={chats}
-                    className={styles.liveChats}
-                    onSelect={(chat) => void openLiveChat(chat)}
-                    isChatDisabled={(chat) => !chat.terminalId}
-                    resolveWorktreeName={resolveWorktreeName}
-                  />
-                </VBox>
-              )}
+              <VBox p="2" flexGrow="1" minHeight="0">
+                <LiveChats
+                  chats={chats}
+                  className={styles.liveChats}
+                  onSelect={(chat) => void openLiveChat(chat)}
+                  isChatDisabled={(chat) => !chat.terminalId}
+                  resolveWorktreeName={resolveWorktreeName}
+                />
+              </VBox>
             </Tabs.Content>
             <Tabs.Content value="historical" className={styles.tabContent}>
-              <ScrollArea
-                type="auto"
-                scrollbars="vertical"
-                className={`${styles.scroll} scroll-area-fill`}
-              >
-                <VBox gap="1" p="2">
-                  {sessions.length === 0 ? (
-                    <Box p="2">
+              <VBox p="2" flexGrow="1" minHeight="0">
+                <Card className={`${liveChatStyles.card} ${styles.liveChats}`}>
+                  {historyView.length === 0 ? (
+                    <HBox p="2" justify="center">
                       <Text size="1" color="gray">
                         {worktreeId
                           ? 'No past chats in this worktree.'
                           : 'No worktree selected.'}
                       </Text>
-                    </Box>
+                    </HBox>
                   ) : (
-                    sessions.map((session) => (
-                      <SessionRow
-                        key={`${session.providerId}:${session.sessionId}`}
-                        session={session}
-                        onClick={() => openSession(session)}
-                      />
-                    ))
+                    <ScrollArea
+                      type="auto"
+                      scrollbars="vertical"
+                      className={`${liveChatStyles.scroll} scroll-area-fill`}
+                    >
+                      <VBox gap="0">
+                        {historyView.map((chat) => (
+                          <HistoricalChatRow
+                            key={`${chat.providerId}:${chat.chatId}`}
+                            chat={chat}
+                            onClick={() => openHistoricalChat(chat)}
+                          />
+                        ))}
+                      </VBox>
+                    </ScrollArea>
                   )}
-                </VBox>
-              </ScrollArea>
+                </Card>
+              </VBox>
             </Tabs.Content>
           </Tabs.Root>
         </VBox>
@@ -342,35 +392,38 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   )
 }
 
-function SessionRow({
-  session,
+function HistoricalChatRow({
+  chat,
   onClick,
 }: {
-  session: ChatSession
+  chat: Chat
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <Card asChild className={styles.sessionRow}>
-      <button
-        type="button"
-        onClick={onClick}
-        style={{ cursor: 'pointer', textAlign: 'left', width: '100%' }}
-      >
-        <VBox gap="1" align="start">
-          <Text size="2" weight="medium" truncate style={{ width: '100%' }}>
-            {session.title || 'Untitled chat'}
+    <button type="button" className={liveChatStyles.row} onClick={onClick}>
+      <Grid columns="minmax(0, 1fr)" gapX="2" gapY="1" align="center" p="2">
+        <HBox minWidth="0">
+          <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
+            {chat.title || 'Untitled chat'}
           </Text>
-          <HBox gap="2" justify="start">
-            <Code size="1" variant="ghost" color="gray">
-              {session.providerId}
-            </Code>
-            <Text size="1" color="gray">
-              {formatTimestamp(session.updatedAt)}
+          <Text size="1" color="gray">
+            {formatShortAge(chat.updatedAt)}
+          </Text>
+        </HBox>
+        {chat.description ? (
+          <HBox minWidth="0">
+            <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
+              {chat.description}
             </Text>
           </HBox>
-        </VBox>
-      </button>
-    </Card>
+        ) : null}
+        <HBox minWidth="0" justify="start">
+          <Badge size="1" variant="soft" radius="full" color="gray">
+            {chatProviderLabel(parseChatProviderId(chat.providerId))}
+          </Badge>
+        </HBox>
+      </Grid>
+    </button>
   )
 }
 
@@ -378,8 +431,5 @@ function terminalLabel(terminal: TerminalDescriptor): string {
   if (terminal.title) {
     return terminal.title
   }
-  if (terminal.sessionId) {
-    return `${terminal.providerId} · ${terminal.sessionId.slice(0, 8)}`
-  }
-  return `New ${terminal.providerId} chat`
+  return 'Chat'
 }

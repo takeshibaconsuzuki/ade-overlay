@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { EventEmitter } from 'node:events'
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
@@ -10,10 +12,27 @@ import {
   type APIRequestContext,
 } from 'playwright'
 import { APP_FOCUS_PATH } from '../../src/api/server/appFocus'
-import { CHAT_HOOKS_PATH } from '../../src/api/server/chats'
+import {
+  CHAT_COMMAND_STREAM_PATH,
+  CHAT_EVENT_TYPE,
+  CHAT_HOOKS_PATH,
+  CHAT_STATUS,
+} from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import {
+  ensureHookForwarderWrapper,
+  hookForwardCommand,
+} from '../../src/server/chats/hookForwarder'
+import { CodexChatProvider } from '../../src/server/chats/providers/codex'
+import { ChatRegistry } from '../../src/server/chats/registry'
+import { ChatService } from '../../src/server/chats/service'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
+import {
+  resolveChatTerminalSpawn,
+  TerminalManager,
+  type TerminalManagerChange,
+} from '../../src/server/terminals/manager'
 
 const execFileAsync = promisify(execFile)
 
@@ -171,16 +190,535 @@ test('maps provider hooks into live chat snapshots', async () => {
     }>
   }>('/chats/live')
   assert.equal(snapshot.event, 'snapshot')
+  // Claude descriptions are read from the transcript, never the prompt payload,
+  // so a hook with no `transcript_path` yields a chat with no description.
   assert.deepEqual(snapshot.data.chats, [
     {
       chatId: 'session-1',
       providerId: 'claude',
       status: 'busy',
-      description: 'Investigate failing test',
       worktreeId: 'bbbbbbbbbbbb',
       updatedAt: snapshot.data.chats[0].updatedAt,
     },
   ])
+})
+
+test('does not surface a live chat from session start alone', async () => {
+  const hook = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-start-only',
+      },
+    },
+  )
+  assert.equal(hook.status(), 200)
+  assert.deepEqual(await hook.json(), { ok: true })
+
+  const snapshot = await readFirstSseEvent<{
+    chats: Array<{
+      chatId: string
+      providerId: string
+      status: string
+    }>
+  }>('/chats/live')
+  assert.equal(snapshot.event, 'snapshot')
+  assert.deepEqual(snapshot.data.chats, [])
+})
+
+test('does not create a dormant chat from session end alone', async () => {
+  const start = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-start-end-only',
+      },
+    },
+  )
+  assert.equal(start.status(), 200)
+  assert.deepEqual(await start.json(), { ok: true })
+
+  const end = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionEnd',
+        session_id: 'session-start-end-only',
+      },
+    },
+  )
+  assert.equal(end.status(), 200)
+  assert.deepEqual(await end.json(), { ok: true })
+
+  const snapshot = await readFirstSseEvent<{
+    chats: Array<{
+      chatId: string
+      providerId: string
+      status: string
+    }>
+  }>('/chats/live')
+  assert.equal(snapshot.event, 'snapshot')
+  assert.deepEqual(snapshot.data.chats, [])
+})
+
+test('finds a terminal by hook process ancestry', () => {
+  const manager = new TerminalManager({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-1', {
+    id: 'terminal-1',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    pty: { pid: 101 },
+  })
+  terminals.set('terminal-2', {
+    id: 'terminal-2',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    pty: { pid: 202 },
+  })
+
+  assert.equal(
+    manager.terminalIdForHookProcess('worktree-1', [303, 202, 1]),
+    'terminal-2',
+  )
+})
+
+test('wraps chat launch with preChatCommand in the same shell', () => {
+  if (process.platform === 'win32') {
+    return
+  }
+
+  const originalShell = process.env.SHELL
+  process.env.SHELL = '/bin/zsh'
+
+  try {
+    const target = resolveChatTerminalSpawn(
+      'claude',
+      ['--resume', "session'1"],
+      'source .venv/bin/activate\nexport FOO=bar',
+    )
+
+    assert.equal(target.file, '/bin/zsh')
+    assert.equal(target.args[0], '-lic')
+    assert.equal(
+      target.args[1],
+      `source .venv/bin/activate
+export FOO=bar
+__ade_pre_chat_status=$?
+if [ "$__ade_pre_chat_status" -ne 0 ]; then
+  exit "$__ade_pre_chat_status"
+fi
+exec 'claude' '--resume' 'session'\\''1'`,
+    )
+  } finally {
+    if (originalShell === undefined) {
+      delete process.env.SHELL
+    } else {
+      process.env.SHELL = originalShell
+    }
+  }
+})
+
+test('reports terminal identity when a terminal is closed', () => {
+  const changes: TerminalManagerChange[] = []
+  const manager = new TerminalManager(
+    { info() {}, warn() {}, debug() {}, error() {} } as never,
+    (event) => {
+      changes.push(event)
+    },
+  )
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-1', {
+    id: 'terminal-1',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    exitCode: null,
+    pty: { kill() {} },
+  })
+
+  manager.close('terminal-1')
+
+  assert.deepEqual(changes, [
+    {
+      type: 'removed',
+      reason: 'closed',
+      terminal: {
+        terminalId: 'terminal-1',
+        worktreeId: 'worktree-1',
+        title: undefined,
+        status: 'running',
+      },
+    },
+  ])
+})
+
+test('chat service owns chat-to-terminal binding', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  const terminalEvents = new EventEmitter()
+  const terminals = {
+    events: terminalEvents,
+    terminalIdForHookProcess() {
+      return 'terminal-1'
+    },
+    list() {
+      return [
+        {
+          terminalId: 'terminal-1',
+          worktreeId: 'worktree-1',
+          title: 'New codex chat',
+          status: 'running',
+        },
+      ]
+    },
+  }
+  const service = new ChatService(
+    registry,
+    { events: new EventEmitter() } as never,
+    terminals as never,
+    logger,
+  )
+  ;(
+    service as unknown as {
+      terminalBindings: Map<
+        string,
+        { providerId: string; worktreeId: string; chatId?: string }
+      >
+    }
+  ).terminalBindings.set('terminal-1', {
+    providerId: 'codex',
+    worktreeId: 'worktree-1',
+  })
+
+  assert.equal(
+    (
+      service as unknown as {
+        bindChatToTerminal: (
+          providerId: string,
+          worktreeId: string,
+          chatId: string,
+          hookAncestorPids?: number[],
+        ) => string | undefined
+        terminalIdForChat: (
+          providerId: string,
+          chatId: string,
+        ) => string | undefined
+      }
+    ).bindChatToTerminal('codex', 'worktree-1', 'session-1', [101]),
+    'terminal-1',
+  )
+  assert.equal(
+    (
+      service as unknown as {
+        terminalIdForChat: (
+          providerId: string,
+          chatId: string,
+        ) => string | undefined
+      }
+    ).terminalIdForChat('codex', 'session-1'),
+    'terminal-1',
+  )
+  assert.equal(registry.getSnapshot().chats.length, 0)
+})
+
+test('marks live chat dormant when its owned terminal ends', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  let terminalRunning = true
+  const terminalEvents = new EventEmitter()
+  const terminals = {
+    events: terminalEvents,
+    terminalIdForHookProcess() {
+      return 'terminal-1'
+    },
+    list() {
+      return terminalRunning
+        ? [
+            {
+              terminalId: 'terminal-1',
+              worktreeId: 'worktree-1',
+              title: 'New codex chat',
+              status: 'running',
+            },
+          ]
+        : []
+    },
+  }
+  const service = new ChatService(
+    registry,
+    { events: new EventEmitter() } as never,
+    terminals as never,
+    logger,
+  )
+  ;(
+    service as unknown as {
+      terminalBindings: Map<
+        string,
+        { providerId: string; worktreeId: string; chatId?: string }
+      >
+    }
+  ).terminalBindings.set('terminal-1', {
+    providerId: 'codex',
+    worktreeId: 'worktree-1',
+  })
+
+  registry.applyHook(
+    'codex',
+    {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'session-1',
+      prompt: 'hello',
+    },
+    { worktreeId: 'worktree-1' },
+  )
+  assert.equal(registry.getSnapshot().chats[0].status, CHAT_STATUS.busy)
+  assert.equal(registry.getSnapshot().chats[0].terminalId, 'terminal-1')
+
+  terminalRunning = false
+  let dormantEvent:
+    | {
+        type: string
+        chat: { status: string; terminalId?: string }
+        snapshot: { chats: Array<{ status: string; terminalId?: string }> }
+      }
+    | undefined
+  registry.events.on('chat-event', (event) => {
+    dormantEvent = event as typeof dormantEvent
+  })
+
+  terminalEvents.emit('terminal-change', {
+    type: 'removed',
+    reason: 'exited',
+    terminal: {
+      terminalId: 'terminal-1',
+      worktreeId: 'worktree-1',
+      title: 'New codex chat',
+      status: 'exited',
+    },
+  })
+
+  assert.equal(dormantEvent?.type, CHAT_EVENT_TYPE.chatUpdated)
+  assert.equal(dormantEvent?.chat.status, CHAT_STATUS.dormant)
+  assert.equal(dormantEvent?.chat.terminalId, undefined)
+  assert.equal(dormantEvent?.snapshot.chats[0].status, CHAT_STATUS.dormant)
+  assert.equal(dormantEvent?.snapshot.chats[0].terminalId, undefined)
+})
+
+test('hook forward command augments and posts payload using app Node runtime', async () => {
+  let received: Record<string, unknown> | undefined
+  let receivedUrl: string | undefined
+  const hookServer = createHttpServer((request, response) => {
+    receivedUrl = request.url
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      received = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<
+        string,
+        unknown
+      >
+      response.writeHead(200).end()
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    hookServer.once('error', reject)
+    hookServer.listen(0, '127.0.0.1', () => {
+      hookServer.off('error', reject)
+      resolve()
+    })
+  })
+
+  try {
+    const address = hookServer.address()
+    assert.equal(typeof address, 'object')
+    assert.ok(address)
+    const wrapperPath = await ensureHookForwarderWrapper(
+      'test',
+      `http://127.0.0.1:${address.port}/hook`,
+    )
+    const { command } = hookForwardCommand(wrapperPath, 'worktree-1')
+    assert.ok(!command.includes(' -e '))
+    assert.ok(command.includes(wrapperPath))
+    assert.ok(!command.includes(`127.0.0.1:${address.port}`))
+    const payload = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'session-1',
+    })
+    await execFileAsync('sh', [
+      '-c',
+      `printf %s ${shellQuote(payload)} | ${command}`,
+    ])
+
+    assert.equal(received?.hook_event_name, 'UserPromptSubmit')
+    assert.equal(received?.session_id, 'session-1')
+    assert.equal(receivedUrl, '/hook?worktreeId=worktree-1')
+    const metadata = received?._ade_overlay as
+      | Record<string, unknown>
+      | undefined
+    assert.equal(typeof metadata?.hook_pid, 'number')
+    assert.equal(typeof metadata?.hook_ppid, 'number')
+    assert.ok(Array.isArray(metadata?.hook_ancestor_pids))
+    assert.ok(metadata.hook_ancestor_pids.length > 0)
+  } finally {
+    await new Promise<void>((resolve) => hookServer.close(() => resolve()))
+  }
+})
+
+test('lists Codex sessions with large session metadata records', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const sessionPath = join(
+    home,
+    '.codex',
+    'sessions',
+    '2026',
+    '06',
+    '19',
+    'rollout-large-meta.jsonl',
+  )
+  await mkdir(dirname(sessionPath), { recursive: true })
+  await mkdir(worktreePath, { recursive: true })
+
+  const sessionId = 'codex-large-session'
+  const meta = {
+    timestamp: '2026-06-20T01:20:12.000Z',
+    type: 'session_meta',
+    payload: {
+      id: sessionId,
+      timestamp: '2026-06-20T01:20:12.000Z',
+      cwd: worktreePath,
+      base_instructions: { text: 'x'.repeat(40_000) },
+    },
+  }
+  const message = {
+    timestamp: '2026-06-20T01:20:13.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'user_message',
+      message: 'hello from codex history',
+    },
+  }
+  const reply = {
+    timestamp: '2026-06-20T01:20:14.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'agent_message',
+      message: 'latest codex assistant reply',
+    },
+  }
+  await writeFile(
+    sessionPath,
+    `${JSON.stringify(meta)}\n${JSON.stringify(message)}\n${JSON.stringify(reply)}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const provider = new CodexChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never)
+
+    const chats = await provider.listHistory({
+      worktreeId: 'x',
+      path: worktreePath,
+    })
+    assert.equal(chats.length, 1)
+    assert.equal(chats[0].chatId, sessionId)
+    assert.equal(chats[0].title, 'hello from codex history')
+    assert.equal(chats[0].description, 'latest codex assistant reply')
+    assert.equal(chats[0].updatedAt, (await stat(sessionPath)).mtimeMs)
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = originalHome
+    }
+  }
+})
+
+test('refreshes Codex description from latest transcript text', async () => {
+  const transcriptPath = join(tempDir, 'codex-transcript.jsonl')
+  const entries = [
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'user_message',
+        message: 'first user prompt',
+      },
+    },
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'agent_message',
+        message: 'assistant progress update',
+      },
+    },
+    {
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'output_text',
+            text: 'assistant final answer',
+          },
+        ],
+      },
+    },
+  ]
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  )
+
+  const provider = new CodexChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+
+  assert.equal(
+    await provider.resolveDescription({ transcript_path: transcriptPath }),
+    'assistant final answer',
+  )
+})
+
+test('opens chat command stream before any command is emitted', async () => {
+  const controller = new AbortController()
+  try {
+    const response = await promiseWithTimeout(
+      fetch(`${baseUrl}${CHAT_COMMAND_STREAM_PATH}`, {
+        signal: controller.signal,
+      }),
+      1_000,
+      `Timed out opening ${CHAT_COMMAND_STREAM_PATH}`,
+    )
+    assert.equal(response.status, 200)
+    assert.match(
+      response.headers.get('content-type') ?? '',
+      /^text\/event-stream\b/,
+    )
+  } finally {
+    controller.abort()
+  }
 })
 
 async function createGitRepository(): Promise<string> {
@@ -196,6 +734,10 @@ async function createGitRepository(): Promise<string> {
   await execFileAsync('git', ['add', 'README.md'], { cwd: repoPath })
   await execFileAsync('git', ['commit', '-m', 'initial'], { cwd: repoPath })
   return realpath(repoPath)
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 async function readFirstSseEvent<T>(
@@ -286,12 +828,20 @@ async function readWithTimeout<T>(
   timeoutMs: number,
   message: string,
 ): Promise<ReadableStreamReadResult<T>> {
+  return promiseWithTimeout(reader.read(), timeoutMs, message)
+}
+
+function promiseWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(message))
     }, timeoutMs)
 
-    reader.read().then(
+    promise.then(
       (result) => {
         clearTimeout(timer)
         resolve(result)

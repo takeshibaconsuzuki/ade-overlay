@@ -8,6 +8,7 @@ import {
   CHAT_COMMAND_STREAM_PATH,
   CHAT_HISTORY_PATH,
   CHAT_HOOKS_PATH,
+  CHAT_READY_PATH,
   CHAT_SHOW_PATH,
   CHAT_STREAM_PATH,
   ChatCommandSseEvents,
@@ -18,6 +19,8 @@ import {
   ChatHookPayload,
   ChatHookQuery,
   ChatHookResponse,
+  ChatReadyRequest,
+  ChatReadyResponse,
   ChatShowRequest,
   ChatShowResponse,
   ChatSseEvents,
@@ -64,6 +67,7 @@ export function registerChatRoutes(
           providerId: request.params.providerId,
           event: body.hook_event_name,
           worktreeId: request.query.worktreeId,
+          hookMetadata: body._ade_overlay,
         },
         'chat hook received',
       )
@@ -123,7 +127,7 @@ export function registerChatRoutes(
       },
     },
     handler: async (request) => ({
-      sessions: await chat.listSessions(request.query.worktreeId),
+      chats: await chat.listHistory(request.query.worktreeId),
     }),
   })
 
@@ -139,6 +143,24 @@ export function registerChatRoutes(
     handler: async (request, reply) => {
       streamChatCommands(request, reply, chat)
     },
+  })
+
+  // Hidden app-internal endpoint. The spawned chat role calls this only after
+  // Electron main is connected to the command stream and the renderer has
+  // installed its IPC command handler.
+  routes.route({
+    method: 'POST',
+    url: CHAT_READY_PATH,
+    schema: {
+      hide: true,
+      body: ChatReadyRequest,
+      response: {
+        200: ChatReadyResponse,
+      },
+    },
+    handler: async (request) => ({
+      ok: chat.markReady(request.body.launchId),
+    }),
   })
 }
 
@@ -172,7 +194,6 @@ function streamChatCommands(
   chat: ChatService,
 ): void {
   const stream = createSseStream<typeof ChatCommandSseEvents>(request, reply)
-  const unregisterClient = chat.registerChatClient()
 
   const onCommand = (command: ChatCommand): void => {
     stream.send(command.type, command)
@@ -180,14 +201,6 @@ function streamChatCommands(
 
   chat.commands.on('command', onCommand)
   stream.onClose(() => {
-    unregisterClient()
     chat.commands.off('command', onCommand)
   })
-
-  // Replay the last command so an app that connects right after being spawned
-  // still receives the `show` that triggered its launch.
-  const lastCommand = chat.getLastCommand()
-  if (lastCommand) {
-    stream.send(lastCommand.type, lastCommand)
-  }
 }

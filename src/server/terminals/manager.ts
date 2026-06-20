@@ -41,8 +41,6 @@ function loadPtySpawn(): typeof PtySpawn {
 type TerminalRecord = {
   id: string
   worktreeId: string
-  providerId: string
-  sessionId?: string
   title?: string
   status: TerminalStatus
   exitCode: number | null
@@ -63,17 +61,23 @@ type TerminalRecord = {
 
 export type CreateTerminalOptions = {
   worktreeId: string
-  providerId: string
-  sessionId?: string
   title?: string
   cwd: string
   command: string
   args: string[]
-  // Whether this resumes an existing session (vs. a fresh chat). Used only for
-  // logging — a fresh chat still gets a pinned `sessionId`, so the presence of
-  // one no longer distinguishes the two.
+  preChatCommand?: string
+  // Whether this resumes an existing chat (vs. a fresh one). Used only for
+  // logging; a fresh chat may not know its chat id until the first hook arrives.
   resumed?: boolean
 }
+
+export type TerminalManagerChange =
+  | { type: 'changed' }
+  | {
+      type: 'removed'
+      reason: 'closed' | 'exited'
+      terminal: Terminal
+    }
 
 /**
  * Owns the live PTYs running chat sessions. PTYs live here in the server (not
@@ -90,29 +94,36 @@ export class TerminalManager {
    */
   constructor(
     private readonly log: Logger,
-    private readonly onChange: () => void = () => {},
+    private readonly onChange: (
+      event: TerminalManagerChange,
+    ) => void = () => {},
   ) {}
 
-  /** The id of the running terminal hosting a provider session, if any. */
-  terminalIdForSession(
-    providerId: string,
-    sessionId: string,
+  terminalIdForHookProcess(
+    worktreeId: string,
+    hookAncestorPids: number[] | undefined,
   ): string | undefined {
-    for (const record of this.terminals.values()) {
-      if (
-        record.status === 'running' &&
-        record.providerId === providerId &&
-        record.sessionId === sessionId
-      ) {
-        return record.id
-      }
+    if (!hookAncestorPids || hookAncestorPids.length === 0) {
+      return undefined
     }
-    return undefined
+
+    const ancestors = new Set(hookAncestorPids)
+    const matches = [...this.terminals.values()].filter(
+      (record) =>
+        record.status === 'running' &&
+        record.worktreeId === worktreeId &&
+        ancestors.has(record.pty.pid),
+    )
+    return matches.length === 1 ? matches[0].id : undefined
   }
 
   create(options: CreateTerminalOptions): Terminal {
     const id = randomUUID()
-    const target = withUserEnvironment(options.command, options.args)
+    const target = resolveChatTerminalSpawn(
+      options.command,
+      options.args,
+      options.preChatCommand,
+    )
     const pty = loadPtySpawn()(target.file, target.args, {
       name: 'xterm-256color',
       cwd: options.cwd,
@@ -128,8 +139,6 @@ export class TerminalManager {
     const record: TerminalRecord = {
       id,
       worktreeId: options.worktreeId,
-      providerId: options.providerId,
-      sessionId: options.sessionId,
       title: options.title,
       status: 'running',
       exitCode: null,
@@ -149,6 +158,7 @@ export class TerminalManager {
     pty.onExit(({ exitCode }) => {
       record.status = 'exited'
       record.exitCode = exitCode
+      const terminal = toDescriptor(record)
       send(record.socket, { type: 'exit', code: exitCode })
       // Drop the record: an exited chat session can't be resumed in place, so
       // it should not linger in the terminal list or be reattachable. The
@@ -158,21 +168,21 @@ export class TerminalManager {
         { terminalId: id, worktreeId: record.worktreeId, exitCode },
         'chat terminal exited',
       )
-      this.onChange()
+      this.onChange({ type: 'removed', reason: 'exited', terminal })
     })
 
     this.log.info(
       {
         terminalId: id,
-        chatId: options.sessionId,
         worktreeId: options.worktreeId,
-        providerId: options.providerId,
         command: options.command,
+        hasPreChatCommand: !!options.preChatCommand,
         resume: options.resumed ?? false,
+        ptyPid: pty.pid,
       },
       'chat terminal started',
     )
-    this.onChange()
+    this.onChange({ type: 'changed' })
     return toDescriptor(record)
   }
 
@@ -294,10 +304,11 @@ export class TerminalManager {
     if (!record) {
       return
     }
+    const terminal = toDescriptor(record)
     this.terminals.delete(terminalId)
     record.socket?.close()
     this.killPty(record)
-    this.onChange()
+    this.onChange({ type: 'removed', reason: 'closed', terminal })
   }
 
   closeForWorktree(worktreeId: string): void {
@@ -355,21 +366,67 @@ export class TerminalManager {
  * resolve, exactly as worktree bootstrap commands do. `exec` replaces the shell
  * with the CLI so it becomes the PTY's controlling process — input, resize, and
  * exit all behave as if it were spawned directly. On Windows there is no such
- * `PATH` stripping, so spawn the command directly.
+ * `PATH` stripping, so spawn the command directly unless a repository
+ * pre-command needs a shell to carry environment changes into the CLI.
  */
-function withUserEnvironment(
+export function resolveChatTerminalSpawn(
   command: string,
   args: string[],
+  preChatCommand?: string,
 ): { file: string; args: string[] } {
   if (platform() === 'win32') {
-    return { file: command, args }
+    if (!preChatCommand) {
+      return { file: command, args }
+    }
+    return {
+      file: process.env.ComSpec ?? 'cmd.exe',
+      args: ['/d', '/s', '/c', windowsScript(command, args, preChatCommand)],
+    }
   }
   const shell = getUserLoginShell()
   if (!shell) {
-    return { file: command, args }
+    if (!preChatCommand) {
+      return { file: command, args }
+    }
+    return {
+      file: '/bin/sh',
+      args: ['-c', shellScript(command, args, preChatCommand)],
+    }
   }
+  return {
+    file: shell,
+    args: ['-lic', shellScript(command, args, preChatCommand)],
+  }
+}
+
+function shellScript(
+  command: string,
+  args: string[],
+  preChatCommand?: string,
+): string {
   const line = [command, ...args].map(shellQuote).join(' ')
-  return { file: shell, args: ['-lic', `exec ${line}`] }
+  if (!preChatCommand) {
+    return `exec ${line}`
+  }
+  return `${preChatCommand}
+__ade_pre_chat_status=$?
+if [ "$__ade_pre_chat_status" -ne 0 ]; then
+  exit "$__ade_pre_chat_status"
+fi
+exec ${line}`
+}
+
+function windowsScript(
+  command: string,
+  args: string[],
+  preChatCommand: string,
+): string {
+  const line = [command, ...args].map(windowsShellQuote).join(' ')
+  return `${preChatCommand}\r\nif errorlevel 1 exit /b %errorlevel%\r\n${line}`
+}
+
+function windowsShellQuote(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`
 }
 
 /**
@@ -385,8 +442,6 @@ function toDescriptor(record: TerminalRecord): Terminal {
   return {
     terminalId: record.id,
     worktreeId: record.worktreeId,
-    providerId: record.providerId,
-    sessionId: record.sessionId,
     title: record.title,
     status: record.status,
   }

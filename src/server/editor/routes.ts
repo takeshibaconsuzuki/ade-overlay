@@ -7,7 +7,6 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
-import { ADE_APP_ROLE } from '../../api/server/appFocus'
 import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BASE_PATH,
@@ -16,6 +15,7 @@ import {
   EDITOR_COMMAND_STREAM_PATH,
   EDITOR_EXTENSION_COMMAND_STREAM_PATH,
   EDITOR_EXTENSION_OPEN_FILE_EVENT,
+  EDITOR_READY_PATH,
   EDITOR_SESSION_STATUS_EVENT,
   EDITOR_SESSION_STREAM_PATH,
   EDITOR_SHOW_PATH,
@@ -25,6 +25,8 @@ import {
   EditorCommandStreamResponse,
   EditorExtensionCommandQuery,
   EditorExtensionCommandSseEvents,
+  EditorReadyRequest,
+  EditorReadyResponse,
   EditorSessionSseEvents,
   EditorSessionStreamResponse,
   EditorWorktreeRequest,
@@ -39,21 +41,21 @@ import {
   WORKTREE_CREATION_LOGS_OPEN_PATH,
   WorktreeIdParams,
 } from '../../api/server/worktrees'
-import { type AppFocusService } from '../appFocus/service'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
+import { type WorktreeOpener } from '../worktrees/opener'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { EditorService } from './service'
 
 type EditorRouteOptions = {
   registry: WorktreeRegistry
   editor: EditorService
-  focus: AppFocusService
+  opener: WorktreeOpener
 }
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { registry, editor, focus }: EditorRouteOptions,
+  { registry, editor, opener }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
@@ -115,13 +117,20 @@ export function registerEditorRoutes(
         500: ErrorResponse,
       },
     },
-    // Bring the editor forward on a worktree without selecting it — focuses the
-    // window without changing the worktree the user is in.
+    // Open the worktree through the shared opener so editor/chat visibility is
+    // consistent with /showChat, then make the editor the foreground app.
     handler: async (request) => {
-      const response = await editor.revealEditor(request.body.worktreeId)
-      editor.showEditor()
-      focus.recordFocused(ADE_APP_ROLE.editor)
-      return response
+      const response = await opener.openWorktree(request.body.worktreeId, {
+        focus: false,
+      })
+      // Foreground the editor and record the focus intent so the launcher
+      // knows the editor (not chat) should be the active role.
+      opener.focusEditor()
+      return {
+        worktreeId: response.worktreeId,
+        url: response.url,
+        alreadyStarted: response.editorAlreadyStarted,
+      }
     },
   })
 
@@ -167,6 +176,23 @@ export function registerEditorRoutes(
       editor.ackEditorCommand(request.body.commandId)
       return { ok: true as const }
     },
+  })
+
+  // Hidden app-internal endpoint. The spawned editor role calls this only after
+  // Electron main is connected to the command stream.
+  routes.route({
+    method: 'POST',
+    url: EDITOR_READY_PATH,
+    schema: {
+      hide: true,
+      body: EditorReadyRequest,
+      response: {
+        200: EditorReadyResponse,
+      },
+    },
+    handler: async (request) => ({
+      ok: editor.markReady(request.body.launchId),
+    }),
   })
 }
 
@@ -246,7 +272,7 @@ async function proxyWorktreeRequest(
 // text inherits the document color. Against our dark editor background that text
 // is unreadable, so we force inherited text white on proxied HTML documents.
 const EDITOR_TEXT_STYLE =
-  '<style>/* ADE: keep serve-web status text (e.g. "Upgrading…") legible */body{color:red!important}</style>'
+  '<style>/* ADE: keep serve-web status text (e.g. "Upgrading…") legible */body{color:white!important}</style>'
 
 function injectEditorStyles(html: string): string {
   const headCloseIndex = html.indexOf('</head>')
@@ -406,10 +432,6 @@ function streamEditorCommands(
     unregisterClient()
     editor.commands.off('command', onCommand)
   })
-
-  for (const command of editor.getReplayCommands()) {
-    stream.send(command.type, command)
-  }
 }
 
 function streamEditorExtensionCommands(

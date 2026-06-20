@@ -228,7 +228,7 @@ export type OpenWorktreeResponses = {
     200: {
         worktreeId: string;
         url: string;
-        alreadyStarted: boolean;
+        editorAlreadyStarted: boolean;
     };
 };
 
@@ -586,11 +586,14 @@ export type HistoricalChatsResponses = {
      * Default Response
      */
     200: {
-        sessions: Array<{
-            sessionId: string;
+        chats: Array<{
+            chatId: string;
             providerId: string;
-            worktreeId: string;
+            status: 'dormant' | 'idle' | 'busy';
             title?: string;
+            description?: string;
+            worktreeId?: string;
+            terminalId?: string;
             updatedAt: number;
         }>;
     };
@@ -634,7 +637,7 @@ export type CreateTerminalData = {
     body: {
         worktreeId: string;
         providerId?: string;
-        resumeSessionId?: string;
+        resumeChatId?: string;
         title?: string;
     };
     path?: never;
@@ -649,8 +652,6 @@ export type CreateTerminalResponses = {
     200: {
         terminalId: string;
         worktreeId: string;
-        providerId: string;
-        sessionId?: string;
         title?: string;
         status: 'running' | 'exited';
     };

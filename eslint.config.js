@@ -44,8 +44,6 @@ const boundaries = {
             'src/api is a shared contract layer and must not depend on runtime source layers.',
           serverToPreload:
             'Server API contracts must not depend on preload API contracts.',
-          preloadToServer:
-            'Preload API contracts must not depend on server API contracts.',
           rendererNodeImport: 'Renderer code must stay node-free.',
           rendererRuntimeImport:
             'Renderer code may only import shared API contracts from src/api.',
@@ -55,7 +53,6 @@ const boundaries = {
         const importerPath = toProjectPath(context.filename)
         const isApi = isInPath(importerPath, 'src/api')
         const isServerApi = isInPath(importerPath, 'src/api/server')
-        const isPreloadApi = isInPath(importerPath, 'src/api/preload')
         const isRenderer = isInPath(importerPath, 'src/renderer')
 
         function checkImport(node) {
@@ -94,11 +91,6 @@ const boundaries = {
             return
           }
 
-          if (isPreloadApi && isInPath(resolvedPath, 'src/api/server')) {
-            context.report({ node, messageId: 'preloadToServer' })
-            return
-          }
-
           if (
             isRenderer &&
             ['src/server', 'src/main', 'src/preload'].some((directory) =>
@@ -126,6 +118,7 @@ export default tseslint.config(
       'out/**',
       'node_modules/**',
       'src/api/server/generated/**',
+      'src/server/chats/hook-forwarder.cjs',
     ],
   },
   js.configs.recommended,
@@ -169,8 +162,9 @@ export default tseslint.config(
   {
     // `src/api` contains node-free shared API contracts. `src/api/server` owns
     // the HTTP server API contract; `src/api/preload` owns the Electron preload
-    // API contract. Keep both free of Node built-ins and of any dependency on
-    // runtime source layers so every consumer can import them safely.
+    // API contract. Keep both free of Node built-ins and runtime source layers
+    // so every consumer can import them safely. Server API contracts must not
+    // depend on preload contracts; preload contracts may reuse server contracts.
     // `src/api/server/generated` is excluded via the global `ignores` above.
     files: ['src/api/**/*.ts'],
     plugins: {

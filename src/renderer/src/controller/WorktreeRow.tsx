@@ -1,15 +1,11 @@
-import {
-  Badge,
-  Box,
-  DropdownMenu,
-  IconButton,
-  Spinner,
-  Text,
-  Tooltip,
-} from '@radix-ui/themes'
-import { CircleAlert, Ellipsis } from 'lucide-react'
+import { Badge, DropdownMenu, IconButton, Text } from '@radix-ui/themes'
+import { Ellipsis } from 'lucide-react'
 import type { EditorSessionStatusValue } from '../../../api/server/editor'
 import { HBox, VBox } from '../components/Box'
+import {
+  StatusIndicator,
+  type StatusIndicatorState,
+} from '../components/StatusIndicator'
 import type { SearchableItemProps } from '../hooks/useSearchableList'
 import { worktreeBranch, worktreeColor, worktreeName } from './worktreeLabels'
 import styles from './WorktreeRow.module.css'
@@ -54,7 +50,7 @@ export function WorktreeRow({
       {...itemProps}
       p="2"
     >
-      <HBox width="32px" justify="center" flexShrink="0">
+      <HBox width="16px" justify="center" flexShrink="0">
         <LeadingIndicator
           worktree={worktree}
           busy={busy}
@@ -153,56 +149,31 @@ function LeadingIndicator({
     worktree.creationState === 'creating' ||
     worktree.creationState === 'bootstrapping'
   ) {
-    return <Spinner />
+    return <StatusIndicator state="busy" label="Working" />
   }
 
   if (worktree.creationState === 'failed') {
     return (
-      <Tooltip content="Creation failed — click to dismiss">
-        <IconButton
-          aria-label="Dismiss creation error"
-          color="red"
-          variant="soft"
-          onClick={(event) => {
-            event.stopPropagation()
-            onDismissCreationError()
-          }}
-        >
-          <CircleAlert size={16} />
-        </IconButton>
-      </Tooltip>
+      <StatusIndicator
+        state="error"
+        label="Creation failed — click to dismiss"
+        onClick={(event) => {
+          event.stopPropagation()
+          onDismissCreationError()
+        }}
+      />
     )
   }
 
-  return <SessionDot status={sessionStatus} />
+  const { state, label } = SESSION_INDICATOR[sessionStatus]
+  return <StatusIndicator state={state} label={label} />
 }
 
-const SESSION_DOT: Record<
+const SESSION_INDICATOR: Record<
   EditorSessionStatusValue,
-  { className: string; label: string }
+  { state: StatusIndicatorState; label: string }
 > = {
-  off: { className: styles.dotOff, label: 'Editor stopped' },
-  starting: { className: styles.dotOff, label: 'Editor starting' },
-  on: { className: styles.dotOn, label: 'Editor running' },
-}
-
-function SessionDot({
-  status,
-}: {
-  status: EditorSessionStatusValue
-}): React.JSX.Element {
-  if (status === 'starting') {
-    return (
-      <Tooltip content={SESSION_DOT.starting.label}>
-        <Spinner />
-      </Tooltip>
-    )
-  }
-
-  const { className, label } = SESSION_DOT[status]
-  return (
-    <Tooltip content={label}>
-      <Box aria-label={label} className={`${styles.dot} ${className}`} />
-    </Tooltip>
-  )
+  off: { state: 'neutral', label: 'Editor stopped' },
+  starting: { state: 'busy', label: 'Editor starting' },
+  on: { state: 'ok', label: 'Editor running' },
 }

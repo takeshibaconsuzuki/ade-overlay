@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test'
 import react from '@vitejs/plugin-react'
 import { chromium, type Browser, type Page, type Route } from 'playwright'
 import { createServer, type ViteDevServer } from 'vite'
+import { droppedFilePathInput } from '../../src/renderer/src/chat/imageDrop'
 
 type RecordedRequest = {
   method: string
@@ -20,6 +21,7 @@ declare global {
         title: string
         allowed: ('d' | 'f')[]
       }) => Promise<string[]>
+      getPathForFile: (file: File) => string
       openWorktreesWindow: () => Promise<void>
       closeWindow: () => Promise<void>
     }
@@ -125,8 +127,7 @@ const terminalSnapshot = {
     {
       terminalId: 'term-live',
       worktreeId: 'bbbbbbbbbbbb',
-      providerId: 'claude',
-      sessionId: 'live-session',
+      title: 'claude · live-ses',
       status: 'running',
     },
   ],
@@ -275,9 +276,10 @@ test('chat app shows live terminals and resumes historical sessions', async () =
 
   await page.goto(`${rendererUrl}/#chat`)
   await page.getByRole('button', { name: /claude.*live-ses/ }).waitFor()
-  await page.getByRole('button', { name: 'New chat' }).click()
+  await page.getByRole('button', { name: 'Choose chat provider' }).click()
+  await page.getByRole('menuitem', { name: 'New Codex chat' }).click()
   await page.getByRole('tab', { name: 'Historical' }).click()
-  await page.getByRole('button', { name: /Past fix/ }).click()
+  await page.getByRole('button', { name: /Codex plan/ }).click()
 
   await page.waitForFunction(() => {
     const creates = window.__apiCalls.filter(
@@ -294,11 +296,37 @@ test('chat app shows live terminals and resumes historical sessions', async () =
     'bbbbbbbbbbbb',
   )
   assert.equal(
-    (terminalCreates[1].body as { resumeSessionId?: string }).resumeSessionId,
-    'history-1',
+    (terminalCreates[0].body as { providerId?: string }).providerId,
+    'codex',
+  )
+  assert.equal(
+    (terminalCreates[1].body as { resumeChatId?: string }).resumeChatId,
+    'codex-history',
+  )
+  assert.equal(
+    (terminalCreates[1].body as { providerId?: string }).providerId,
+    'codex',
   )
 
   await page.close()
+})
+
+test('formats dropped file paths for terminal input', () => {
+  const input = droppedFilePathInput(
+    [
+      { name: 'plain.png', type: '' },
+      { name: 'screen shot 1.png', type: 'image/png' },
+      { name: 'notes.txt', type: 'text/plain' },
+      { name: 'manual.pdf', type: 'application/pdf' },
+      { name: "quote's.webp", type: 'image/webp' },
+    ],
+    (file) => `/tmp/${file.name}`,
+  )
+
+  assert.equal(
+    input,
+    "'/tmp/plain.png' '/tmp/screen shot 1.png' '/tmp/notes.txt' '/tmp/manual.pdf' '/tmp/quote'\\''s.webp' ",
+  )
 })
 
 async function newMockedPage(): Promise<Page> {
@@ -311,6 +339,7 @@ async function newMockedPage(): Promise<Page> {
         window.__desktopCalls.push('chooseFiles')
         return ['/repos/project']
       },
+      getPathForFile: (file) => `/tmp/${file.name}`,
       openWorktreesWindow: async () => {
         window.__desktopCalls.push('openWorktreesWindow')
       },
@@ -395,14 +424,16 @@ async function handleApiRoute(route: Route): Promise<void> {
     path.match(/^\/worktrees\/[^/]+\/open$/) ||
     path === '/showEditor'
   ) {
-    const worktreeId =
-      path === '/showEditor'
-        ? (body as { worktreeId?: string }).worktreeId
-        : path.split('/')[2]
+    const isShowEditor = path === '/showEditor'
+    const worktreeId = isShowEditor
+      ? (body as { worktreeId?: string }).worktreeId
+      : path.split('/')[2]
     await json(route, {
       worktreeId,
       url: 'http://bbbbbbbbbbbb.localhost:3000/__ade-overlay/editor-bootstrap',
-      alreadyStarted: true,
+      ...(isShowEditor
+        ? { alreadyStarted: true }
+        : { editorAlreadyStarted: true }),
     })
   } else if (path === '/chats/live' && request.method() === 'GET') {
     await sse(route, 'snapshot', chatSnapshot)
@@ -412,13 +443,22 @@ async function handleApiRoute(route: Route): Promise<void> {
     await sse(route, 'snapshot', {})
   } else if (path === '/chats/history') {
     await json(route, {
-      sessions: [
+      chats: [
         {
-          sessionId: 'history-1',
+          chatId: 'history-1',
           providerId: 'claude',
+          status: 'dormant',
           worktreeId: 'bbbbbbbbbbbb',
           title: 'Past fix',
           updatedAt: Date.parse('2026-06-18T10:00:00Z'),
+        },
+        {
+          chatId: 'codex-history',
+          providerId: 'codex',
+          status: 'dormant',
+          worktreeId: 'bbbbbbbbbbbb',
+          title: 'Codex plan',
+          updatedAt: Date.parse('2026-06-18T09:00:00Z'),
         },
       ],
     })
@@ -428,15 +468,17 @@ async function handleApiRoute(route: Route): Promise<void> {
     const requestBody = body as {
       worktreeId: string
       providerId?: string
-      resumeSessionId?: string
+      resumeChatId?: string
       title?: string
     }
     await json(route, {
-      terminalId: requestBody.resumeSessionId ? 'term-history' : 'term-new',
+      terminalId: requestBody.resumeChatId ? 'term-history' : 'term-new',
       worktreeId: requestBody.worktreeId,
-      providerId: requestBody.providerId ?? 'claude',
-      sessionId: requestBody.resumeSessionId ?? 'new-session',
-      title: requestBody.title,
+      title:
+        requestBody.title ??
+        (requestBody.resumeChatId
+          ? `${requestBody.providerId ?? 'claude'} · ${requestBody.resumeChatId.slice(0, 8)}`
+          : `New ${requestBody.providerId ?? 'claude'} chat`),
       status: 'running',
     })
   } else {

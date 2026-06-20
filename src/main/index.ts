@@ -2,7 +2,10 @@ import { parseArgs } from 'node:util'
 import { app, nativeTheme } from 'electron'
 import { startServer } from '../server'
 import { flushLogs, logger } from '../server/logger'
-import { createWindow as createChatWindow } from './chat'
+import {
+  createWindow as createChatWindow,
+  registerChatIpcHandlers,
+} from './chat'
 import { createWindow as createControllerWindow } from './controller'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
@@ -77,6 +80,7 @@ async function main(): Promise<void> {
       await app.whenReady()
       setRoleDockIcon('chat')
       registerMainIpcHandlers()
+      registerChatIpcHandlers()
       createChatWindow()
       log.info('chat window created')
       break

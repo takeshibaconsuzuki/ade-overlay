@@ -137,6 +137,7 @@ export class WorktreeRegistry {
       mainWorktreePath,
       worktreePathTemplate: previousRepository?.worktreePathTemplate,
       bootstrapCommand: previousRepository?.bootstrapCommand,
+      preChatCommand: previousRepository?.preChatCommand,
     }
 
     this.repositories.set(mainWorktreePath, repository)
@@ -730,6 +731,14 @@ export class WorktreeRegistry {
     return worktree
   }
 
+  async getPreChatCommandForWorktree(
+    worktreeId: string,
+  ): Promise<string | undefined> {
+    const worktree = await this.getWorktreeById(worktreeId)
+    const repository = await this.getRepository(worktree.mainWorktreePath)
+    return repository.preChatCommand
+  }
+
   private emit(event: WorktreeEvent): void {
     this.events.emit('worktree-event', event)
   }
@@ -770,6 +779,7 @@ export class WorktreeRegistry {
         mainWorktreePath,
         worktreePathTemplate: repository.worktreePathTemplate,
         bootstrapCommand: repository.bootstrapCommand,
+        preChatCommand: repository.preChatCommand,
       })
     }
 
@@ -806,6 +816,7 @@ export class WorktreeRegistry {
 
 type TrackedRepository = Repository & {
   worktreePathTemplate?: string
+  preChatCommand?: string
 }
 
 function toPublicRepository(repository: TrackedRepository): Repository {
@@ -829,7 +840,8 @@ function repositoriesEqual(
       !rightRepository ||
       leftRepository.worktreePathTemplate !==
         rightRepository.worktreePathTemplate ||
-      leftRepository.bootstrapCommand !== rightRepository.bootstrapCommand
+      leftRepository.bootstrapCommand !== rightRepository.bootstrapCommand ||
+      leftRepository.preChatCommand !== rightRepository.preChatCommand
     ) {
       return false
     }
