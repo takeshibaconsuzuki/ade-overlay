@@ -5,3 +5,4 @@
 - Live-chat focus rewrites app config every time
 - Codex does not exit on Stop
 - Notify when a chat becomes idle
+- Picture drag and drop to chat

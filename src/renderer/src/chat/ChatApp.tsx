@@ -1,8 +1,8 @@
 import {
+  Badge,
   Box,
   Button,
   Card,
-  Code,
   DropdownMenu,
   IconButton,
   ScrollArea,
@@ -16,6 +16,7 @@ import {
   CHAT_STATUS,
   chatProviderLabel,
   DEFAULT_CHAT_PROVIDER,
+  parseChatProviderId,
   type ChatCommand,
   type ChatProviderId,
 } from '../../../api/server/chats'
@@ -24,12 +25,13 @@ import {
   historicalChats,
   showChat,
 } from '../../../api/server/generated'
-import { HBox, VBox } from '../components/Box'
+import { Grid, HBox, VBox } from '../components/Box'
 import { LiveChats } from '../components/LiveChats'
+import liveChatStyles from '../components/LiveChats.module.css'
 import { Titlebar } from '../components/Titlebar'
 import { worktreeColor, worktreeName } from '../controller/worktreeLabels'
 import { useWorktreeStream } from '../controller/worktrees'
-import { formatTimestamp } from '../format'
+import { formatShortAge } from '../format'
 import { useChatStream, type Chat } from '../hooks/useChatStream'
 import { useCurrentWorktreeId } from '../hooks/useCurrentWorktreeId'
 import {
@@ -282,31 +284,37 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
               )}
             </Tabs.Content>
             <Tabs.Content value="historical" className={styles.tabContent}>
-              <ScrollArea
-                type="auto"
-                scrollbars="vertical"
-                className={`${styles.scroll} scroll-area-fill`}
-              >
-                <VBox gap="1" p="2">
-                  {sessions.length === 0 ? (
-                    <Box p="2">
-                      <Text size="1" color="gray">
-                        {worktreeId
-                          ? 'No past chats in this worktree.'
-                          : 'No worktree selected.'}
-                      </Text>
-                    </Box>
-                  ) : (
-                    sessions.map((session) => (
-                      <SessionRow
-                        key={`${session.providerId}:${session.sessionId}`}
-                        session={session}
-                        onClick={() => openSession(session)}
-                      />
-                    ))
-                  )}
+              {sessions.length === 0 ? (
+                <Box p="3">
+                  <Text size="1" color="gray">
+                    {worktreeId
+                      ? 'No past chats in this worktree.'
+                      : 'No worktree selected.'}
+                  </Text>
+                </Box>
+              ) : (
+                <VBox p="2" flexGrow="1" minHeight="0">
+                  <Card
+                    className={`${liveChatStyles.card} ${styles.liveChats}`}
+                  >
+                    <ScrollArea
+                      type="auto"
+                      scrollbars="vertical"
+                      className={`${liveChatStyles.scroll} scroll-area-fill`}
+                    >
+                      <VBox gap="0">
+                        {sessions.map((session) => (
+                          <SessionRow
+                            key={`${session.providerId}:${session.sessionId}`}
+                            session={session}
+                            onClick={() => openSession(session)}
+                          />
+                        ))}
+                      </VBox>
+                    </ScrollArea>
+                  </Card>
                 </VBox>
-              </ScrollArea>
+              )}
             </Tabs.Content>
           </Tabs.Root>
         </VBox>
@@ -393,27 +401,23 @@ function SessionRow({
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <Card asChild className={styles.sessionRow}>
-      <button
-        type="button"
-        onClick={onClick}
-        style={{ cursor: 'pointer', textAlign: 'left', width: '100%' }}
-      >
-        <VBox gap="1" align="start">
-          <Text size="2" weight="medium" truncate style={{ width: '100%' }}>
+    <button type="button" className={liveChatStyles.row} onClick={onClick}>
+      <Grid columns="minmax(0, 1fr)" gapX="2" gapY="1" align="center" p="2">
+        <HBox minWidth="0">
+          <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
             {session.title || 'Untitled chat'}
           </Text>
-          <HBox gap="2" justify="start">
-            <Code size="1" variant="ghost" color="gray">
-              {session.providerId}
-            </Code>
-            <Text size="1" color="gray">
-              {formatTimestamp(session.updatedAt)}
-            </Text>
-          </HBox>
-        </VBox>
-      </button>
-    </Card>
+          <Text size="1" color="gray">
+            {formatShortAge(session.updatedAt)}
+          </Text>
+        </HBox>
+        <HBox minWidth="0" justify="start">
+          <Badge size="1" variant="soft" radius="full" color="gray">
+            {chatProviderLabel(parseChatProviderId(session.providerId))}
+          </Badge>
+        </HBox>
+      </Grid>
+    </button>
   )
 }
 
