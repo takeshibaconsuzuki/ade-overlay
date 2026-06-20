@@ -8,6 +8,7 @@ const RepositoryConfig = z.object({
   mainWorktreePath: z.string().min(1),
   worktreePathTemplate: z.string().min(1).optional(),
   bootstrapCommand: z.string().min(1).optional(),
+  preChatCommand: z.string().min(1).optional(),
 })
 
 const AppConfig = z

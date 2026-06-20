@@ -254,8 +254,8 @@ test('chat app shows live terminals and resumes historical sessions', async () =
 
   await page.goto(`${rendererUrl}/#chat`)
   await page.getByRole('button', { name: /claude.*live-ses/ }).waitFor()
-  await page.getByRole('radio', { name: 'Codex' }).click()
-  await page.getByRole('button', { name: 'New Codex chat' }).click()
+  await page.getByRole('button', { name: 'Choose chat provider' }).click()
+  await page.getByRole('menuitem', { name: 'New Codex chat' }).click()
   await page.getByRole('tab', { name: 'Historical' }).click()
   await page.getByRole('button', { name: /Codex plan/ }).click()
 

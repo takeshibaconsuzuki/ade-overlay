@@ -69,6 +69,7 @@ export type CreateTerminalOptions = {
   cwd: string
   command: string
   args: string[]
+  preChatCommand?: string
   // Whether this resumes an existing session (vs. a fresh chat). Used only for
   // logging; a fresh chat may not know its provider session id until the first
   // hook arrives.
@@ -187,7 +188,11 @@ export class TerminalManager {
 
   create(options: CreateTerminalOptions): Terminal {
     const id = randomUUID()
-    const target = withUserEnvironment(options.command, options.args)
+    const target = resolveChatTerminalSpawn(
+      options.command,
+      options.args,
+      options.preChatCommand,
+    )
     const pty = loadPtySpawn()(target.file, target.args, {
       name: 'xterm-256color',
       cwd: options.cwd,
@@ -243,6 +248,7 @@ export class TerminalManager {
         worktreeId: options.worktreeId,
         providerId: options.providerId,
         command: options.command,
+        hasPreChatCommand: !!options.preChatCommand,
         resume: options.resumed ?? false,
         ptyPid: pty.pid,
       },
@@ -431,21 +437,67 @@ export class TerminalManager {
  * resolve, exactly as worktree bootstrap commands do. `exec` replaces the shell
  * with the CLI so it becomes the PTY's controlling process — input, resize, and
  * exit all behave as if it were spawned directly. On Windows there is no such
- * `PATH` stripping, so spawn the command directly.
+ * `PATH` stripping, so spawn the command directly unless a repository
+ * pre-command needs a shell to carry environment changes into the CLI.
  */
-function withUserEnvironment(
+export function resolveChatTerminalSpawn(
   command: string,
   args: string[],
+  preChatCommand?: string,
 ): { file: string; args: string[] } {
   if (platform() === 'win32') {
-    return { file: command, args }
+    if (!preChatCommand) {
+      return { file: command, args }
+    }
+    return {
+      file: process.env.ComSpec ?? 'cmd.exe',
+      args: ['/d', '/s', '/c', windowsScript(command, args, preChatCommand)],
+    }
   }
   const shell = getUserLoginShell()
   if (!shell) {
-    return { file: command, args }
+    if (!preChatCommand) {
+      return { file: command, args }
+    }
+    return {
+      file: '/bin/sh',
+      args: ['-c', shellScript(command, args, preChatCommand)],
+    }
   }
+  return {
+    file: shell,
+    args: ['-lic', shellScript(command, args, preChatCommand)],
+  }
+}
+
+function shellScript(
+  command: string,
+  args: string[],
+  preChatCommand?: string,
+): string {
   const line = [command, ...args].map(shellQuote).join(' ')
-  return { file: shell, args: ['-lic', `exec ${line}`] }
+  if (!preChatCommand) {
+    return `exec ${line}`
+  }
+  return `${preChatCommand}
+__ade_pre_chat_status=$?
+if [ "$__ade_pre_chat_status" -ne 0 ]; then
+  exit "$__ade_pre_chat_status"
+fi
+exec ${line}`
+}
+
+function windowsScript(
+  command: string,
+  args: string[],
+  preChatCommand: string,
+): string {
+  const line = [command, ...args].map(windowsShellQuote).join(' ')
+  return `${preChatCommand}\r\nif errorlevel 1 exit /b %errorlevel%\r\n${line}`
+}
+
+function windowsShellQuote(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`
 }
 
 /**

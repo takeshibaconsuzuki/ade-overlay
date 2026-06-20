@@ -44,6 +44,7 @@ export class TerminalService {
     cwd: string
     command: string
     args: string[]
+    preChatCommand?: string
     resumed?: boolean
   }): Terminal {
     return this.manager.create(options)

@@ -23,7 +23,10 @@ import {
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
-import { TerminalManager } from '../../src/server/terminals/manager'
+import {
+  resolveChatTerminalSpawn,
+  TerminalManager,
+} from '../../src/server/terminals/manager'
 
 const execFileAsync = promisify(execFile)
 
@@ -261,6 +264,42 @@ test('binds a chat terminal to its provider session by hook process ancestry', (
     'terminal-2',
   )
   assert.equal(changeCount, 1)
+})
+
+test('wraps chat launch with preChatCommand in the same shell', () => {
+  if (process.platform === 'win32') {
+    return
+  }
+
+  const originalShell = process.env.SHELL
+  process.env.SHELL = '/bin/zsh'
+
+  try {
+    const target = resolveChatTerminalSpawn(
+      'claude',
+      ['--resume', "session'1"],
+      'source .venv/bin/activate\nexport FOO=bar',
+    )
+
+    assert.equal(target.file, '/bin/zsh')
+    assert.equal(target.args[0], '-lic')
+    assert.equal(
+      target.args[1],
+      `source .venv/bin/activate
+export FOO=bar
+__ade_pre_chat_status=$?
+if [ "$__ade_pre_chat_status" -ne 0 ]; then
+  exit "$__ade_pre_chat_status"
+fi
+exec 'claude' '--resume' 'session'\\''1'`,
+    )
+  } finally {
+    if (originalShell === undefined) {
+      delete process.env.SHELL
+    } else {
+      process.env.SHELL = originalShell
+    }
+  }
 })
 
 test('falls back to one unbound chat terminal when hook metadata is absent', () => {

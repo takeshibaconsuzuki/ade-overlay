@@ -4,4 +4,4 @@
 - Make worktree name and chat status more opaque
 - Live-chat focus rewrites app config every time
 - Codex does not exit on Stop
-- Chat env
+- Notify when a chat becomes idle

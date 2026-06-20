@@ -175,6 +175,9 @@ export class ChatService {
       }
     }
 
+    const preChatCommand = await this.worktrees.getPreChatCommandForWorktree(
+      options.worktreeId,
+    )
     return this.terminals.create({
       worktreeId: options.worktreeId,
       providerId,
@@ -187,6 +190,7 @@ export class ChatService {
       cwd: worktree.path,
       command: launch.command,
       args: launch.args,
+      preChatCommand,
     })
   }
 
