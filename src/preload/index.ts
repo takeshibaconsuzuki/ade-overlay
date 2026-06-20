@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { DESKTOP_API_GLOBAL, type DesktopApi } from '../api/preload/desktop'
 import { type ChatCommand } from '../api/server/chats'
 import { CONTROLLER_IPC_CHANNELS } from '../main/controller/ipc-channels'
@@ -12,6 +12,11 @@ const desktop: DesktopApi = {
   /** Opens a native file picker; resolves to the chosen paths. */
   chooseFiles: (options): Promise<string[]> =>
     ipcRenderer.invoke(MAIN_IPC_CHANNELS.chooseFiles, options),
+  /** Resolves a dropped browser File to its native filesystem path. */
+  getPathForFile: (file): string =>
+    webUtils.getPathForFile(
+      file as Parameters<typeof webUtils.getPathForFile>[0],
+    ),
   /** Opens the worktrees window (focusing it if already open). */
   openWorktreesWindow: (): Promise<void> =>
     ipcRenderer.invoke(CONTROLLER_IPC_CHANNELS.openWorktreesWindow),

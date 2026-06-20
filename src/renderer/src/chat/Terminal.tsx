@@ -1,6 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import {
@@ -9,6 +9,7 @@ import {
   type TerminalClientMessage,
 } from '../../../api/server/terminals'
 import { logger } from '../logger'
+import { droppedFilePathInput, isFileDropItem } from './imageDrop'
 
 // The terminal WebSocket shares the server origin, swapped to the ws scheme.
 const WS_ORIGIN = SERVER_ORIGIN.replace(/^http/, 'ws')
@@ -30,7 +31,10 @@ export function Terminal({
   onExit?: () => void
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<XTerm | null>(null)
   const refitRef = useRef<(() => void) | null>(null)
+  const sendInputRef = useRef<((data: string) => void) | null>(null)
+  const [isDraggingImage, setIsDraggingImage] = useState(false)
   // A stable id for this mounted viewer (one per Terminal component instance,
   // not per connection). Stamped on every log line and sent to the server on the
   // socket URL so a post-mortem can tell one reconnecting viewer from two
@@ -83,6 +87,7 @@ export function Terminal({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+    termRef.current = term
 
     // A single terminal reconnects across the life of this effect, so the socket
     // and its heartbeat timers are mutable. `disposed` guards against the
@@ -109,6 +114,7 @@ export function Terminal({
         socket.send(JSON.stringify(message))
       }
     }
+    sendInputRef.current = (data) => send({ type: 'input', data })
 
     // Fit + report size only when the terminal is actually measurable. A hidden
     // or zero-size element makes the fit addon propose a 1-column layout; pushing
@@ -306,7 +312,9 @@ export function Terminal({
         socket.close()
       }
       term.dispose()
+      termRef.current = null
       refitRef.current = null
+      sendInputRef.current = null
     }
     // `viewerId` is stable for the life of this component instance, so listing it
     // never reconnects the socket; it is here only to satisfy exhaustive-deps.
@@ -322,5 +330,70 @@ export function Terminal({
     return () => cancelAnimationFrame(handle)
   }, [active])
 
-  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+  const dropFiles = useCallback((files: FileList): void => {
+    const input = droppedFilePathInput([...files], (file) => {
+      try {
+        return window.desktop.getPathForFile(file)
+      } catch (error) {
+        logger.warn({ err: error }, 'failed to resolve dropped file path')
+        return ''
+      }
+    })
+
+    if (!input) {
+      return
+    }
+
+    termRef.current?.focus()
+    sendInputRef.current?.(input)
+  }, [])
+
+  const onDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>): void => {
+      if (![...event.dataTransfer.items].some(isFileDropItem)) {
+        return
+      }
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      setIsDraggingImage(true)
+    },
+    [],
+  )
+
+  const onDragLeave = useCallback(
+    (event: React.DragEvent<HTMLDivElement>): void => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        setIsDraggingImage(false)
+      }
+    },
+    [],
+  )
+
+  const onDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>): void => {
+      setIsDraggingImage(false)
+      if (event.dataTransfer.files.length === 0) {
+        return
+      }
+      event.preventDefault()
+      dropFiles(event.dataTransfer.files)
+    },
+    [dropFiles],
+  )
+
+  return (
+    <div
+      ref={containerRef}
+      data-terminal-id={terminalId}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      style={{
+        width: '100%',
+        height: '100%',
+        outline: isDraggingImage ? '2px solid var(--accent-9)' : undefined,
+        outlineOffset: isDraggingImage ? '-2px' : undefined,
+      }}
+    />
+  )
 }

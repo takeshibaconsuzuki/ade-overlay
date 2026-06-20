@@ -17,6 +17,8 @@ export type ChooseFilesOptions = {
 export interface DesktopApi {
   /** Opens a native file picker; resolves to the chosen paths. */
   chooseFiles(options: ChooseFilesOptions): Promise<string[]>
+  /** Resolves a dropped browser File to its native filesystem path. */
+  getPathForFile(file: unknown): string
   /** Opens the worktrees window (focusing it if already open). */
   openWorktreesWindow(): Promise<void>
   /** Closes the window that invokes this (used by the custom titlebar). */

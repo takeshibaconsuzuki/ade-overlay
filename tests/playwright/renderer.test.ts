@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test'
 import react from '@vitejs/plugin-react'
 import { chromium, type Browser, type Page, type Route } from 'playwright'
 import { createServer, type ViteDevServer } from 'vite'
+import { droppedFilePathInput } from '../../src/renderer/src/chat/imageDrop'
 
 type RecordedRequest = {
   method: string
@@ -20,6 +21,7 @@ declare global {
         title: string
         allowed: ('d' | 'f')[]
       }) => Promise<string[]>
+      getPathForFile: (file: File) => string
       openWorktreesWindow: () => Promise<void>
       closeWindow: () => Promise<void>
     }
@@ -288,6 +290,24 @@ test('chat app shows live terminals and resumes historical sessions', async () =
   await page.close()
 })
 
+test('formats dropped file paths for terminal input', () => {
+  const input = droppedFilePathInput(
+    [
+      { name: 'plain.png', type: '' },
+      { name: 'screen shot 1.png', type: 'image/png' },
+      { name: 'notes.txt', type: 'text/plain' },
+      { name: 'manual.pdf', type: 'application/pdf' },
+      { name: "quote's.webp", type: 'image/webp' },
+    ],
+    (file) => `/tmp/${file.name}`,
+  )
+
+  assert.equal(
+    input,
+    "'/tmp/plain.png' '/tmp/screen shot 1.png' '/tmp/notes.txt' '/tmp/manual.pdf' '/tmp/quote'\\''s.webp' ",
+  )
+})
+
 async function newMockedPage(): Promise<Page> {
   const page = await browser.newPage()
   await page.addInitScript(() => {
@@ -298,6 +318,7 @@ async function newMockedPage(): Promise<Page> {
         window.__desktopCalls.push('chooseFiles')
         return ['/repos/project']
       },
+      getPathForFile: (file) => `/tmp/${file.name}`,
       openWorktreesWindow: async () => {
         window.__desktopCalls.push('openWorktreesWindow')
       },
