@@ -17,6 +17,10 @@ import {
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { type Logger } from '../../../api/server/logger'
 import {
+  ensureHookForwarderWrapper,
+  hookForwardCommand,
+} from '../hookForwarder'
+import {
   type ChatDetails,
   type ChatHookContext,
   type ChatLaunch,
@@ -32,7 +36,6 @@ import {
  * local hook sink.
  */
 const HOOK_STATUS: Record<string, ChatStatus> = {
-  SessionStart: CHAT_STATUS.idle,
   UserPromptSubmit: CHAT_STATUS.busy,
   PreToolUse: CHAT_STATUS.busy,
   PermissionRequest: CHAT_STATUS.idle,
@@ -50,6 +53,7 @@ export class CodexChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.codex
 
   private readonly marker = `${CHAT_HOOKS_PATH}/${this.id}`
+  private readonly wrapperMarker = `ade-overlay-chat-hook-${this.id}`
 
   constructor(private readonly log: Logger) {}
 
@@ -66,13 +70,21 @@ export class CodexChatProvider implements ChatProvider {
       // No (or unreadable) existing hooks file -- start from an empty object.
     }
 
+    const hookEndpoint = new URL(`${SERVER_ORIGIN}${this.marker}`)
+    const wrapperPath = await ensureHookForwarderWrapper(
+      this.id,
+      hookEndpoint.toString(),
+    )
     const hooks = isRecord(config.hooks) ? { ...config.hooks } : {}
     for (const event of HOOK_EVENTS) {
       const existing = Array.isArray(hooks[event])
         ? (hooks[event] as unknown[])
         : []
       const preserved = existing.filter((group) => !this.isManagedGroup(group))
-      hooks[event] = [...preserved, { hooks: [this.hook(worktree.worktreeId)] }]
+      hooks[event] = [
+        ...preserved,
+        { hooks: [this.hook(worktree.worktreeId, wrapperPath)] },
+      ]
     }
 
     const next = { ...config, hooks }
@@ -86,7 +98,7 @@ export class CodexChatProvider implements ChatProvider {
     context: ChatHookContext,
   ): ChatStatusUpdate | null {
     const eventName = asString(payload.hook_event_name)
-    const chatId = asString(payload.session_id)
+    const chatId = this.hookSessionId(payload)
     if (!eventName || !chatId) {
       return null
     }
@@ -107,6 +119,10 @@ export class CodexChatProvider implements ChatProvider {
       description,
       worktreeId: context.worktreeId,
     }
+  }
+
+  hookSessionId(payload: Record<string, unknown>): string | undefined {
+    return asString(payload.session_id)
   }
 
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails> {
@@ -161,25 +177,15 @@ export class CodexChatProvider implements ChatProvider {
     return { command: 'codex', args: [] }
   }
 
-  private hook(worktreeId: string): {
+  private hook(
+    worktreeId: string,
+    wrapperPath: string,
+  ): {
     type: 'command'
     command: string
     timeout: number
   } {
-    const url = new URL(`${SERVER_ORIGIN}${this.marker}`)
-    url.searchParams.set('worktreeId', worktreeId)
-    const script = [
-      'import sys,urllib.request',
-      'data=sys.stdin.buffer.read()',
-      'req=urllib.request.Request(sys.argv[1],data=data,headers={"Content-Type":"application/json"},method="POST")',
-      'urllib.request.urlopen(req,timeout=1).read()',
-    ].join(';')
-
-    return {
-      type: 'command',
-      command: `/usr/bin/env python3 -c ${shellQuote(script)} ${shellQuote(url.toString())} >/dev/null 2>&1 || true`,
-      timeout: 5,
-    }
+    return hookForwardCommand(wrapperPath, worktreeId)
   }
 
   private isManagedGroup(group: unknown): boolean {
@@ -191,7 +197,8 @@ export class CodexChatProvider implements ChatProvider {
         isRecord(hook) &&
         hook.type === 'command' &&
         typeof hook.command === 'string' &&
-        hook.command.includes(this.marker),
+        (hook.command.includes(this.marker) ||
+          hook.command.includes(this.wrapperMarker)),
     )
   }
 }
@@ -422,8 +429,4 @@ function asStringOrNull(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`
 }

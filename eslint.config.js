@@ -118,6 +118,7 @@ export default tseslint.config(
       'out/**',
       'node_modules/**',
       'src/api/server/generated/**',
+      'src/server/chats/hook-forwarder.cjs',
     ],
   },
   js.configs.recommended,

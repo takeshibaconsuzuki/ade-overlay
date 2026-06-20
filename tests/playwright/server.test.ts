@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
@@ -15,6 +16,10 @@ import {
   CHAT_HOOKS_PATH,
 } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import {
+  ensureHookForwarderWrapper,
+  hookForwardCommand,
+} from '../../src/server/chats/hookForwarder'
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
@@ -184,7 +189,31 @@ test('maps provider hooks into live chat snapshots', async () => {
   ])
 })
 
-test('binds an unbound chat terminal to its provider session', () => {
+test('does not surface a live chat from session start alone', async () => {
+  const hook = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-start-only',
+      },
+    },
+  )
+  assert.equal(hook.status(), 200)
+  assert.deepEqual(await hook.json(), { ok: true })
+
+  const snapshot = await readFirstSseEvent<{
+    chats: Array<{
+      chatId: string
+      providerId: string
+      status: string
+    }>
+  }>('/chats/live')
+  assert.equal(snapshot.event, 'snapshot')
+  assert.deepEqual(snapshot.data.chats, [])
+})
+
+test('binds a chat terminal to its provider session by hook process ancestry', () => {
   let changeCount = 0
   const manager = new TerminalManager(
     { info() {}, warn() {}, debug() {}, error() {} } as never,
@@ -200,20 +229,131 @@ test('binds an unbound chat terminal to its provider session', () => {
     worktreeId: 'worktree-1',
     providerId: 'codex',
     status: 'running',
+    pty: { pid: 101 },
+  })
+  terminals.set('terminal-2', {
+    id: 'terminal-2',
+    worktreeId: 'worktree-1',
+    providerId: 'codex',
+    status: 'running',
+    pty: { pid: 202 },
   })
 
   assert.equal(
-    manager.bindSessionToUnboundTerminal('codex', 'worktree-1', 'session-1'),
+    manager.bindSessionToTerminal(
+      'codex',
+      'worktree-1',
+      'session-1',
+      [303, 202, 1],
+    ),
+    'terminal-2',
+  )
+  assert.equal(manager.terminalIdForSession('codex', 'session-1'), 'terminal-2')
+  assert.equal(changeCount, 1)
+
+  assert.equal(
+    manager.bindSessionToTerminal(
+      'codex',
+      'worktree-1',
+      'session-1',
+      [303, 202, 1],
+    ),
+    'terminal-2',
+  )
+  assert.equal(changeCount, 1)
+})
+
+test('falls back to one unbound chat terminal when hook metadata is absent', () => {
+  let changeCount = 0
+  const manager = new TerminalManager(
+    { info() {}, warn() {}, debug() {}, error() {} } as never,
+    () => {
+      changeCount += 1
+    },
+  )
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-1', {
+    id: 'terminal-1',
+    worktreeId: 'worktree-1',
+    providerId: 'codex',
+    status: 'running',
+    pty: { pid: 101 },
+  })
+
+  assert.equal(
+    manager.bindSessionToTerminal('codex', 'worktree-1', 'session-1'),
     'terminal-1',
   )
   assert.equal(manager.terminalIdForSession('codex', 'session-1'), 'terminal-1')
   assert.equal(changeCount, 1)
 
   assert.equal(
-    manager.bindSessionToUnboundTerminal('codex', 'worktree-1', 'session-1'),
+    manager.bindSessionToTerminal('codex', 'worktree-1', 'session-1'),
     'terminal-1',
   )
   assert.equal(changeCount, 1)
+})
+
+test('hook forward command augments and posts payload using app Node runtime', async () => {
+  let received: Record<string, unknown> | undefined
+  let receivedUrl: string | undefined
+  const hookServer = createHttpServer((request, response) => {
+    receivedUrl = request.url
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      received = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<
+        string,
+        unknown
+      >
+      response.writeHead(200).end()
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    hookServer.once('error', reject)
+    hookServer.listen(0, '127.0.0.1', () => {
+      hookServer.off('error', reject)
+      resolve()
+    })
+  })
+
+  try {
+    const address = hookServer.address()
+    assert.equal(typeof address, 'object')
+    assert.ok(address)
+    const wrapperPath = await ensureHookForwarderWrapper(
+      'test',
+      `http://127.0.0.1:${address.port}/hook`,
+    )
+    const { command } = hookForwardCommand(wrapperPath, 'worktree-1')
+    assert.ok(!command.includes(' -e '))
+    assert.ok(command.includes(wrapperPath))
+    assert.ok(!command.includes(`127.0.0.1:${address.port}`))
+    const payload = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'session-1',
+    })
+    await execFileAsync('sh', [
+      '-c',
+      `printf %s ${shellQuote(payload)} | ${command}`,
+    ])
+
+    assert.equal(received?.hook_event_name, 'UserPromptSubmit')
+    assert.equal(received?.session_id, 'session-1')
+    assert.equal(receivedUrl, '/hook?worktreeId=worktree-1')
+    const metadata = received?._ade_overlay as
+      | Record<string, unknown>
+      | undefined
+    assert.equal(typeof metadata?.hook_pid, 'number')
+    assert.equal(typeof metadata?.hook_ppid, 'number')
+    assert.ok(Array.isArray(metadata?.hook_ancestor_pids))
+    assert.ok(metadata.hook_ancestor_pids.length > 0)
+  } finally {
+    await new Promise<void>((resolve) => hookServer.close(() => resolve()))
+  }
 })
 
 test('lists Codex sessions with large session metadata records', async () => {
@@ -316,6 +456,10 @@ async function createGitRepository(): Promise<string> {
   await execFileAsync('git', ['add', 'README.md'], { cwd: repoPath })
   await execFileAsync('git', ['commit', '-m', 'initial'], { cwd: repoPath })
   return realpath(repoPath)
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 async function readFirstSseEvent<T>(

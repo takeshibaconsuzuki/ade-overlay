@@ -62,12 +62,14 @@ export class ChatService {
     this.registry.setTerminalResolver((providerId, chatId) =>
       this.terminals.terminalIdForSession(providerId, chatId),
     )
-    this.registry.setTerminalSessionBinder((providerId, worktreeId, chatId) =>
-      this.terminals.bindSessionToUnboundTerminal(
-        providerId,
-        worktreeId,
-        chatId,
-      ),
+    this.registry.setTerminalSessionBinder(
+      (providerId, worktreeId, chatId, hookAncestorPids) =>
+        this.terminals.bindSessionToTerminal(
+          providerId,
+          worktreeId,
+          chatId,
+          hookAncestorPids,
+        ),
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)

@@ -21,9 +21,9 @@ export type WorktreeRef = {
 
 /**
  * Out-of-band context the server knows about a hook call, independent of the
- * payload. `worktreeId` is encoded into the hook URL at configure time, so it
- * authoritatively identifies the worktree the chat belongs to — no need to
- * trust the payload's reported working directory.
+ * payload. `worktreeId` is added to the managed hook request by the wrapper
+ * script, so it authoritatively identifies the worktree the chat belongs to —
+ * no need to trust the payload's reported working directory.
  */
 export type ChatHookContext = {
   worktreeId?: string
@@ -43,6 +43,14 @@ export interface ChatProvider {
 
   /** Merge this server's hook endpoint into the worktree's config files. */
   configureWorktree(worktree: WorktreeRef): Promise<void>
+
+  /**
+   * Extract the provider's stable session id from any hook payload, including
+   * hooks that should not create a live chat row. The registry uses this to bind
+   * server-owned terminals as early as possible without treating session startup
+   * itself as meaningful chat activity.
+   */
+  hookSessionId(payload: Record<string, unknown>): string | undefined
 
   /**
    * Interpret a raw hook payload (plus server-known {@link ChatHookContext})
@@ -98,11 +106,10 @@ export type ChatLaunch = {
   command: string
   args: string[]
   /**
-   * The provider session id this launch will run as, when it can be pinned up
-   * front (resuming a session, or a fresh session the provider lets us name).
-   * Recorded on the terminal so a live chat — keyed by the same id — can be
-   * matched back to its terminal. Absent when the provider only learns its
-   * session id after the process starts.
+   * The provider session id this launch will run as, when known up front
+   * (normally a resumed session). Recorded on the terminal so a live chat keyed
+   * by the same id can be matched back before the first hook lands. Fresh
+   * sessions usually bind back to their terminal from hook process metadata.
    */
   sessionId?: string
 }

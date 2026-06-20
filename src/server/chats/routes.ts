@@ -67,6 +67,7 @@ export function registerChatRoutes(
           providerId: request.params.providerId,
           event: body.hook_event_name,
           worktreeId: request.query.worktreeId,
+          hookMetadata: body._ade_overlay,
         },
         'chat hook received',
       )

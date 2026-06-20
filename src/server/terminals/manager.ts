@@ -70,8 +70,8 @@ export type CreateTerminalOptions = {
   command: string
   args: string[]
   // Whether this resumes an existing session (vs. a fresh chat). Used only for
-  // logging — a fresh chat still gets a pinned `sessionId`, so the presence of
-  // one no longer distinguishes the two.
+  // logging; a fresh chat may not know its provider session id until the first
+  // hook arrives.
   resumed?: boolean
 }
 
@@ -110,14 +110,37 @@ export class TerminalManager {
     return undefined
   }
 
-  bindSessionToUnboundTerminal(
+  bindSessionToTerminal(
     providerId: string,
     worktreeId: string,
     sessionId: string,
+    hookAncestorPids?: number[],
   ): string | undefined {
     const existing = this.terminalIdForSession(providerId, sessionId)
     if (existing) {
       return existing
+    }
+
+    const owned = this.terminalForHookProcess(
+      providerId,
+      worktreeId,
+      hookAncestorPids,
+    )
+    if (owned) {
+      owned.sessionId = sessionId
+      this.log.info(
+        {
+          terminalId: owned.id,
+          providerId,
+          worktreeId,
+          sessionId,
+          hookAncestorPids,
+          ptyPid: owned.pty.pid,
+        },
+        'chat terminal bound to provider session by process ancestry',
+      )
+      this.onChange()
+      return owned.id
     }
 
     const candidates = [...this.terminals.values()].filter(
@@ -139,6 +162,27 @@ export class TerminalManager {
     )
     this.onChange()
     return record.id
+  }
+
+  private terminalForHookProcess(
+    providerId: string,
+    worktreeId: string,
+    hookAncestorPids: number[] | undefined,
+  ): TerminalRecord | undefined {
+    if (!hookAncestorPids || hookAncestorPids.length === 0) {
+      return undefined
+    }
+
+    const ancestors = new Set(hookAncestorPids)
+    const matches = [...this.terminals.values()].filter(
+      (record) =>
+        record.status === 'running' &&
+        record.providerId === providerId &&
+        record.worktreeId === worktreeId &&
+        !record.sessionId &&
+        ancestors.has(record.pty.pid),
+    )
+    return matches.length === 1 ? matches[0] : undefined
   }
 
   create(options: CreateTerminalOptions): Terminal {
@@ -200,6 +244,7 @@ export class TerminalManager {
         providerId: options.providerId,
         command: options.command,
         resume: options.resumed ?? false,
+        ptyPid: pty.pid,
       },
       'chat terminal started',
     )

@@ -22,15 +22,17 @@ export class TerminalService {
     return this.manager.terminalIdForSession(providerId, sessionId)
   }
 
-  bindSessionToUnboundTerminal(
+  bindSessionToTerminal(
     providerId: string,
     worktreeId: string,
     sessionId: string,
+    hookAncestorPids?: number[],
   ): string | undefined {
-    return this.manager.bindSessionToUnboundTerminal(
+    return this.manager.bindSessionToTerminal(
       providerId,
       worktreeId,
       sessionId,
+      hookAncestorPids,
     )
   }
 

@@ -7,6 +7,7 @@ import {
   type ChatSnapshot,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
+import { hookAncestorPids } from './hookForwarder'
 import {
   type ChatHookContext,
   type ChatLaunch,
@@ -43,6 +44,7 @@ export class ChatRegistry {
     providerId: string,
     worktreeId: string,
     chatId: string,
+    hookAncestorPids?: number[],
   ) => string | undefined = () => undefined
 
   constructor(
@@ -92,6 +94,16 @@ export class ChatRegistry {
       return
     }
 
+    const hookSessionId = provider.hookSessionId(payload)
+    if (hookSessionId && context.worktreeId) {
+      this.bindTerminalSession(
+        providerId,
+        context.worktreeId,
+        hookSessionId,
+        hookAncestorPids(payload),
+      )
+    }
+
     const update = provider.mapHook(payload, context)
     if (!update) {
       return
@@ -99,9 +111,6 @@ export class ChatRegistry {
 
     const chatKey = `${providerId}:${update.chatId}`
     const previous = this.chats.get(chatKey)
-    if (update.worktreeId) {
-      this.bindTerminalSession(providerId, update.worktreeId, update.chatId)
-    }
     const chat: Chat = {
       chatId: update.chatId,
       providerId,
@@ -236,15 +245,17 @@ export class ChatRegistry {
   }
 
   /**
-   * Providers like Codex only reveal a fresh session id after the CLI starts.
-   * Bind that first hook back to the server-owned terminal when there is one
-   * unambiguous unbound terminal for the same provider and worktree.
+   * Providers usually reveal a fresh session id only after the CLI starts. Bind
+   * that first hook back to the server-owned terminal, preferring the managed
+   * hook's process ancestry and falling back to one unambiguous unbound terminal
+   * for older hook configurations.
    */
   setTerminalSessionBinder(
     bind: (
       providerId: string,
       worktreeId: string,
       chatId: string,
+      hookAncestorPids?: number[],
     ) => string | undefined,
   ): void {
     this.bindTerminalSession = bind

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -10,6 +9,10 @@ import {
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { type Logger } from '../../../api/server/logger'
+import {
+  ensureHookForwarderWrapper,
+  hookForwardCommand,
+} from '../hookForwarder'
 import {
   type ChatDetails,
   type ChatHookContext,
@@ -38,7 +41,6 @@ import {
  * chat in `busy`.
  */
 const HOOK_STATUS: Record<string, ChatStatus> = {
-  SessionStart: CHAT_STATUS.idle,
   UserPromptSubmit: CHAT_STATUS.busy,
   PreToolUse: CHAT_STATUS.busy,
   PostToolUse: CHAT_STATUS.busy,
@@ -55,6 +57,7 @@ export class ClaudeChatProvider implements ChatProvider {
   // Marker substring identifying a hook command we own, so re-configuring a
   // worktree replaces our group instead of stacking duplicates.
   private readonly marker = `${CHAT_HOOKS_PATH}/${this.id}`
+  private readonly wrapperMarker = `ade-overlay-chat-hook-${this.id}`
 
   constructor(private readonly log: Logger) {}
 
@@ -74,6 +77,11 @@ export class ClaudeChatProvider implements ChatProvider {
       // No (or unreadable) existing settings — start from an empty object.
     }
 
+    const hookEndpoint = new URL(`${SERVER_ORIGIN}${this.marker}`)
+    const wrapperPath = await ensureHookForwarderWrapper(
+      this.id,
+      hookEndpoint.toString(),
+    )
     const hooks = isRecord(settings.hooks) ? { ...settings.hooks } : {}
     for (const event of HOOK_EVENTS) {
       const existing = Array.isArray(hooks[event])
@@ -82,7 +90,10 @@ export class ClaudeChatProvider implements ChatProvider {
       // Drop any prior group we added, then append a fresh one. This preserves
       // the user's own hooks while keeping ours idempotent.
       const preserved = existing.filter((group) => !this.isManagedGroup(group))
-      hooks[event] = [...preserved, { hooks: [this.hook(worktree.worktreeId)] }]
+      hooks[event] = [
+        ...preserved,
+        { hooks: [this.hook(worktree.worktreeId, wrapperPath)] },
+      ]
     }
 
     const next = { ...settings, hooks }
@@ -96,7 +107,7 @@ export class ClaudeChatProvider implements ChatProvider {
     context: ChatHookContext,
   ): ChatStatusUpdate | null {
     const eventName = asString(payload.hook_event_name)
-    const chatId = asString(payload.session_id)
+    const chatId = this.hookSessionId(payload)
     if (!eventName || !chatId) {
       return null
     }
@@ -120,6 +131,10 @@ export class ClaudeChatProvider implements ChatProvider {
       // Authoritative worktree identity from the hook URL we configured.
       worktreeId: context.worktreeId,
     }
+  }
+
+  hookSessionId(payload: Record<string, unknown>): string | undefined {
+    return asString(payload.session_id)
   }
 
   /**
@@ -180,23 +195,24 @@ export class ClaudeChatProvider implements ChatProvider {
     return { command: 'claude', args: ['--resume', sessionId], sessionId }
   }
 
-  // Name the fresh session up front so its terminal can be linked to the live
-  // chat that Claude reports under the same id (`--session-id` takes any UUID).
   newLaunch(): ChatLaunch {
-    const sessionId = randomUUID()
-    return { command: 'claude', args: ['--session-id', sessionId], sessionId }
+    return { command: 'claude', args: [] }
   }
 
   /**
-   * A Claude Code `http` hook: it POSTs the event JSON straight to our endpoint,
-   * so no shell or `curl` is involved (works the same on every platform). The
-   * worktree id is carried as a query param so we can attribute the call to a
-   * worktree without trusting the payload's reported cwd.
+   * A Claude Code command hook using the same managed forwarder as Codex. The
+   * worktree id is carried as a query param so we can attribute the call without
+   * trusting the payload's reported cwd.
    */
-  private hook(worktreeId: string): { type: 'http'; url: string } {
-    const url = new URL(`${SERVER_ORIGIN}${this.marker}`)
-    url.searchParams.set('worktreeId', worktreeId)
-    return { type: 'http', url: url.toString() }
+  private hook(
+    worktreeId: string,
+    wrapperPath: string,
+  ): {
+    type: 'command'
+    command: string
+    timeout: number
+  } {
+    return hookForwardCommand(wrapperPath, worktreeId)
   }
 
   private isManagedGroup(group: unknown): boolean {
@@ -206,9 +222,13 @@ export class ClaudeChatProvider implements ChatProvider {
     return group.hooks.some(
       (hook) =>
         isRecord(hook) &&
-        hook.type === 'http' &&
-        typeof hook.url === 'string' &&
-        hook.url.includes(this.marker),
+        ((hook.type === 'http' &&
+          typeof hook.url === 'string' &&
+          hook.url.includes(this.marker)) ||
+          (hook.type === 'command' &&
+            typeof hook.command === 'string' &&
+            (hook.command.includes(this.marker) ||
+              hook.command.includes(this.wrapperMarker)))),
     )
   }
 }
