@@ -1,4 +1,12 @@
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import {
+  type FileHandle,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -50,6 +58,26 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 }
 
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
+
+/**
+ * Events after which the description should be re-read from the transcript.
+ * No hook payload carries the assistant's text, so we rescan the transcript
+ * tail on every event that may have advanced the conversation: a fresh prompt
+ * (`UserPromptSubmit`), mid-turn narration written before a tool call
+ * (`PreToolUse`), a pause for input (`Notification`), or the final reply
+ * (`Stop`). `PostToolUse` is omitted — it carries no new assistant text beyond
+ * the matching `PreToolUse`.
+ */
+const HOOK_REFRESH_DESCRIPTION = new Set([
+  'UserPromptSubmit',
+  'PreToolUse',
+  'Notification',
+  'Stop',
+])
+
+// Read at most this many bytes from the end of a transcript when refreshing the
+// live description; the latest entries we need sit at the very end of the file.
+const TRANSCRIPT_TAIL_BYTES = 64 * 1024
 
 export class ClaudeChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.claude
@@ -117,17 +145,12 @@ export class ClaudeChatProvider implements ChatProvider {
       return null
     }
 
-    // A live prompt updates the description immediately; the transcript
-    // fallback (see resolveDetails) backfills it when no live event carries it.
-    const description =
-      eventName === 'UserPromptSubmit'
-        ? firstLine(asString(payload.prompt))
-        : undefined
-
     return {
       chatId,
       status,
-      description,
+      // No payload carries the assistant's text, so the description is always
+      // read from the transcript (see resolveDescription) rather than the event.
+      refreshDescription: HOOK_REFRESH_DESCRIPTION.has(eventName),
       // Authoritative worktree identity from the hook URL we configured.
       worktreeId: context.worktreeId,
     }
@@ -146,6 +169,12 @@ export class ClaudeChatProvider implements ChatProvider {
    */
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails> {
     return readTranscriptDetails(asString(payload.transcript_path))
+  }
+
+  resolveDescription(
+    payload: Record<string, unknown>,
+  ): Promise<string | undefined> {
+    return readTranscriptTailDescription(asString(payload.transcript_path))
   }
 
   /**
@@ -265,35 +294,22 @@ async function readTranscriptDetails(
   // so it ends on the most recent of the two — what the chat is doing now.
   let description: string | undefined
   for (const line of contents.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) {
-      continue
-    }
-
-    let entry: unknown
-    try {
-      entry = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (!isRecord(entry)) {
+    const entry = parseTranscriptLine(line)
+    if (!entry) {
       continue
     }
 
     if (entry.type === 'ai-title' && typeof entry.aiTitle === 'string') {
       // Keep scanning; the last ai-title in the file is the most recent.
       aiTitle = entry.aiTitle
-    } else if (entry.type === 'user') {
-      const text = userMessageText(entry)
-      if (text) {
+      continue
+    }
+    const text = entryDescriptionText(entry)
+    if (text) {
+      if (entry.type === 'user') {
         firstUserMessage ??= text
-        description = text
       }
-    } else if (entry.type === 'assistant') {
-      const text = assistantMessageText(entry)
-      if (text) {
-        description = text
-      }
+      description = text
     }
   }
 
@@ -301,6 +317,93 @@ async function readTranscriptDetails(
     title: firstLine(aiTitle ?? firstUserMessage),
     description: firstLine(description),
   }
+}
+
+/**
+ * Refresh just the live description by reading only the tail of the transcript:
+ * the latest assistant text or genuine user prompt sits at the very end of the
+ * file, so we avoid re-reading the whole thing on every hook. Returns
+ * `undefined` when the file is missing/unreadable or holds nothing usable.
+ */
+async function readTranscriptTailDescription(
+  transcriptPath: string | undefined,
+): Promise<string | undefined> {
+  if (!transcriptPath) {
+    return undefined
+  }
+
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(transcriptPath, 'r')
+    const { size } = await handle.stat()
+    const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES)
+    const length = size - start
+    if (length === 0) {
+      return undefined
+    }
+
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buffer, 0, length, start)
+    let lines = buffer.toString('utf8', 0, bytesRead).split('\n')
+    // Reading from mid-file usually clips the first line into a fragment. Drop
+    // it — we only want the most recent entry, which is at the end regardless.
+    const clipped = start > 0
+    if (clipped) {
+      lines = lines.slice(1)
+    }
+
+    let description: string | undefined
+    for (const line of lines) {
+      const entry = parseTranscriptLine(line)
+      if (entry) {
+        description = entryDescriptionText(entry) ?? description
+      }
+    }
+
+    if (description !== undefined || !clipped) {
+      return firstLine(description)
+    }
+    // The tail held no usable text and may have clipped the entry we need (e.g.
+    // a final message longer than the tail window); fall back to a full read.
+    return (await readTranscriptDetails(transcriptPath)).description
+  } catch {
+    return undefined
+  } finally {
+    await handle?.close()
+  }
+}
+
+/** Parse one transcript JSONL line into a record, or `undefined` if unusable. */
+function parseTranscriptLine(
+  line: string,
+): Record<string, unknown> | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return undefined
+  }
+  let entry: unknown
+  try {
+    entry = JSON.parse(trimmed)
+  } catch {
+    return undefined
+  }
+  return isRecord(entry) ? entry : undefined
+}
+
+/**
+ * The description-worthy text of a transcript entry: an assistant reply or a
+ * genuine user prompt. `undefined` for anything else (titles, tool results, …).
+ */
+function entryDescriptionText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'user') {
+    return userMessageText(entry)
+  }
+  if (entry.type === 'assistant') {
+    return assistantMessageText(entry)
+  }
+  return undefined
 }
 
 /**

@@ -16,10 +16,11 @@ import {
 } from './providers/types'
 
 /**
- * How long to wait after a chat first appears before reading its details from
- * the transcript. Gives the agent time to write its first message / summary.
+ * How long to wait after a hook before reading the transcript. The hook can
+ * fire just before the agent flushes the entry it describes, so reading
+ * immediately lags a step behind; this delay lets the write land first.
  */
-const DETAILS_RESOLVE_DELAY_MS = 2000
+const TRANSCRIPT_READ_DELAY_MS = 1000
 
 /**
  * In-memory map of live chats across every agentic coding system. Hook events
@@ -134,9 +135,57 @@ export class ChatRegistry {
     })
 
     if (!this.detailsResolved.has(chatKey)) {
+      // First appearance: a full details read backfills title and description.
       this.detailsResolved.add(chatKey)
       this.scheduleDetails(provider, chatKey, payload)
+    } else if (update.refreshDescription) {
+      // Re-read the transcript for the freshest description when the event
+      // implies the conversation advanced (a new prompt or assistant text).
+      this.refreshDescription(provider, chatKey, payload)
     }
+  }
+
+  /**
+   * Re-read just the description from the transcript and overwrite it, in
+   * response to an event that advanced the conversation. Unlike
+   * {@link scheduleDetails} this runs on every such event (not once) and takes
+   * precedence over the existing value. Best-effort: failures are logged.
+   */
+  private refreshDescription(
+    provider: ChatProvider,
+    chatKey: string,
+    payload: Record<string, unknown>,
+  ): void {
+    // Delay the read: the hook can fire just before the agent flushes the entry
+    // it describes, so reading immediately would lag a step behind.
+    const timer = setTimeout(() => {
+      void provider
+        .resolveDescription(payload)
+        .then((description) => {
+          if (description === undefined) {
+            return
+          }
+          const chat = this.chats.get(chatKey)
+          if (!chat || chat.description === description) {
+            return
+          }
+          const next = { ...chat, description }
+          this.chats.set(chatKey, next)
+          this.emit({
+            type: CHAT_EVENT_TYPE.chatUpdated,
+            chat: next,
+            snapshot: this.getSnapshot(),
+          })
+        })
+        .catch((error: unknown) => {
+          this.log.warn(
+            { err: error, chatId: chatKey },
+            'failed to refresh chat description',
+          )
+        })
+    }, TRANSCRIPT_READ_DELAY_MS)
+    // Don't let a pending read keep the process alive on shutdown.
+    timer.unref()
   }
 
   /**
@@ -178,7 +227,7 @@ export class ChatRegistry {
             'failed to resolve chat details',
           )
         })
-    }, DETAILS_RESOLVE_DELAY_MS)
+    }, TRANSCRIPT_READ_DELAY_MS)
     // Don't let a pending detail read keep the process alive on shutdown.
     timer.unref()
   }

@@ -11,6 +11,13 @@ export type ChatStatusUpdate = {
   title?: string
   description?: string
   worktreeId?: string
+  /**
+   * When set, this event may have advanced the conversation with text the live
+   * hook payload doesn't carry (a new user prompt, the assistant's mid-turn
+   * narration, or its final reply), so the registry re-reads the transcript (via
+   * {@link ChatProvider.resolveDescription}) and overwrites the description.
+   */
+  refreshDescription?: boolean
 }
 
 /** Identifies a worktree to configure hooks for. */
@@ -71,6 +78,17 @@ export interface ChatProvider {
    * after a restart, when a chat reappears via a status-only event.
    */
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails>
+
+  /**
+   * Resolve just the live description (the latest assistant text, or the latest
+   * user prompt when no reply follows it) from a hook payload. Called on every
+   * event that sets {@link ChatStatusUpdate.refreshDescription}, so it should be
+   * cheap — read only the tail of the transcript, not the whole file. Returns
+   * `undefined` when nothing usable is found.
+   */
+  resolveDescription(
+    payload: Record<string, unknown>,
+  ): Promise<string | undefined>
 
   /**
    * List the worktree's historical, on-disk sessions, most-recent first. Read

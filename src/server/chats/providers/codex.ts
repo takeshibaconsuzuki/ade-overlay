@@ -129,6 +129,14 @@ export class CodexChatProvider implements ChatProvider {
     return readTranscriptDetails(asStringOrNull(payload.transcript_path))
   }
 
+  // Codex hooks already carry the description live, so they never request a
+  // refresh; this satisfies the provider contract and stays correct if they do.
+  async resolveDescription(
+    payload: Record<string, unknown>,
+  ): Promise<string | undefined> {
+    return (await this.resolveDetails(payload)).description
+  }
+
   /**
    * Codex stores one rollout transcript per session under
    * `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Each file's first
