@@ -3,18 +3,19 @@ import {
   Button,
   Card,
   Code,
+  DropdownMenu,
+  IconButton,
   ScrollArea,
-  SegmentedControl,
   Tabs,
   Text,
 } from '@radix-ui/themes'
+import { ChevronDown } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
   CHAT_PROVIDERS,
   CHAT_STATUS,
   chatProviderLabel,
   DEFAULT_CHAT_PROVIDER,
-  parseChatProviderId,
   type ChatCommand,
   type ChatProviderId,
 } from '../../../api/server/chats'
@@ -158,6 +159,13 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     setActiveId(data.terminalId)
   }
 
+  // Launch a chat with the given provider and remember it as the default for the
+  // split button's primary action.
+  const launchChat = async (providerId: ChatProviderId): Promise<void> => {
+    setNewChatProviderId(providerId)
+    await startTerminal({ providerId })
+  }
+
   const openSession = (session: ChatSession): void => {
     void startTerminal({
       providerId: session.providerId,
@@ -206,30 +214,48 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
           style={{ borderRight: '1px solid var(--gray-4)' }}
         >
           <VBox gap="2" p="3">
-            <SegmentedControl.Root
-              value={newChatProviderId}
-              onValueChange={(value) =>
-                setNewChatProviderId(parseChatProviderId(value))
-              }
-              disabled={!worktreeId}
-            >
-              {CHAT_PROVIDERS.map((provider) => (
-                <SegmentedControl.Item key={provider.id} value={provider.id}>
-                  {provider.label}
-                </SegmentedControl.Item>
-              ))}
-            </SegmentedControl.Root>
-            <Button
-              size="2"
-              variant="solid"
-              onClick={() =>
-                void startTerminal({ providerId: newChatProviderId })
-              }
-              disabled={!worktreeId}
-              style={{ width: '100%' }}
-            >
-              New {chatProviderLabel(newChatProviderId)} chat
-            </Button>
+            <HBox gap="0" align="stretch">
+              <Button
+                size="2"
+                variant="solid"
+                onClick={() => void launchChat(newChatProviderId)}
+                disabled={!worktreeId}
+                style={{
+                  flexGrow: 1,
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                }}
+              >
+                New {chatProviderLabel(newChatProviderId)} chat
+              </Button>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  <IconButton
+                    size="2"
+                    variant="solid"
+                    aria-label="Choose chat provider"
+                    disabled={!worktreeId}
+                    style={{
+                      borderTopLeftRadius: 0,
+                      borderBottomLeftRadius: 0,
+                      boxShadow: 'inset 1px 0 0 0 var(--gray-a6)',
+                    }}
+                  >
+                    <ChevronDown size={16} />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  {CHAT_PROVIDERS.map((provider) => (
+                    <DropdownMenu.Item
+                      key={provider.id}
+                      onSelect={() => void launchChat(provider.id)}
+                    >
+                      New {provider.label} chat
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            </HBox>
           </VBox>
           <Tabs.Root defaultValue="live" className={styles.tabs}>
             <Tabs.List className={styles.tabsList}>
