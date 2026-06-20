@@ -149,6 +149,7 @@ export function createServer() {
     registerEditorRoutes(instance, {
       registry: worktreeRegistry,
       editor,
+      opener: worktreeOpener,
     })
     registerChatRoutes(instance, chatRegistry, chatService, worktreeOpener)
     registerTerminalRoutes(instance, terminalService, chatService)

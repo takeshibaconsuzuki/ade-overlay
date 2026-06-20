@@ -77,6 +77,7 @@ export class ChatService {
     }
     const launchId = this.ensureChatAppProcess()
     if (this.readyLaunchId === launchId) {
+      this.showChat()
       return
     }
 
@@ -84,6 +85,7 @@ export class ChatService {
     if (!ready) {
       this.log.warn({ launchId }, 'chat app readiness timed out')
     }
+    this.showChat()
   }
 
   markReady(launchId: string): boolean {
@@ -101,16 +103,16 @@ export class ChatService {
   }
 
   focusChat(target?: { providerId: string; chatId: string }): void {
-    let command: ChatCommand = { type: 'show' }
+    let command: ChatCommand = { type: 'focus' }
     if (target) {
       const terminalId = this.terminals.terminalIdForSession(
         target.providerId,
         target.chatId,
       )
       if (terminalId) {
-        command = { type: 'show', ...target, terminalId }
+        command = { type: 'focus', ...target, terminalId }
       } else {
-        this.log.warn(target, 'chat show target has no terminal')
+        this.log.warn(target, 'chat focus target has no terminal')
       }
     }
     this.emitCommand(command)
@@ -119,8 +121,13 @@ export class ChatService {
         chatId: 'chatId' in command ? command.chatId : undefined,
         terminalId: 'terminalId' in command ? command.terminalId : undefined,
       },
-      'chat show emitted',
+      'chat focus emitted',
     )
+  }
+
+  private showChat(): void {
+    this.emitCommand({ type: 'show' })
+    this.log.info('chat show emitted')
   }
 
   /** Historical, on-disk sessions for a worktree, most-recent first. */

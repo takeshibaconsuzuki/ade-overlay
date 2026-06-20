@@ -43,17 +43,19 @@ import {
 } from '../../api/server/worktrees'
 import { HttpError } from '../errors'
 import { createSseStream } from '../sse'
+import { type WorktreeOpener } from '../worktrees/opener'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { EditorService } from './service'
 
 type EditorRouteOptions = {
   registry: WorktreeRegistry
   editor: EditorService
+  opener: WorktreeOpener
 }
 
 export function registerEditorRoutes(
   server: FastifyInstance,
-  { registry, editor }: EditorRouteOptions,
+  { registry, editor, opener }: EditorRouteOptions,
 ): void {
   registerEditorProxy(server, editor)
   const routes = server.withTypeProvider<ZodTypeProvider>()
@@ -115,12 +117,18 @@ export function registerEditorRoutes(
         500: ErrorResponse,
       },
     },
-    // Bring the editor forward on a worktree without selecting it — focuses the
-    // window without changing the worktree the user is in.
+    // Open the worktree through the shared opener so editor/chat visibility is
+    // consistent with /showChat, then make the editor the foreground app.
     handler: async (request) => {
-      const response = await editor.openWorktree(request.body.worktreeId)
-      editor.showEditor()
-      return response
+      const response = await opener.openWorktree(request.body.worktreeId, {
+        focus: false,
+      })
+      editor.focusEditor()
+      return {
+        worktreeId: response.worktreeId,
+        url: response.url,
+        alreadyStarted: response.editorAlreadyStarted,
+      }
     },
   })
 

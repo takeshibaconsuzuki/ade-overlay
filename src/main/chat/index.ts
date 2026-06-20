@@ -13,7 +13,7 @@ import { reportAppFocus } from '../appFocus'
 import { loadRenderer, webPreferences } from '../browser'
 import { MAIN_IPC_CHANNELS } from '../ipc-channels'
 import { connectSseClient } from '../sse'
-import { focusWindowOnCurrentWorkspace } from '../windowFocus'
+import { showWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'chat' })
 
@@ -35,8 +35,8 @@ export function registerChatIpcHandlers(): void {
 
 /**
  * Creates the chat window: a separate-role app that hosts the terminals running
- * chat sessions. It listens to the server's chat command stream so a `show`
- * (emitted when the launcher's `c` key opens the app) brings it forward.
+ * chat sessions. It listens to the server's chat command stream so `show`
+ * reveals the window and `focus` brings it forward.
  */
 export function createWindow(): BrowserWindow {
   window = new BrowserWindow({
@@ -119,22 +119,34 @@ function connectChatCommandStream(): Promise<void> {
 }
 
 function handleChatCommand(command: ChatCommand): void {
-  if (command.type !== 'show') {
+  if (command.type === 'show') {
+    showChatWindow()
+    return
+  }
+
+  if (command.type !== 'focus') {
     log.warn({ command }, 'unknown chat command')
     return
   }
 
-  bringForward()
+  focusChatWindow()
   if ('terminalId' in command) {
     sendRendererCommand(command)
   }
 }
 
-function bringForward(): void {
+function showChatWindow(): void {
   if (!window || window.isDestroyed()) {
     window = createWindow()
   }
-  focusWindowOnCurrentWorkspace(window)
+  showWindowOnCurrentWorkspace(window, { focus: false })
+}
+
+function focusChatWindow(): void {
+  if (!window || window.isDestroyed()) {
+    window = createWindow()
+  }
+  showWindowOnCurrentWorkspace(window, { focus: true })
 }
 
 function sendRendererCommand(command: ChatCommand): void {

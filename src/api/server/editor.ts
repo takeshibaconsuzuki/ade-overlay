@@ -21,6 +21,10 @@ export type EditorShowCommand = {
   type: 'show'
 }
 
+export type EditorFocusCommand = {
+  type: 'focus'
+}
+
 export type EditorCloseCommand = {
   type: 'close'
   commandId: string
@@ -37,6 +41,7 @@ export type EditorOpenFileCommand = {
 export type EditorCommand =
   | EditorSwitchCommand
   | EditorShowCommand
+  | EditorFocusCommand
   | EditorCloseCommand
   | EditorOpenFileCommand
 
@@ -48,6 +53,10 @@ export const EditorSwitchCommand = z.object({
 
 export const EditorShowCommand = z.object({
   type: z.literal('show'),
+})
+
+export const EditorFocusCommand = z.object({
+  type: z.literal('focus'),
 })
 
 export const EditorCloseCommand = z.object({
@@ -66,6 +75,7 @@ export const EditorOpenFileCommand = z.object({
 export const EditorCommand = z.discriminatedUnion('type', [
   EditorSwitchCommand,
   EditorShowCommand,
+  EditorFocusCommand,
   EditorCloseCommand,
   EditorOpenFileCommand,
 ])
@@ -73,6 +83,7 @@ export const EditorCommand = z.discriminatedUnion('type', [
 export const EditorCommandSseEvents = defineSseEvents({
   switch: EditorSwitchCommand,
   show: EditorShowCommand,
+  focus: EditorFocusCommand,
   close: EditorCloseCommand,
   'open-file': EditorOpenFileCommand,
 })

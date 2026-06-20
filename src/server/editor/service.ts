@@ -119,6 +119,7 @@ export class EditorService {
     }
     this.emitCommand(command)
     this.log.info({ worktreeId, url: session.url }, 'editor switch emitted')
+    this.showEditor()
 
     return { worktreeId, url: session.url, alreadyStarted }
   }
@@ -126,6 +127,11 @@ export class EditorService {
   showEditor(): void {
     this.emitCommand({ type: 'show' })
     this.log.info('editor show emitted')
+  }
+
+  focusEditor(): void {
+    this.emitCommand({ type: 'focus' })
+    this.log.info('editor focus emitted')
   }
 
   async openFile(worktreeId: string, filePath: string): Promise<void> {

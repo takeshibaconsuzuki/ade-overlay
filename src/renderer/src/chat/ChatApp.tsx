@@ -89,13 +89,13 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   }, [worktreeId])
 
   // Electron main is the sole /chats/commands consumer. It validates commands
-  // and forwards targeted show commands here after this handler is installed.
+  // and forwards targeted focus commands here after this handler is installed.
   useEffect(() => {
     if (!window.desktop) {
       return undefined
     }
     const unsubscribe = window.desktop.onChatCommand((command: ChatCommand) => {
-      if (command.type === 'show' && 'terminalId' in command) {
+      if (command.type === 'focus' && 'terminalId' in command) {
         setActiveId(command.terminalId)
       }
     })

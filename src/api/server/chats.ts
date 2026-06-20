@@ -163,39 +163,49 @@ export const ChatReadyResponse = z.object({
 
 /**
  * Commands streamed to the chat Electron process over the SSE command stream.
- * `show` brings the already-spawned chat window forward. When it carries a
- * target chat (a live chat clicked from another window, e.g. the launcher), the
- * server includes the resolved terminal id for the renderer to select.
+ * `show` reveals the already-spawned chat window. `focus` brings it forward.
+ * When `focus` carries a target chat (a live chat clicked from another window,
+ * e.g. the launcher), the server includes the resolved terminal id for the
+ * renderer to select.
  */
-export type ChatShowCommand =
+export type ChatShowCommand = {
+  type: 'show'
+}
+
+export type ChatFocusCommand =
   | {
-      type: 'show'
+      type: 'focus'
     }
   | {
-      type: 'show'
+      type: 'focus'
       providerId: string
       chatId: string
       terminalId: string
     }
 
-export type ChatCommand = ChatShowCommand
+export type ChatCommand = ChatShowCommand | ChatFocusCommand
 
-export const ChatShowCommand = z.union([
+export const ChatShowCommand = z.strictObject({
+  type: z.literal('show'),
+})
+
+export const ChatFocusCommand = z.union([
   z.strictObject({
-    type: z.literal('show'),
+    type: z.literal('focus'),
   }),
   z.strictObject({
-    type: z.literal('show'),
+    type: z.literal('focus'),
     providerId: z.string().min(1),
     chatId: z.string().min(1),
     terminalId: z.string().min(1),
   }),
 ])
 
-export const ChatCommand = ChatShowCommand
+export const ChatCommand = z.union([ChatShowCommand, ChatFocusCommand])
 
 export const ChatCommandSseEvents = defineSseEvents({
-  show: ChatCommand,
+  show: ChatShowCommand,
+  focus: ChatFocusCommand,
 })
 
 export type Chat = z.infer<typeof Chat>

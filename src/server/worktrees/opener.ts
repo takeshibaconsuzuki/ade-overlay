@@ -40,6 +40,6 @@ export class WorktreeOpener {
       this.chat.focusChat()
       return
     }
-    this.editor.showEditor()
+    this.editor.focusEditor()
   }
 }

@@ -12,7 +12,7 @@ import {
 import { logger } from '../../server/logger'
 import { reportAppFocus } from '../appFocus'
 import { connectSseClient } from '../sse'
-import { focusWindowOnCurrentWorkspace } from '../windowFocus'
+import { showWindowOnCurrentWorkspace } from '../windowFocus'
 
 const log = logger.child({ process: 'editor' })
 
@@ -125,7 +125,11 @@ function handleEditorCommand(command: EditorCommandType): void {
     return
   }
   if (command.type === 'show') {
-    bringForward()
+    showEditorWindow()
+    return
+  }
+  if (command.type === 'focus') {
+    focusEditorWindow()
     return
   }
   if (command.type === 'open-file') {
@@ -136,7 +140,7 @@ function handleEditorCommand(command: EditorCommandType): void {
       worktreeId: command.worktreeId,
       url: command.url,
     })
-    bringForward()
+    focusEditorWindow()
     return
   }
   if (command.type === 'close') {
@@ -183,11 +187,18 @@ function switchWorktree(
   activeWorktreeId = command.worktreeId
 }
 
-function bringForward(): void {
+function showEditorWindow(): void {
   if (!window) {
     return
   }
-  focusWindowOnCurrentWorkspace(window)
+  showWindowOnCurrentWorkspace(window, { focus: false })
+}
+
+function focusEditorWindow(): void {
+  if (!window) {
+    return
+  }
+  showWindowOnCurrentWorkspace(window, { focus: true })
 }
 
 async function postReadyIfPossible(): Promise<void> {

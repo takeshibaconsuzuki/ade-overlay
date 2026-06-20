@@ -3,5 +3,3 @@
 - Codex support in chat app
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque
-- Text on right side of terminal is cut off
-- Open chat window on open chat app
