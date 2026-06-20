@@ -5,6 +5,7 @@ import {
   readFile,
   stat,
   writeFile,
+  type FileHandle,
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -48,6 +49,23 @@ const HOOK_STATUS: Record<string, ChatStatus> = {
 }
 
 const HOOK_EVENTS = Object.keys(HOOK_STATUS)
+
+/**
+ * Codex hook payloads only carry the latest prompt, not assistant text. Re-read
+ * the transcript after events that may have appended a visible assistant update
+ * so the live description follows the conversation instead of staying pinned to
+ * the last prompt.
+ */
+const HOOK_REFRESH_DESCRIPTION = new Set([
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PermissionRequest',
+  'Stop',
+])
+
+// Read at most this many bytes from the end of a transcript when refreshing the
+// live description; the latest entries we need sit at the very end of the file.
+const TRANSCRIPT_TAIL_BYTES = 64 * 1024
 
 export class CodexChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.codex
@@ -117,6 +135,7 @@ export class CodexChatProvider implements ChatProvider {
       chatId,
       status,
       description,
+      refreshDescription: HOOK_REFRESH_DESCRIPTION.has(eventName),
       worktreeId: context.worktreeId,
     }
   }
@@ -130,12 +149,12 @@ export class CodexChatProvider implements ChatProvider {
     return readTranscriptDetails(asStringOrNull(payload.transcript_path))
   }
 
-  // Codex hooks already carry the description live, so they never request a
-  // refresh; this satisfies the provider contract and stays correct if they do.
   async resolveDescription(
     payload: Record<string, unknown>,
   ): Promise<string | undefined> {
-    return (await this.resolveDetails(payload)).description
+    return readTranscriptTailDescription(
+      asStringOrNull(payload.transcript_path),
+    )
   }
 
   /**
@@ -143,7 +162,7 @@ export class CodexChatProvider implements ChatProvider {
    * `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Each file's first
    * line is a `session_meta` record carrying the session `id` and the `cwd` it
    * ran in. We read only that head line to attribute a session to a worktree,
-   * then read matched files in full for titles and use file mtimes for sorting.
+   * then read matched files in full for details and use file mtimes for sorting.
    * The session id is the chat id we expose.
    */
   async listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]> {
@@ -230,42 +249,102 @@ async function readTranscriptDetails(
   }
 
   let firstUserMessage: string | undefined
-  let lastUserMessage: string | undefined
+  let description: string | undefined
   let firstFallbackUserMessage: string | undefined
-  let lastFallbackUserMessage: string | undefined
   for (const line of contents.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) {
-      continue
-    }
-
-    let entry: unknown
-    try {
-      entry = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (!isRecord(entry)) {
+    const entry = parseTranscriptLine(line)
+    if (!entry) {
       continue
     }
 
     const text = codexEventUserMessageText(entry)
     if (text) {
       firstUserMessage ??= text
-      lastUserMessage = text
+      description = text
+      continue
+    }
+
+    const agentText = codexEventAgentMessageText(entry)
+    if (agentText) {
+      description = agentText
       continue
     }
 
     const fallbackText = codexResponseUserMessageText(entry)
     if (fallbackText) {
       firstFallbackUserMessage ??= fallbackText
-      lastFallbackUserMessage = fallbackText
+      description = fallbackText
+      continue
+    }
+
+    const fallbackAgentText = codexResponseAssistantMessageText(entry)
+    if (fallbackAgentText) {
+      description = fallbackAgentText
     }
   }
 
   return {
     title: firstUserMessage ?? firstFallbackUserMessage,
-    description: lastUserMessage ?? lastFallbackUserMessage,
+    description,
+  }
+}
+
+/**
+ * Refresh just the live description by reading only the tail of the transcript:
+ * the latest visible assistant text or genuine user prompt sits near the end of
+ * the file, so we avoid re-reading the whole session on every hook. Returns
+ * `undefined` when the file is missing/unreadable or holds nothing usable.
+ */
+async function readTranscriptTailDescription(
+  transcriptPath: string | undefined,
+): Promise<string | undefined> {
+  if (!transcriptPath) {
+    return undefined
+  }
+
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(transcriptPath, 'r')
+    const { size } = await handle.stat()
+    const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES)
+    const length = size - start
+    if (length === 0) {
+      return undefined
+    }
+
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buffer, 0, length, start)
+    let lines = buffer.toString('utf8', 0, bytesRead).split('\n')
+    const clipped = start > 0
+    if (clipped) {
+      lines = lines.slice(1)
+    }
+
+    let description: string | undefined
+    for (const line of lines) {
+      const entry = parseTranscriptLine(line)
+      if (!entry) {
+        continue
+      }
+      description =
+        codexEventDescriptionText(entry) ??
+        codexResponseDescriptionText(entry) ??
+        description
+    }
+
+    if (description !== undefined) {
+      return description
+    }
+    if (!clipped) {
+      return undefined
+    }
+    // The tail held no usable text and may have clipped the entry we need (e.g.
+    // a final message longer than the tail window); fall back to a full read.
+    return (await readTranscriptDetails(transcriptPath)).description
+  } catch {
+    return undefined
+  } finally {
+    await handle?.close()
   }
 }
 
@@ -326,6 +405,24 @@ async function readSessionMeta(
   return { id, cwd }
 }
 
+function parseTranscriptLine(
+  line: string,
+): Record<string, unknown> | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return undefined
+  }
+
+  let entry: unknown
+  try {
+    entry = JSON.parse(trimmed)
+  } catch {
+    return undefined
+  }
+
+  return isRecord(entry) ? entry : undefined
+}
+
 async function readFirstLine(filePath: string): Promise<string | null> {
   let handle
   try {
@@ -378,6 +475,25 @@ function codexEventUserMessageText(
   return undefined
 }
 
+function codexEventAgentMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'event_msg') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'agent_message') {
+      return firstLine(asString(payload.message))
+    }
+  }
+
+  return undefined
+}
+
+function codexEventDescriptionText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  return codexEventUserMessageText(entry) ?? codexEventAgentMessageText(entry)
+}
+
 function codexResponseUserMessageText(
   entry: Record<string, unknown>,
 ): string | undefined {
@@ -389,6 +505,28 @@ function codexResponseUserMessageText(
   }
 
   return undefined
+}
+
+function codexResponseAssistantMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  if (entry.type === 'response_item') {
+    const payload = isRecord(entry.payload) ? entry.payload : undefined
+    if (payload?.type === 'message' && payload.role === 'assistant') {
+      return firstLine(contentText(payload.content))
+    }
+  }
+
+  return undefined
+}
+
+function codexResponseDescriptionText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  return (
+    codexResponseUserMessageText(entry) ??
+    codexResponseAssistantMessageText(entry)
+  )
 }
 
 function userPromptLine(value: string | undefined): string | undefined {

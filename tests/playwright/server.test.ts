@@ -430,9 +430,17 @@ test('lists Codex sessions with large session metadata records', async () => {
       message: 'hello from codex history',
     },
   }
+  const reply = {
+    timestamp: '2026-06-20T01:20:14.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'agent_message',
+      message: 'latest codex assistant reply',
+    },
+  }
   await writeFile(
     sessionPath,
-    `${JSON.stringify(meta)}\n${JSON.stringify(message)}\n`,
+    `${JSON.stringify(meta)}\n${JSON.stringify(message)}\n${JSON.stringify(reply)}\n`,
     'utf8',
   )
 
@@ -453,7 +461,7 @@ test('lists Codex sessions with large session metadata records', async () => {
     assert.equal(chats.length, 1)
     assert.equal(chats[0].chatId, sessionId)
     assert.equal(chats[0].title, 'hello from codex history')
-    assert.equal(chats[0].description, 'hello from codex history')
+    assert.equal(chats[0].description, 'latest codex assistant reply')
     assert.equal(chats[0].updatedAt, (await stat(sessionPath)).mtimeMs)
   } finally {
     if (originalHome === undefined) {
@@ -462,6 +470,56 @@ test('lists Codex sessions with large session metadata records', async () => {
       process.env.HOME = originalHome
     }
   }
+})
+
+test('refreshes Codex description from latest transcript text', async () => {
+  const transcriptPath = join(tempDir, 'codex-transcript.jsonl')
+  const entries = [
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'user_message',
+        message: 'first user prompt',
+      },
+    },
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'agent_message',
+        message: 'assistant progress update',
+      },
+    },
+    {
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'output_text',
+            text: 'assistant final answer',
+          },
+        ],
+      },
+    },
+  ]
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  )
+
+  const provider = new CodexChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+
+  assert.equal(
+    await provider.resolveDescription({ transcript_path: transcriptPath }),
+    'assistant final answer',
+  )
 })
 
 test('opens chat command stream before any command is emitted', async () => {
