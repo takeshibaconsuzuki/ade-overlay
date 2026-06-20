@@ -41,8 +41,6 @@ function loadPtySpawn(): typeof PtySpawn {
 type TerminalRecord = {
   id: string
   worktreeId: string
-  providerId: string
-  chatId?: string
   title?: string
   status: TerminalStatus
   exitCode: number | null
@@ -63,8 +61,6 @@ type TerminalRecord = {
 
 export type CreateTerminalOptions = {
   worktreeId: string
-  providerId: string
-  chatId?: string
   title?: string
   cwd: string
   command: string
@@ -74,6 +70,14 @@ export type CreateTerminalOptions = {
   // logging; a fresh chat may not know its chat id until the first hook arrives.
   resumed?: boolean
 }
+
+export type TerminalManagerChange =
+  | { type: 'changed' }
+  | {
+      type: 'removed'
+      reason: 'closed' | 'exited'
+      terminal: Terminal
+    }
 
 /**
  * Owns the live PTYs running chat sessions. PTYs live here in the server (not
@@ -90,82 +94,15 @@ export class TerminalManager {
    */
   constructor(
     private readonly log: Logger,
-    private readonly onChange: () => void = () => {},
+    private readonly onChange: (
+      event: TerminalManagerChange,
+    ) => void = () => {},
   ) {}
 
-  /** The id of the running terminal hosting a chat, if any. */
-  terminalIdForChat(providerId: string, chatId: string): string | undefined {
-    for (const record of this.terminals.values()) {
-      if (
-        record.status === 'running' &&
-        record.providerId === providerId &&
-        record.chatId === chatId
-      ) {
-        return record.id
-      }
-    }
-    return undefined
-  }
-
-  bindChatToTerminal(
-    providerId: string,
-    worktreeId: string,
-    chatId: string,
-    hookAncestorPids?: number[],
-  ): string | undefined {
-    const existing = this.terminalIdForChat(providerId, chatId)
-    if (existing) {
-      return existing
-    }
-
-    const owned = this.terminalForHookProcess(
-      providerId,
-      worktreeId,
-      hookAncestorPids,
-    )
-    if (owned) {
-      owned.chatId = chatId
-      this.log.info(
-        {
-          terminalId: owned.id,
-          providerId,
-          worktreeId,
-          chatId,
-          hookAncestorPids,
-          ptyPid: owned.pty.pid,
-        },
-        'chat terminal bound to chat by process ancestry',
-      )
-      this.onChange()
-      return owned.id
-    }
-
-    const candidates = [...this.terminals.values()].filter(
-      (record) =>
-        record.status === 'running' &&
-        record.providerId === providerId &&
-        record.worktreeId === worktreeId &&
-        !record.chatId,
-    )
-    if (candidates.length !== 1) {
-      return undefined
-    }
-
-    const [record] = candidates
-    record.chatId = chatId
-    this.log.info(
-      { terminalId: record.id, providerId, worktreeId, chatId },
-      'chat terminal bound to chat',
-    )
-    this.onChange()
-    return record.id
-  }
-
-  private terminalForHookProcess(
-    providerId: string,
+  terminalIdForHookProcess(
     worktreeId: string,
     hookAncestorPids: number[] | undefined,
-  ): TerminalRecord | undefined {
+  ): string | undefined {
     if (!hookAncestorPids || hookAncestorPids.length === 0) {
       return undefined
     }
@@ -174,12 +111,10 @@ export class TerminalManager {
     const matches = [...this.terminals.values()].filter(
       (record) =>
         record.status === 'running' &&
-        record.providerId === providerId &&
         record.worktreeId === worktreeId &&
-        !record.chatId &&
         ancestors.has(record.pty.pid),
     )
-    return matches.length === 1 ? matches[0] : undefined
+    return matches.length === 1 ? matches[0].id : undefined
   }
 
   create(options: CreateTerminalOptions): Terminal {
@@ -204,8 +139,6 @@ export class TerminalManager {
     const record: TerminalRecord = {
       id,
       worktreeId: options.worktreeId,
-      providerId: options.providerId,
-      chatId: options.chatId,
       title: options.title,
       status: 'running',
       exitCode: null,
@@ -225,6 +158,7 @@ export class TerminalManager {
     pty.onExit(({ exitCode }) => {
       record.status = 'exited'
       record.exitCode = exitCode
+      const terminal = toDescriptor(record)
       send(record.socket, { type: 'exit', code: exitCode })
       // Drop the record: an exited chat session can't be resumed in place, so
       // it should not linger in the terminal list or be reattachable. The
@@ -234,15 +168,13 @@ export class TerminalManager {
         { terminalId: id, worktreeId: record.worktreeId, exitCode },
         'chat terminal exited',
       )
-      this.onChange()
+      this.onChange({ type: 'removed', reason: 'exited', terminal })
     })
 
     this.log.info(
       {
         terminalId: id,
-        chatId: options.chatId,
         worktreeId: options.worktreeId,
-        providerId: options.providerId,
         command: options.command,
         hasPreChatCommand: !!options.preChatCommand,
         resume: options.resumed ?? false,
@@ -250,7 +182,7 @@ export class TerminalManager {
       },
       'chat terminal started',
     )
-    this.onChange()
+    this.onChange({ type: 'changed' })
     return toDescriptor(record)
   }
 
@@ -372,10 +304,11 @@ export class TerminalManager {
     if (!record) {
       return
     }
+    const terminal = toDescriptor(record)
     this.terminals.delete(terminalId)
     record.socket?.close()
     this.killPty(record)
-    this.onChange()
+    this.onChange({ type: 'removed', reason: 'closed', terminal })
   }
 
   closeForWorktree(worktreeId: string): void {
@@ -509,8 +442,6 @@ function toDescriptor(record: TerminalRecord): Terminal {
   return {
     terminalId: record.id,
     worktreeId: record.worktreeId,
-    providerId: record.providerId,
-    chatId: record.chatId,
     title: record.title,
     status: record.status,
   }

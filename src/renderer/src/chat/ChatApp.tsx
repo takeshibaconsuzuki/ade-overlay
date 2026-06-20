@@ -445,8 +445,5 @@ function terminalLabel(terminal: TerminalDescriptor): string {
   if (terminal.title) {
     return terminal.title
   }
-  if (terminal.chatId) {
-    return `${terminal.providerId} · ${terminal.chatId.slice(0, 8)}`
-  }
-  return `New ${terminal.providerId} chat`
+  return 'Chat'
 }

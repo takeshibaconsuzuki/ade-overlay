@@ -112,6 +112,10 @@ export class ChatRegistry {
 
     const chatKey = `${providerId}:${update.chatId}`
     const previous = this.chats.get(chatKey)
+    if (!previous && update.status === CHAT_STATUS.dormant) {
+      return
+    }
+
     const chat: Chat = {
       chatId: update.chatId,
       providerId,
@@ -290,6 +294,35 @@ export class ChatRegistry {
       .map((chat) => this.withTerminal(chat))
       .sort((left, right) => right.updatedAt - left.updatedAt)
     return { chats }
+  }
+
+  /**
+   * Mark a server-owned chat as ended. Used when the terminal running that chat
+   * exits or is closed; provider hooks may not emit a separate session-end event.
+   */
+  markDormant(providerId: string, chatId: string): void {
+    const chatKey = `${providerId}:${chatId}`
+    const chat = this.chats.get(chatKey)
+    if (!chat || chat.status === CHAT_STATUS.dormant) {
+      return
+    }
+
+    const next: Chat = {
+      ...chat,
+      status: CHAT_STATUS.dormant,
+      updatedAt: Date.now(),
+    }
+    this.chats.set(chatKey, next)
+
+    this.log.info(
+      { chatId: next.chatId, providerId, status: next.status },
+      'chat status updated',
+    )
+    this.emit({
+      type: CHAT_EVENT_TYPE.chatUpdated,
+      chat: next,
+      snapshot: this.getSnapshot(),
+    })
   }
 
   /** Inject the terminal resolver used to stamp `terminalId` onto chats. */

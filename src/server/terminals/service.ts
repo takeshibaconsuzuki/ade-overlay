@@ -2,7 +2,9 @@ import { EventEmitter } from 'node:events'
 import { type WebSocket } from 'ws'
 import { type Logger } from '../../api/server/logger'
 import { type Terminal } from '../../api/server/terminals'
-import { TerminalManager } from './manager'
+import { TerminalManager, type TerminalManagerChange } from './manager'
+
+export type TerminalChange = TerminalManagerChange
 
 export class TerminalService {
   readonly events = new EventEmitter()
@@ -10,33 +12,21 @@ export class TerminalService {
   private readonly manager: TerminalManager
 
   constructor(log: Logger) {
-    this.manager = new TerminalManager(log, () => {
+    this.manager = new TerminalManager(log, (event) => {
+      this.events.emit('terminal-change', event)
       this.events.emit('terminal-snapshot', this.list())
     })
   }
 
-  terminalIdForChat(providerId: string, chatId: string): string | undefined {
-    return this.manager.terminalIdForChat(providerId, chatId)
-  }
-
-  bindChatToTerminal(
-    providerId: string,
+  terminalIdForHookProcess(
     worktreeId: string,
-    chatId: string,
     hookAncestorPids?: number[],
   ): string | undefined {
-    return this.manager.bindChatToTerminal(
-      providerId,
-      worktreeId,
-      chatId,
-      hookAncestorPids,
-    )
+    return this.manager.terminalIdForHookProcess(worktreeId, hookAncestorPids)
   }
 
   create(options: {
     worktreeId: string
-    providerId: string
-    chatId?: string
     title?: string
     cwd: string
     command: string

@@ -648,8 +648,6 @@ export type CreateTerminalResponses = {
     200: {
         terminalId: string;
         worktreeId: string;
-        providerId: string;
-        chatId?: string;
         title?: string;
         status: 'running' | 'exited';
     };

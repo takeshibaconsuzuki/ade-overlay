@@ -15,7 +15,7 @@ import {
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
-import { type TerminalService } from '../terminals/service'
+import { type TerminalChange, type TerminalService } from '../terminals/service'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { type ChatRegistry } from './registry'
 
@@ -23,6 +23,12 @@ type ReadyWaiter = {
   launchId: string
   promise: Promise<boolean>
   complete: (ready: boolean) => void
+}
+
+type ChatTerminalBinding = {
+  providerId: string
+  worktreeId: string
+  chatId?: string
 }
 
 /**
@@ -40,6 +46,8 @@ export class ChatService {
   private readyLaunchId: string | null = null
   private readyWaiter: ReadyWaiter | null = null
   private shuttingDown = false
+  private readonly terminalBindings = new Map<string, ChatTerminalBinding>()
+  private readonly chatTerminals = new Map<string, string>()
 
   private readonly onWorktreeEvent = (event: WorktreeEvent): void => {
     this.handleWorktreeEvent(event)
@@ -53,6 +61,10 @@ export class ChatService {
     this.registry.notifyTerminalsChanged()
   }
 
+  private readonly onTerminalChange = (event: TerminalChange): void => {
+    this.handleTerminalChange(event)
+  }
+
   constructor(
     private readonly registry: ChatRegistry,
     private readonly worktrees: WorktreeRegistry,
@@ -60,11 +72,11 @@ export class ChatService {
     private readonly log: Logger,
   ) {
     this.registry.setTerminalResolver((providerId, chatId) =>
-      this.terminals.terminalIdForChat(providerId, chatId),
+      this.terminalIdForChat(providerId, chatId),
     )
     this.registry.setTerminalSessionBinder(
       (providerId, worktreeId, chatId, hookAncestorPids) =>
-        this.terminals.bindChatToTerminal(
+        this.bindChatToTerminal(
           providerId,
           worktreeId,
           chatId,
@@ -72,6 +84,7 @@ export class ChatService {
         ),
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
+    this.terminals.events.on('terminal-change', this.onTerminalChange)
     this.worktrees.events.on('worktree-event', this.onWorktreeEvent)
     this.worktrees.events.on('worktree-snapshot', this.onWorktreeSnapshot)
   }
@@ -114,7 +127,7 @@ export class ChatService {
   focusChat(target?: { providerId: string; chatId: string }): void {
     let command: ChatCommand = { type: 'focus' }
     if (target) {
-      const terminalId = this.terminals.terminalIdForChat(
+      const terminalId = this.terminalIdForChat(
         target.providerId,
         target.chatId,
       )
@@ -137,6 +150,21 @@ export class ChatService {
   private showChat(): void {
     this.emitCommand({ type: 'show' })
     this.log.info('chat show emitted')
+  }
+
+  private handleTerminalChange(event: TerminalChange): void {
+    if (event.type !== 'removed') {
+      return
+    }
+
+    const binding = this.terminalBindings.get(event.terminal.terminalId)
+    this.terminalBindings.delete(event.terminal.terminalId)
+    if (!binding?.chatId) {
+      return
+    }
+
+    this.chatTerminals.delete(chatKey(binding.providerId, binding.chatId))
+    this.registry.markDormant(binding.providerId, binding.chatId)
   }
 
   /** Historical, on-disk chats for a worktree, most-recent first. */
@@ -163,13 +191,13 @@ export class ChatService {
     }
     const chatId = launch.chatId ?? options.resumeChatId
     if (chatId) {
-      const existing = this.terminals
-        .list(options.worktreeId)
-        .find(
-          (terminal) =>
-            terminal.providerId === providerId && terminal.chatId === chatId,
-        )
-      if (existing) {
+      const existingTerminalId = this.terminalIdForChat(providerId, chatId)
+      const existing = existingTerminalId
+        ? this.terminals
+            .list(options.worktreeId)
+            .find((terminal) => terminal.terminalId === existingTerminalId)
+        : undefined
+      if (existing?.worktreeId === options.worktreeId) {
         return existing
       }
     }
@@ -177,20 +205,110 @@ export class ChatService {
     const preChatCommand = await this.worktrees.getPreChatCommandForWorktree(
       options.worktreeId,
     )
-    return this.terminals.create({
+    const terminal = this.terminals.create({
       worktreeId: options.worktreeId,
-      providerId,
-      // Prefer the launch's pinned chat id (a resumed id, or a fresh one the
-      // provider named) so the terminal links to its live chat; fall back to the
-      // requested resume id.
-      chatId,
       resumed: !!options.resumeChatId,
-      title: options.title,
+      title: terminalTitle(providerId, chatId, options.title),
       cwd: worktree.path,
       command: launch.command,
       args: launch.args,
       preChatCommand,
     })
+    this.terminalBindings.set(terminal.terminalId, {
+      providerId,
+      worktreeId: options.worktreeId,
+      chatId,
+    })
+    if (chatId) {
+      this.chatTerminals.set(chatKey(providerId, chatId), terminal.terminalId)
+    }
+    return terminal
+  }
+
+  private terminalIdForChat(
+    providerId: string,
+    chatId: string,
+  ): string | undefined {
+    const terminalId = this.chatTerminals.get(chatKey(providerId, chatId))
+    if (!terminalId) {
+      return undefined
+    }
+    const terminal = this.terminals
+      .list()
+      .find((entry) => entry.terminalId === terminalId)
+    if (!terminal) {
+      this.chatTerminals.delete(chatKey(providerId, chatId))
+      return undefined
+    }
+    return terminalId
+  }
+
+  private bindChatToTerminal(
+    providerId: string,
+    worktreeId: string,
+    chatId: string,
+    hookAncestorPids?: number[],
+  ): string | undefined {
+    const existing = this.terminalIdForChat(providerId, chatId)
+    if (existing) {
+      return existing
+    }
+
+    const owned = this.terminals.terminalIdForHookProcess(
+      worktreeId,
+      hookAncestorPids,
+    )
+    if (owned && this.canBindTerminal(owned, providerId, worktreeId)) {
+      this.recordChatBinding(owned, providerId, worktreeId, chatId)
+      this.log.info(
+        { terminalId: owned, providerId, worktreeId, chatId, hookAncestorPids },
+        'chat terminal bound to chat by process ancestry',
+      )
+      this.registry.notifyTerminalsChanged()
+      return owned
+    }
+
+    const candidates = this.terminals
+      .list(worktreeId)
+      .filter((terminal) =>
+        this.canBindTerminal(terminal.terminalId, providerId, worktreeId),
+      )
+    if (candidates.length !== 1) {
+      return undefined
+    }
+
+    const [terminal] = candidates
+    this.recordChatBinding(terminal.terminalId, providerId, worktreeId, chatId)
+    this.log.info(
+      { terminalId: terminal.terminalId, providerId, worktreeId, chatId },
+      'chat terminal bound to chat',
+    )
+    this.registry.notifyTerminalsChanged()
+    return terminal.terminalId
+  }
+
+  private canBindTerminal(
+    terminalId: string,
+    providerId: string,
+    worktreeId: string,
+  ): boolean {
+    const binding = this.terminalBindings.get(terminalId)
+    return (
+      binding !== undefined &&
+      binding.providerId === providerId &&
+      binding.worktreeId === worktreeId &&
+      binding.chatId === undefined
+    )
+  }
+
+  private recordChatBinding(
+    terminalId: string,
+    providerId: string,
+    worktreeId: string,
+    chatId: string,
+  ): void {
+    this.terminalBindings.set(terminalId, { providerId, worktreeId, chatId })
+    this.chatTerminals.set(chatKey(providerId, chatId), terminalId)
   }
 
   private ensureChatAppProcess(): string {
@@ -310,6 +428,7 @@ export class ChatService {
     this.worktrees.events.off('worktree-event', this.onWorktreeEvent)
     this.worktrees.events.off('worktree-snapshot', this.onWorktreeSnapshot)
     this.terminals.events.off('terminal-snapshot', this.onTerminalSnapshot)
+    this.terminals.events.off('terminal-change', this.onTerminalChange)
     this.commands.removeAllListeners()
     if (this.readyWaiter) {
       this.resolveReadyWaiter(this.readyWaiter.launchId, false)
@@ -321,4 +440,21 @@ export class ChatService {
       await killChildProcessTree(chatProcess, this.log, 'chat app')
     }
   }
+}
+
+function chatKey(providerId: string, chatId: string): string {
+  return `${providerId}:${chatId}`
+}
+
+function terminalTitle(
+  providerId: string,
+  chatId: string | undefined,
+  title: string | undefined,
+): string {
+  if (title) {
+    return title
+  }
+  return chatId
+    ? `${providerId} · ${chatId.slice(0, 8)}`
+    : `New ${providerId} chat`
 }

@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -13,7 +14,9 @@ import {
 import { APP_FOCUS_PATH } from '../../src/api/server/appFocus'
 import {
   CHAT_COMMAND_STREAM_PATH,
+  CHAT_EVENT_TYPE,
   CHAT_HOOKS_PATH,
+  CHAT_STATUS,
 } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
 import {
@@ -21,11 +24,14 @@ import {
   hookForwardCommand,
 } from '../../src/server/chats/hookForwarder'
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
+import { ChatRegistry } from '../../src/server/chats/registry'
+import { ChatService } from '../../src/server/chats/service'
 import { getAppConfigPath } from '../../src/server/config/store'
 import { createServer } from '../../src/server/server'
 import {
   resolveChatTerminalSpawn,
   TerminalManager,
+  type TerminalManagerChange,
 } from '../../src/server/terminals/manager'
 
 const execFileAsync = promisify(execFile)
@@ -217,54 +223,69 @@ test('does not surface a live chat from session start alone', async () => {
   assert.deepEqual(snapshot.data.chats, [])
 })
 
-test('binds a chat terminal to its provider session by hook process ancestry', () => {
-  let changeCount = 0
-  const manager = new TerminalManager(
-    { info() {}, warn() {}, debug() {}, error() {} } as never,
-    () => {
-      changeCount += 1
+test('does not create a dormant chat from session end alone', async () => {
+  const start = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-start-end-only',
+      },
     },
   )
+  assert.equal(start.status(), 200)
+  assert.deepEqual(await start.json(), { ok: true })
+
+  const end = await api.post(
+    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
+    {
+      data: {
+        hook_event_name: 'SessionEnd',
+        session_id: 'session-start-end-only',
+      },
+    },
+  )
+  assert.equal(end.status(), 200)
+  assert.deepEqual(await end.json(), { ok: true })
+
+  const snapshot = await readFirstSseEvent<{
+    chats: Array<{
+      chatId: string
+      providerId: string
+      status: string
+    }>
+  }>('/chats/live')
+  assert.equal(snapshot.event, 'snapshot')
+  assert.deepEqual(snapshot.data.chats, [])
+})
+
+test('finds a terminal by hook process ancestry', () => {
+  const manager = new TerminalManager({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
   const terminals = (
     manager as unknown as { terminals: Map<string, Record<string, unknown>> }
   ).terminals
   terminals.set('terminal-1', {
     id: 'terminal-1',
     worktreeId: 'worktree-1',
-    providerId: 'codex',
     status: 'running',
     pty: { pid: 101 },
   })
   terminals.set('terminal-2', {
     id: 'terminal-2',
     worktreeId: 'worktree-1',
-    providerId: 'codex',
     status: 'running',
     pty: { pid: 202 },
   })
 
   assert.equal(
-    manager.bindChatToTerminal(
-      'codex',
-      'worktree-1',
-      'session-1',
-      [303, 202, 1],
-    ),
+    manager.terminalIdForHookProcess('worktree-1', [303, 202, 1]),
     'terminal-2',
   )
-  assert.equal(manager.terminalIdForChat('codex', 'session-1'), 'terminal-2')
-  assert.equal(changeCount, 1)
-
-  assert.equal(
-    manager.bindChatToTerminal(
-      'codex',
-      'worktree-1',
-      'session-1',
-      [303, 202, 1],
-    ),
-    'terminal-2',
-  )
-  assert.equal(changeCount, 1)
 })
 
 test('wraps chat launch with preChatCommand in the same shell', () => {
@@ -303,12 +324,12 @@ exec 'claude' '--resume' 'session'\\''1'`,
   }
 })
 
-test('falls back to one unbound chat terminal when hook metadata is absent', () => {
-  let changeCount = 0
+test('reports terminal identity when a terminal is closed', () => {
+  const changes: TerminalManagerChange[] = []
   const manager = new TerminalManager(
     { info() {}, warn() {}, debug() {}, error() {} } as never,
-    () => {
-      changeCount += 1
+    (event) => {
+      changes.push(event)
     },
   )
   const terminals = (
@@ -317,23 +338,177 @@ test('falls back to one unbound chat terminal when hook metadata is absent', () 
   terminals.set('terminal-1', {
     id: 'terminal-1',
     worktreeId: 'worktree-1',
-    providerId: 'codex',
     status: 'running',
-    pty: { pid: 101 },
+    exitCode: null,
+    pty: { kill() {} },
+  })
+
+  manager.close('terminal-1')
+
+  assert.deepEqual(changes, [
+    {
+      type: 'removed',
+      reason: 'closed',
+      terminal: {
+        terminalId: 'terminal-1',
+        worktreeId: 'worktree-1',
+        title: undefined,
+        status: 'running',
+      },
+    },
+  ])
+})
+
+test('chat service owns chat-to-terminal binding', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  const terminalEvents = new EventEmitter()
+  const terminals = {
+    events: terminalEvents,
+    terminalIdForHookProcess() {
+      return 'terminal-1'
+    },
+    list() {
+      return [
+        {
+          terminalId: 'terminal-1',
+          worktreeId: 'worktree-1',
+          title: 'New codex chat',
+          status: 'running',
+        },
+      ]
+    },
+  }
+  const service = new ChatService(
+    registry,
+    { events: new EventEmitter() } as never,
+    terminals as never,
+    logger,
+  )
+  ;(
+    service as unknown as {
+      terminalBindings: Map<
+        string,
+        { providerId: string; worktreeId: string; chatId?: string }
+      >
+    }
+  ).terminalBindings.set('terminal-1', {
+    providerId: 'codex',
+    worktreeId: 'worktree-1',
   })
 
   assert.equal(
-    manager.bindChatToTerminal('codex', 'worktree-1', 'session-1'),
+    (
+      service as unknown as {
+        bindChatToTerminal: (
+          providerId: string,
+          worktreeId: string,
+          chatId: string,
+          hookAncestorPids?: number[],
+        ) => string | undefined
+        terminalIdForChat: (
+          providerId: string,
+          chatId: string,
+        ) => string | undefined
+      }
+    ).bindChatToTerminal('codex', 'worktree-1', 'session-1', [101]),
     'terminal-1',
   )
-  assert.equal(manager.terminalIdForChat('codex', 'session-1'), 'terminal-1')
-  assert.equal(changeCount, 1)
-
   assert.equal(
-    manager.bindChatToTerminal('codex', 'worktree-1', 'session-1'),
+    (
+      service as unknown as {
+        terminalIdForChat: (
+          providerId: string,
+          chatId: string,
+        ) => string | undefined
+      }
+    ).terminalIdForChat('codex', 'session-1'),
     'terminal-1',
   )
-  assert.equal(changeCount, 1)
+  assert.equal(registry.getSnapshot().chats.length, 0)
+})
+
+test('marks live chat dormant when its owned terminal ends', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  let terminalRunning = true
+  const terminalEvents = new EventEmitter()
+  const terminals = {
+    events: terminalEvents,
+    terminalIdForHookProcess() {
+      return 'terminal-1'
+    },
+    list() {
+      return terminalRunning
+        ? [
+            {
+              terminalId: 'terminal-1',
+              worktreeId: 'worktree-1',
+              title: 'New codex chat',
+              status: 'running',
+            },
+          ]
+        : []
+    },
+  }
+  const service = new ChatService(
+    registry,
+    { events: new EventEmitter() } as never,
+    terminals as never,
+    logger,
+  )
+  ;(
+    service as unknown as {
+      terminalBindings: Map<
+        string,
+        { providerId: string; worktreeId: string; chatId?: string }
+      >
+    }
+  ).terminalBindings.set('terminal-1', {
+    providerId: 'codex',
+    worktreeId: 'worktree-1',
+  })
+
+  registry.applyHook(
+    'codex',
+    {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'session-1',
+      prompt: 'hello',
+    },
+    { worktreeId: 'worktree-1' },
+  )
+  assert.equal(registry.getSnapshot().chats[0].status, CHAT_STATUS.busy)
+  assert.equal(registry.getSnapshot().chats[0].terminalId, 'terminal-1')
+
+  terminalRunning = false
+  let dormantEvent:
+    | {
+        type: string
+        chat: { status: string; terminalId?: string }
+        snapshot: { chats: Array<{ status: string; terminalId?: string }> }
+      }
+    | undefined
+  registry.events.on('chat-event', (event) => {
+    dormantEvent = event as typeof dormantEvent
+  })
+
+  terminalEvents.emit('terminal-change', {
+    type: 'removed',
+    reason: 'exited',
+    terminal: {
+      terminalId: 'terminal-1',
+      worktreeId: 'worktree-1',
+      title: 'New codex chat',
+      status: 'exited',
+    },
+  })
+
+  assert.equal(dormantEvent?.type, CHAT_EVENT_TYPE.chatUpdated)
+  assert.equal(dormantEvent?.chat.status, CHAT_STATUS.dormant)
+  assert.equal(dormantEvent?.chat.terminalId, undefined)
+  assert.equal(dormantEvent?.snapshot.chats[0].status, CHAT_STATUS.dormant)
+  assert.equal(dormantEvent?.snapshot.chats[0].terminalId, undefined)
 })
 
 test('hook forward command augments and posts payload using app Node runtime', async () => {

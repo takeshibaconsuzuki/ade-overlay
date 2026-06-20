@@ -107,8 +107,7 @@ const terminalSnapshot = {
     {
       terminalId: 'term-live',
       worktreeId: 'bbbbbbbbbbbb',
-      providerId: 'claude',
-      chatId: 'live-session',
+      title: 'claude · live-ses',
       status: 'running',
     },
   ],
@@ -432,9 +431,11 @@ async function handleApiRoute(route: Route): Promise<void> {
     await json(route, {
       terminalId: requestBody.resumeChatId ? 'term-history' : 'term-new',
       worktreeId: requestBody.worktreeId,
-      providerId: requestBody.providerId ?? 'claude',
-      chatId: requestBody.resumeChatId ?? 'new-session',
-      title: requestBody.title,
+      title:
+        requestBody.title ??
+        (requestBody.resumeChatId
+          ? `${requestBody.providerId ?? 'claude'} · ${requestBody.resumeChatId.slice(0, 8)}`
+          : `New ${requestBody.providerId ?? 'claude'} chat`),
       status: 'running',
     })
   } else {

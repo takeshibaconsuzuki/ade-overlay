@@ -63,8 +63,6 @@ export const TerminalStatus = z.enum(['running', 'exited'])
 export const Terminal = z.object({
   terminalId: z.string(),
   worktreeId: z.string(),
-  providerId: z.string(),
-  chatId: z.string().optional(),
   title: z.string().optional(),
   status: TerminalStatus,
 })
