@@ -194,10 +194,6 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     (terminal) => terminal.worktreeId === worktreeId,
   )
 
-  const liveChatCount = chats.filter(
-    (chat) => chat.status !== CHAT_STATUS.dormant,
-  ).length
-
   // Derive the shown terminal from the list so removing the active tab (e.g. on
   // exit) transparently falls back to another one without juggling `activeId`.
   const activeTerminalId = worktreeTerminals.some(
@@ -278,38 +274,28 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
               <Tabs.Trigger value="historical">Historical</Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="live" className={styles.tabContent}>
-              {liveChatCount === 0 ? (
-                <Box p="3">
-                  <Text size="1" color="gray">
-                    No live chats.
-                  </Text>
-                </Box>
-              ) : (
-                <VBox p="2" flexGrow="1" minHeight="0">
-                  <LiveChats
-                    chats={chats}
-                    className={styles.liveChats}
-                    onSelect={(chat) => void openLiveChat(chat)}
-                    isChatDisabled={(chat) => !chat.terminalId}
-                    resolveWorktreeName={resolveWorktreeName}
-                  />
-                </VBox>
-              )}
+              <VBox p="2" flexGrow="1" minHeight="0">
+                <LiveChats
+                  chats={chats}
+                  className={styles.liveChats}
+                  onSelect={(chat) => void openLiveChat(chat)}
+                  isChatDisabled={(chat) => !chat.terminalId}
+                  resolveWorktreeName={resolveWorktreeName}
+                />
+              </VBox>
             </Tabs.Content>
             <Tabs.Content value="historical" className={styles.tabContent}>
-              {historyView.length === 0 ? (
-                <Box p="3">
-                  <Text size="1" color="gray">
-                    {worktreeId
-                      ? 'No past chats in this worktree.'
-                      : 'No worktree selected.'}
-                  </Text>
-                </Box>
-              ) : (
-                <VBox p="2" flexGrow="1" minHeight="0">
-                  <Card
-                    className={`${liveChatStyles.card} ${styles.liveChats}`}
-                  >
+              <VBox p="2" flexGrow="1" minHeight="0">
+                <Card className={`${liveChatStyles.card} ${styles.liveChats}`}>
+                  {historyView.length === 0 ? (
+                    <HBox p="2" justify="center">
+                      <Text size="1" color="gray">
+                        {worktreeId
+                          ? 'No past chats in this worktree.'
+                          : 'No worktree selected.'}
+                      </Text>
+                    </HBox>
+                  ) : (
                     <ScrollArea
                       type="auto"
                       scrollbars="vertical"
@@ -325,9 +311,9 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                         ))}
                       </VBox>
                     </ScrollArea>
-                  </Card>
-                </VBox>
-              )}
+                  )}
+                </Card>
+              </VBox>
             </Tabs.Content>
           </Tabs.Root>
         </VBox>

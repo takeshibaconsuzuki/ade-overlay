@@ -31,6 +31,7 @@ export function LiveChats({
   onSelect,
   isChatDisabled,
   resolveWorktreeName,
+  emptyLabel,
 }: {
   chats: Chat[]
   /** Lets the consumer size the card in its layout (e.g. grow to fill space). */
@@ -41,31 +42,38 @@ export function LiveChats({
   isChatDisabled?: (chat: Chat) => boolean
   /** Resolves a chat's worktree id to a display name, shown as a row badge. */
   resolveWorktreeName?: (worktreeId: string | undefined) => string | undefined
-}): React.JSX.Element | null {
+  /** Message shown inside the card when there are no live chats. */
+  emptyLabel?: string
+}): React.JSX.Element {
   const live = chats.filter((chat) => chat.status !== CHAT_STATUS.dormant)
-  if (live.length === 0) {
-    return null
-  }
 
   return (
     <Card className={className ? `${styles.card} ${className}` : styles.card}>
-      <ScrollArea
-        type="auto"
-        scrollbars="vertical"
-        className={`${styles.scroll} scroll-area-fill`}
-      >
-        <VBox gap="0">
-          {live.map((chat) => (
-            <ChatRow
-              key={`${chat.providerId}:${chat.chatId}`}
-              chat={chat}
-              onSelect={onSelect}
-              disabled={isChatDisabled?.(chat) ?? false}
-              worktreeName={resolveWorktreeName?.(chat.worktreeId)}
-            />
-          ))}
-        </VBox>
-      </ScrollArea>
+      {live.length === 0 ? (
+        <HBox p="2" justify="center">
+          <Text size="1" color="gray">
+            {emptyLabel ?? 'No live chats.'}
+          </Text>
+        </HBox>
+      ) : (
+        <ScrollArea
+          type="auto"
+          scrollbars="vertical"
+          className={`${styles.scroll} scroll-area-fill`}
+        >
+          <VBox gap="0">
+            {live.map((chat) => (
+              <ChatRow
+                key={`${chat.providerId}:${chat.chatId}`}
+                chat={chat}
+                onSelect={onSelect}
+                disabled={isChatDisabled?.(chat) ?? false}
+                worktreeName={resolveWorktreeName?.(chat.worktreeId)}
+              />
+            ))}
+          </VBox>
+        </ScrollArea>
+      )}
     </Card>
   )
 }
