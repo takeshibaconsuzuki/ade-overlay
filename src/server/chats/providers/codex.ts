@@ -25,8 +25,8 @@ import {
   type ChatHookContext,
   type ChatLaunch,
   type ChatProvider,
-  type ChatSessionSummary,
   type ChatStatusUpdate,
+  type HistoricalChat,
   type WorktreeRef,
 } from './types'
 
@@ -98,7 +98,7 @@ export class CodexChatProvider implements ChatProvider {
     context: ChatHookContext,
   ): ChatStatusUpdate | null {
     const eventName = asString(payload.hook_event_name)
-    const chatId = this.hookSessionId(payload)
+    const chatId = this.hookChatId(payload)
     if (!eventName || !chatId) {
       return null
     }
@@ -121,7 +121,8 @@ export class CodexChatProvider implements ChatProvider {
     }
   }
 
-  hookSessionId(payload: Record<string, unknown>): string | undefined {
+  hookChatId(payload: Record<string, unknown>): string | undefined {
+    // Codex's native session id is the chat's identity for us.
     return asString(payload.session_id)
   }
 
@@ -143,8 +144,9 @@ export class CodexChatProvider implements ChatProvider {
    * line is a `session_meta` record carrying the session `id` and the `cwd` it
    * ran in. We read only that head line to attribute a session to a worktree,
    * then read matched files in full for titles and use file mtimes for sorting.
+   * The session id is the chat id we expose.
    */
-  async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
+  async listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]> {
     const root = join(homedir(), '.codex', 'sessions')
 
     let files: string[]
@@ -155,7 +157,7 @@ export class CodexChatProvider implements ChatProvider {
     }
 
     const metas = await Promise.all(
-      files.map(async (filePath): Promise<ChatSessionSummary | null> => {
+      files.map(async (filePath): Promise<HistoricalChat | null> => {
         const meta = await readSessionMeta(filePath)
         if (!meta || meta.cwd !== worktree.path) {
           return null
@@ -165,7 +167,7 @@ export class CodexChatProvider implements ChatProvider {
           stat(filePath),
         ])
         return {
-          sessionId: meta.id,
+          chatId: meta.id,
           title: details.title,
           description: details.description,
           updatedAt: info.mtimeMs,
@@ -174,12 +176,13 @@ export class CodexChatProvider implements ChatProvider {
     )
 
     return metas
-      .filter((session): session is ChatSessionSummary => session !== null)
+      .filter((chat): chat is HistoricalChat => chat !== null)
       .sort((left, right) => right.updatedAt - left.updatedAt)
   }
 
-  resumeLaunch(sessionId: string): ChatLaunch {
-    return { command: 'codex', args: ['resume', sessionId], sessionId }
+  resumeLaunch(chatId: string): ChatLaunch {
+    // Codex resumes by its native session id, which is our chat id.
+    return { command: 'codex', args: ['resume', chatId], chatId }
   }
 
   newLaunch(): ChatLaunch {

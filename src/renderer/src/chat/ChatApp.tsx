@@ -10,7 +10,7 @@ import {
   Text,
 } from '@radix-ui/themes'
 import { ChevronDown } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CHAT_PROVIDERS,
   CHAT_STATUS,
@@ -42,20 +42,11 @@ import { logger } from '../logger'
 import styles from './ChatApp.module.css'
 import { Terminal } from './Terminal'
 
-type ChatSession = {
-  sessionId: string
-  providerId: string
-  worktreeId: string
-  title?: string
-  description?: string
-  updatedAt: number
-}
-
 /**
- * The chat app: a sidebar of the current worktree's historical sessions and a
- * tabbed area of live terminals. Clicking a session resumes it in a new
- * terminal; "New chat" starts a fresh one. Terminals live in the server, so
- * reopening this window re-lists and re-attaches them.
+ * The chat app: a sidebar of the current worktree's chats (live and historical)
+ * and a tabbed area of live terminals. Clicking a historical chat resumes it in
+ * a new terminal; "New chat" starts a fresh one. Terminals live in the server,
+ * so reopening this window re-lists and re-attaches them.
  */
 export function ChatApp({ title }: { title: string }): React.JSX.Element {
   const worktreeId = useCurrentWorktreeId()
@@ -78,24 +69,26 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   const { chats } = useChatStream()
   const { terminals } = useTerminalStream()
 
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [historyChats, setHistoryChats] = useState<Chat[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [newChatProviderId, setNewChatProviderId] = useState<ChatProviderId>(
     DEFAULT_CHAT_PROVIDER,
   )
 
-  // Historical sessions are read from disk (git), so they load separately and
-  // only feed the Historical tab; a slow read never delays terminal display.
+  // Historical chats are read from disk, so they load separately from the live
+  // stream and only on mount / worktree change; a slow read never delays
+  // terminal display. A chat that ends later needs no re-read: the live registry
+  // retains dormant entries, so the overlay below surfaces it reactively.
   useEffect(() => {
     let cancelled = false
     const load = async (): Promise<void> => {
       if (!worktreeId) {
-        setSessions([])
+        setHistoryChats([])
         return
       }
       const history = await historicalChats({ query: { worktreeId } })
       if (!cancelled) {
-        setSessions(history.data?.sessions ?? [])
+        setHistoryChats(history.data?.chats ?? [])
       }
     }
     void load()
@@ -103,6 +96,25 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
       cancelled = true
     }
   }, [worktreeId])
+
+  // The Historical tab is the union of on-disk chats and the live stream's
+  // dormant (ended) chats, overlaid by (providerId, chatId) so the live entry
+  // wins. A currently-running chat carries a non-dormant status and so drops out
+  // of this list — it shows only in the Live tab. Most-recent first.
+  const historyView = useMemo(() => {
+    const byKey = new Map<string, Chat>()
+    for (const chat of historyChats) {
+      byKey.set(`${chat.providerId}:${chat.chatId}`, chat)
+    }
+    for (const chat of chats) {
+      if (chat.worktreeId === worktreeId) {
+        byKey.set(`${chat.providerId}:${chat.chatId}`, chat)
+      }
+    }
+    return [...byKey.values()]
+      .filter((chat) => chat.status === CHAT_STATUS.dormant)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+  }, [historyChats, chats, worktreeId])
 
   // Electron main is the sole /chats/commands consumer. It validates commands
   // and forwards targeted focus commands here after this handler is installed.
@@ -146,7 +158,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
 
   const startTerminal = async (body: {
     providerId?: string
-    resumeSessionId?: string
+    resumeChatId?: string
     title?: string
   }): Promise<void> => {
     if (!worktreeId) {
@@ -169,11 +181,11 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     await startTerminal({ providerId })
   }
 
-  const openSession = (session: ChatSession): void => {
+  const openHistoricalChat = (chat: Chat): void => {
     void startTerminal({
-      providerId: session.providerId,
-      resumeSessionId: session.sessionId,
-      title: session.title,
+      providerId: chat.providerId,
+      resumeChatId: chat.chatId,
+      title: chat.title,
     })
   }
 
@@ -285,7 +297,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
               )}
             </Tabs.Content>
             <Tabs.Content value="historical" className={styles.tabContent}>
-              {sessions.length === 0 ? (
+              {historyView.length === 0 ? (
                 <Box p="3">
                   <Text size="1" color="gray">
                     {worktreeId
@@ -304,11 +316,11 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                       className={`${liveChatStyles.scroll} scroll-area-fill`}
                     >
                       <VBox gap="0">
-                        {sessions.map((session) => (
-                          <SessionRow
-                            key={`${session.providerId}:${session.sessionId}`}
-                            session={session}
-                            onClick={() => openSession(session)}
+                        {historyView.map((chat) => (
+                          <HistoricalChatRow
+                            key={`${chat.providerId}:${chat.chatId}`}
+                            chat={chat}
+                            onClick={() => openHistoricalChat(chat)}
                           />
                         ))}
                       </VBox>
@@ -394,11 +406,11 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   )
 }
 
-function SessionRow({
-  session,
+function HistoricalChatRow({
+  chat,
   onClick,
 }: {
-  session: ChatSession
+  chat: Chat
   onClick: () => void
 }): React.JSX.Element {
   return (
@@ -406,22 +418,22 @@ function SessionRow({
       <Grid columns="minmax(0, 1fr)" gapX="2" gapY="1" align="center" p="2">
         <HBox minWidth="0">
           <Text size="2" weight="medium" truncate style={{ minWidth: 0 }}>
-            {session.title || 'Untitled chat'}
+            {chat.title || 'Untitled chat'}
           </Text>
           <Text size="1" color="gray">
-            {formatShortAge(session.updatedAt)}
+            {formatShortAge(chat.updatedAt)}
           </Text>
         </HBox>
-        {session.description ? (
+        {chat.description ? (
           <HBox minWidth="0">
             <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
-              {session.description}
+              {chat.description}
             </Text>
           </HBox>
         ) : null}
         <HBox minWidth="0" justify="start">
           <Badge size="1" variant="soft" radius="full" color="gray">
-            {chatProviderLabel(parseChatProviderId(session.providerId))}
+            {chatProviderLabel(parseChatProviderId(chat.providerId))}
           </Badge>
         </HBox>
       </Grid>
@@ -433,8 +445,8 @@ function terminalLabel(terminal: TerminalDescriptor): string {
   if (terminal.title) {
     return terminal.title
   }
-  if (terminal.sessionId) {
-    return `${terminal.providerId} · ${terminal.sessionId.slice(0, 8)}`
+  if (terminal.chatId) {
+    return `${terminal.providerId} · ${terminal.chatId.slice(0, 8)}`
   }
   return `New ${terminal.providerId} chat`
 }

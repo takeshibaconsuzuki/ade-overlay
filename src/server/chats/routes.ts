@@ -127,7 +127,7 @@ export function registerChatRoutes(
       },
     },
     handler: async (request) => ({
-      sessions: await chat.listSessions(request.query.worktreeId),
+      chats: await chat.listHistory(request.query.worktreeId),
     }),
   })
 

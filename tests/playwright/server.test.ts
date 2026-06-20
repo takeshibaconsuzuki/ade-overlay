@@ -180,12 +180,13 @@ test('maps provider hooks into live chat snapshots', async () => {
     }>
   }>('/chats/live')
   assert.equal(snapshot.event, 'snapshot')
+  // Claude descriptions are read from the transcript, never the prompt payload,
+  // so a hook with no `transcript_path` yields a chat with no description.
   assert.deepEqual(snapshot.data.chats, [
     {
       chatId: 'session-1',
       providerId: 'claude',
       status: 'busy',
-      description: 'Investigate failing test',
       worktreeId: 'bbbbbbbbbbbb',
       updatedAt: snapshot.data.chats[0].updatedAt,
     },
@@ -243,7 +244,7 @@ test('binds a chat terminal to its provider session by hook process ancestry', (
   })
 
   assert.equal(
-    manager.bindSessionToTerminal(
+    manager.bindChatToTerminal(
       'codex',
       'worktree-1',
       'session-1',
@@ -251,11 +252,11 @@ test('binds a chat terminal to its provider session by hook process ancestry', (
     ),
     'terminal-2',
   )
-  assert.equal(manager.terminalIdForSession('codex', 'session-1'), 'terminal-2')
+  assert.equal(manager.terminalIdForChat('codex', 'session-1'), 'terminal-2')
   assert.equal(changeCount, 1)
 
   assert.equal(
-    manager.bindSessionToTerminal(
+    manager.bindChatToTerminal(
       'codex',
       'worktree-1',
       'session-1',
@@ -322,14 +323,14 @@ test('falls back to one unbound chat terminal when hook metadata is absent', () 
   })
 
   assert.equal(
-    manager.bindSessionToTerminal('codex', 'worktree-1', 'session-1'),
+    manager.bindChatToTerminal('codex', 'worktree-1', 'session-1'),
     'terminal-1',
   )
-  assert.equal(manager.terminalIdForSession('codex', 'session-1'), 'terminal-1')
+  assert.equal(manager.terminalIdForChat('codex', 'session-1'), 'terminal-1')
   assert.equal(changeCount, 1)
 
   assert.equal(
-    manager.bindSessionToTerminal('codex', 'worktree-1', 'session-1'),
+    manager.bindChatToTerminal('codex', 'worktree-1', 'session-1'),
     'terminal-1',
   )
   assert.equal(changeCount, 1)
@@ -445,15 +446,15 @@ test('lists Codex sessions with large session metadata records', async () => {
       error() {},
     } as never)
 
-    const sessions = await provider.listSessions({
+    const chats = await provider.listHistory({
       worktreeId: 'x',
       path: worktreePath,
     })
-    assert.equal(sessions.length, 1)
-    assert.equal(sessions[0].sessionId, sessionId)
-    assert.equal(sessions[0].title, 'hello from codex history')
-    assert.equal(sessions[0].description, 'hello from codex history')
-    assert.equal(sessions[0].updatedAt, (await stat(sessionPath)).mtimeMs)
+    assert.equal(chats.length, 1)
+    assert.equal(chats[0].chatId, sessionId)
+    assert.equal(chats[0].title, 'hello from codex history')
+    assert.equal(chats[0].description, 'hello from codex history')
+    assert.equal(chats[0].updatedAt, (await stat(sessionPath)).mtimeMs)
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME

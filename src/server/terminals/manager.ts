@@ -42,7 +42,7 @@ type TerminalRecord = {
   id: string
   worktreeId: string
   providerId: string
-  sessionId?: string
+  chatId?: string
   title?: string
   status: TerminalStatus
   exitCode: number | null
@@ -64,15 +64,14 @@ type TerminalRecord = {
 export type CreateTerminalOptions = {
   worktreeId: string
   providerId: string
-  sessionId?: string
+  chatId?: string
   title?: string
   cwd: string
   command: string
   args: string[]
   preChatCommand?: string
-  // Whether this resumes an existing session (vs. a fresh chat). Used only for
-  // logging; a fresh chat may not know its provider session id until the first
-  // hook arrives.
+  // Whether this resumes an existing chat (vs. a fresh one). Used only for
+  // logging; a fresh chat may not know its chat id until the first hook arrives.
   resumed?: boolean
 }
 
@@ -94,16 +93,13 @@ export class TerminalManager {
     private readonly onChange: () => void = () => {},
   ) {}
 
-  /** The id of the running terminal hosting a provider session, if any. */
-  terminalIdForSession(
-    providerId: string,
-    sessionId: string,
-  ): string | undefined {
+  /** The id of the running terminal hosting a chat, if any. */
+  terminalIdForChat(providerId: string, chatId: string): string | undefined {
     for (const record of this.terminals.values()) {
       if (
         record.status === 'running' &&
         record.providerId === providerId &&
-        record.sessionId === sessionId
+        record.chatId === chatId
       ) {
         return record.id
       }
@@ -111,13 +107,13 @@ export class TerminalManager {
     return undefined
   }
 
-  bindSessionToTerminal(
+  bindChatToTerminal(
     providerId: string,
     worktreeId: string,
-    sessionId: string,
+    chatId: string,
     hookAncestorPids?: number[],
   ): string | undefined {
-    const existing = this.terminalIdForSession(providerId, sessionId)
+    const existing = this.terminalIdForChat(providerId, chatId)
     if (existing) {
       return existing
     }
@@ -128,17 +124,17 @@ export class TerminalManager {
       hookAncestorPids,
     )
     if (owned) {
-      owned.sessionId = sessionId
+      owned.chatId = chatId
       this.log.info(
         {
           terminalId: owned.id,
           providerId,
           worktreeId,
-          sessionId,
+          chatId,
           hookAncestorPids,
           ptyPid: owned.pty.pid,
         },
-        'chat terminal bound to provider session by process ancestry',
+        'chat terminal bound to chat by process ancestry',
       )
       this.onChange()
       return owned.id
@@ -149,17 +145,17 @@ export class TerminalManager {
         record.status === 'running' &&
         record.providerId === providerId &&
         record.worktreeId === worktreeId &&
-        !record.sessionId,
+        !record.chatId,
     )
     if (candidates.length !== 1) {
       return undefined
     }
 
     const [record] = candidates
-    record.sessionId = sessionId
+    record.chatId = chatId
     this.log.info(
-      { terminalId: record.id, providerId, worktreeId, sessionId },
-      'chat terminal bound to provider session',
+      { terminalId: record.id, providerId, worktreeId, chatId },
+      'chat terminal bound to chat',
     )
     this.onChange()
     return record.id
@@ -180,7 +176,7 @@ export class TerminalManager {
         record.status === 'running' &&
         record.providerId === providerId &&
         record.worktreeId === worktreeId &&
-        !record.sessionId &&
+        !record.chatId &&
         ancestors.has(record.pty.pid),
     )
     return matches.length === 1 ? matches[0] : undefined
@@ -209,7 +205,7 @@ export class TerminalManager {
       id,
       worktreeId: options.worktreeId,
       providerId: options.providerId,
-      sessionId: options.sessionId,
+      chatId: options.chatId,
       title: options.title,
       status: 'running',
       exitCode: null,
@@ -244,7 +240,7 @@ export class TerminalManager {
     this.log.info(
       {
         terminalId: id,
-        chatId: options.sessionId,
+        chatId: options.chatId,
         worktreeId: options.worktreeId,
         providerId: options.providerId,
         command: options.command,
@@ -514,7 +510,7 @@ function toDescriptor(record: TerminalRecord): Terminal {
     terminalId: record.id,
     worktreeId: record.worktreeId,
     providerId: record.providerId,
-    sessionId: record.sessionId,
+    chatId: record.chatId,
     title: record.title,
     status: record.status,
   }

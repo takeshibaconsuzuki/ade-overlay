@@ -1,11 +1,11 @@
 import {
-  type FileHandle,
   mkdir,
   open,
   readdir,
   readFile,
   stat,
   writeFile,
+  type FileHandle,
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -26,8 +26,8 @@ import {
   type ChatHookContext,
   type ChatLaunch,
   type ChatProvider,
-  type ChatSessionSummary,
   type ChatStatusUpdate,
+  type HistoricalChat,
   type WorktreeRef,
 } from './types'
 
@@ -135,7 +135,7 @@ export class ClaudeChatProvider implements ChatProvider {
     context: ChatHookContext,
   ): ChatStatusUpdate | null {
     const eventName = asString(payload.hook_event_name)
-    const chatId = this.hookSessionId(payload)
+    const chatId = this.hookChatId(payload)
     if (!eventName || !chatId) {
       return null
     }
@@ -156,7 +156,8 @@ export class ClaudeChatProvider implements ChatProvider {
     }
   }
 
-  hookSessionId(payload: Record<string, unknown>): string | undefined {
+  hookChatId(payload: Record<string, unknown>): string | undefined {
+    // Claude Code's native session id is the chat's identity for us.
     return asString(payload.session_id)
   }
 
@@ -181,9 +182,10 @@ export class ClaudeChatProvider implements ChatProvider {
    * Claude Code keeps one JSONL transcript per session under
    * `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, where the directory
    * name is the worktree path with every non-alphanumeric character replaced by
-   * `-` (the same scheme Claude Code uses). The session id is the file stem.
+   * `-` (the same scheme Claude Code uses). The session id is the file stem, and
+   * is the chat id we expose.
    */
-  async listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]> {
+  async listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]> {
     const dir = join(homedir(), '.claude', 'projects', encodeCwd(worktree.path))
 
     let entries: string[]
@@ -194,10 +196,10 @@ export class ClaudeChatProvider implements ChatProvider {
       return []
     }
 
-    const sessions = await Promise.all(
+    const chats = await Promise.all(
       entries
         .filter((name) => name.endsWith('.jsonl'))
-        .map(async (name): Promise<ChatSessionSummary | null> => {
+        .map(async (name): Promise<HistoricalChat | null> => {
           const filePath = join(dir, name)
           try {
             const [info, details] = await Promise.all([
@@ -205,7 +207,7 @@ export class ClaudeChatProvider implements ChatProvider {
               readTranscriptDetails(filePath),
             ])
             return {
-              sessionId: name.slice(0, -'.jsonl'.length),
+              chatId: name.slice(0, -'.jsonl'.length),
               title: details.title,
               description: details.description,
               updatedAt: info.mtimeMs,
@@ -216,13 +218,14 @@ export class ClaudeChatProvider implements ChatProvider {
         }),
     )
 
-    return sessions
-      .filter((session): session is ChatSessionSummary => session !== null)
+    return chats
+      .filter((chat): chat is HistoricalChat => chat !== null)
       .sort((left, right) => right.updatedAt - left.updatedAt)
   }
 
-  resumeLaunch(sessionId: string): ChatLaunch {
-    return { command: 'claude', args: ['--resume', sessionId], sessionId }
+  resumeLaunch(chatId: string): ChatLaunch {
+    // Claude Code resumes by its native session id, which is our chat id.
+    return { command: 'claude', args: ['--resume', chatId], chatId }
   }
 
   newLaunch(): ChatLaunch {
@@ -422,7 +425,11 @@ function assistantMessageText(
   } else if (Array.isArray(content)) {
     const parts: string[] = []
     for (const block of content) {
-      if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
+      if (
+        isRecord(block) &&
+        block.type === 'text' &&
+        typeof block.text === 'string'
+      ) {
         parts.push(block.text)
       }
     }

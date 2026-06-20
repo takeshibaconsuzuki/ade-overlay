@@ -52,12 +52,13 @@ export interface ChatProvider {
   configureWorktree(worktree: WorktreeRef): Promise<void>
 
   /**
-   * Extract the provider's stable session id from any hook payload, including
-   * hooks that should not create a live chat row. The registry uses this to bind
+   * Extract the provider-scoped chat id from any hook payload, including hooks
+   * that should not create a live chat row. The registry uses this to bind
    * server-owned terminals as early as possible without treating session startup
-   * itself as meaningful chat activity.
+   * itself as meaningful chat activity. A provider may derive this from its own
+   * native session id internally; the abstraction only ever sees the chat id.
    */
-  hookSessionId(payload: Record<string, unknown>): string | undefined
+  hookChatId(payload: Record<string, unknown>): string | undefined
 
   /**
    * Interpret a raw hook payload (plus server-known {@link ChatHookContext})
@@ -91,15 +92,15 @@ export interface ChatProvider {
   ): Promise<string | undefined>
 
   /**
-   * List the worktree's historical, on-disk sessions, most-recent first. Read
-   * from the agent's own session store (e.g. Claude Code's project transcripts),
-   * so history survives app restarts and yields resumable session ids.
-   * Best-effort: return an empty list when the store is missing/unreadable.
+   * List the worktree's historical, on-disk chats, most-recent first. Read from
+   * the agent's own session store (e.g. Claude Code's project transcripts), so
+   * history survives app restarts and yields resumable chat ids. Best-effort:
+   * return an empty list when the store is missing/unreadable.
    */
-  listSessions(worktree: WorktreeRef): Promise<ChatSessionSummary[]>
+  listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]>
 
-  /** Command + args to resume an existing session in the worktree's cwd. */
-  resumeLaunch(sessionId: string): ChatLaunch
+  /** Command + args to resume an existing chat in the worktree's cwd. */
+  resumeLaunch(chatId: string): ChatLaunch
 
   /** Command + args to start a fresh session in the worktree's cwd. */
   newLaunch(): ChatLaunch
@@ -111,12 +112,12 @@ export type ChatDetails = {
   description?: string
 }
 
-/** A historical session discovered in a provider's on-disk store. */
-export type ChatSessionSummary = {
-  sessionId: string
+/** A historical chat discovered in a provider's on-disk store. */
+export type HistoricalChat = {
+  chatId: string
   title?: string
   description?: string
-  /** Epoch milliseconds of the session's last activity (for sorting). */
+  /** Epoch milliseconds of the chat's last activity (for sorting). */
   updatedAt: number
 }
 
@@ -125,10 +126,10 @@ export type ChatLaunch = {
   command: string
   args: string[]
   /**
-   * The provider session id this launch will run as, when known up front
-   * (normally a resumed session). Recorded on the terminal so a live chat keyed
-   * by the same id can be matched back before the first hook lands. Fresh
-   * sessions usually bind back to their terminal from hook process metadata.
+   * The chat id this launch will run as, when known up front (normally a resumed
+   * chat). Recorded on the terminal so the live chat with the same id can be
+   * matched back before the first hook lands. Fresh chats usually bind back to
+   * their terminal from hook process metadata.
    */
-  sessionId?: string
+  chatId?: string
 }

@@ -15,23 +15,20 @@ export class TerminalService {
     })
   }
 
-  terminalIdForSession(
-    providerId: string,
-    sessionId: string,
-  ): string | undefined {
-    return this.manager.terminalIdForSession(providerId, sessionId)
+  terminalIdForChat(providerId: string, chatId: string): string | undefined {
+    return this.manager.terminalIdForChat(providerId, chatId)
   }
 
-  bindSessionToTerminal(
+  bindChatToTerminal(
     providerId: string,
     worktreeId: string,
-    sessionId: string,
+    chatId: string,
     hookAncestorPids?: number[],
   ): string | undefined {
-    return this.manager.bindSessionToTerminal(
+    return this.manager.bindChatToTerminal(
       providerId,
       worktreeId,
-      sessionId,
+      chatId,
       hookAncestorPids,
     )
   }
@@ -39,7 +36,7 @@ export class TerminalService {
   create(options: {
     worktreeId: string
     providerId: string
-    sessionId?: string
+    chatId?: string
     title?: string
     cwd: string
     command: string

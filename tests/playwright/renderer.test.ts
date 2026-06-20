@@ -108,7 +108,7 @@ const terminalSnapshot = {
       terminalId: 'term-live',
       worktreeId: 'bbbbbbbbbbbb',
       providerId: 'claude',
-      sessionId: 'live-session',
+      chatId: 'live-session',
       status: 'running',
     },
   ],
@@ -278,7 +278,7 @@ test('chat app shows live terminals and resumes historical sessions', async () =
     'codex',
   )
   assert.equal(
-    (terminalCreates[1].body as { resumeSessionId?: string }).resumeSessionId,
+    (terminalCreates[1].body as { resumeChatId?: string }).resumeChatId,
     'codex-history',
   )
   assert.equal(
@@ -401,17 +401,19 @@ async function handleApiRoute(route: Route): Promise<void> {
     await sse(route, 'snapshot', {})
   } else if (path === '/chats/history') {
     await json(route, {
-      sessions: [
+      chats: [
         {
-          sessionId: 'history-1',
+          chatId: 'history-1',
           providerId: 'claude',
+          status: 'dormant',
           worktreeId: 'bbbbbbbbbbbb',
           title: 'Past fix',
           updatedAt: Date.parse('2026-06-18T10:00:00Z'),
         },
         {
-          sessionId: 'codex-history',
+          chatId: 'codex-history',
           providerId: 'codex',
+          status: 'dormant',
           worktreeId: 'bbbbbbbbbbbb',
           title: 'Codex plan',
           updatedAt: Date.parse('2026-06-18T09:00:00Z'),
@@ -424,14 +426,14 @@ async function handleApiRoute(route: Route): Promise<void> {
     const requestBody = body as {
       worktreeId: string
       providerId?: string
-      resumeSessionId?: string
+      resumeChatId?: string
       title?: string
     }
     await json(route, {
-      terminalId: requestBody.resumeSessionId ? 'term-history' : 'term-new',
+      terminalId: requestBody.resumeChatId ? 'term-history' : 'term-new',
       worktreeId: requestBody.worktreeId,
       providerId: requestBody.providerId ?? 'claude',
-      sessionId: requestBody.resumeSessionId ?? 'new-session',
+      chatId: requestBody.resumeChatId ?? 'new-session',
       title: requestBody.title,
       status: 'running',
     })

@@ -54,7 +54,7 @@ export function registerTerminalRoutes(
       chat.createTerminal({
         worktreeId: request.body.worktreeId,
         providerId: request.body.providerId,
-        resumeSessionId: request.body.resumeSessionId,
+        resumeChatId: request.body.resumeChatId,
         title: request.body.title,
       }),
   })

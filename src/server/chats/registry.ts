@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events'
 import {
   CHAT_EVENT_TYPE,
+  CHAT_STATUS,
   type Chat,
   type ChatEvent,
-  type ChatSession,
   type ChatSnapshot,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
@@ -95,12 +95,12 @@ export class ChatRegistry {
       return
     }
 
-    const hookSessionId = provider.hookSessionId(payload)
-    if (hookSessionId && context.worktreeId) {
+    const hookChatId = provider.hookChatId(payload)
+    if (hookChatId && context.worktreeId) {
       this.bindTerminalSession(
         providerId,
         context.worktreeId,
-        hookSessionId,
+        hookChatId,
         hookAncestorPids(payload),
       )
     }
@@ -233,29 +233,34 @@ export class ChatRegistry {
   }
 
   /**
-   * Aggregate every provider's historical, on-disk sessions for a worktree,
-   * tagged with their provider and worktree, most-recent first. Per-provider
-   * failures are logged and skipped so one bad store never hides the rest.
+   * Aggregate every provider's historical, on-disk chats for a worktree as
+   * `Chat`s, most-recent first. History is read from disk, so each chat is
+   * marked `dormant`; the live registry's reactive entries (which the renderer
+   * overlays by `(providerId, chatId)`) take precedence when a chat is currently
+   * running. Per-provider failures are logged and skipped so one bad store never
+   * hides the rest.
    */
-  async listSessions(worktree: WorktreeRef): Promise<ChatSession[]> {
+  async listHistory(worktree: WorktreeRef): Promise<Chat[]> {
     const perProvider = await Promise.all(
       [...this.providers.values()].map(async (provider) => {
         try {
-          const sessions = await provider.listSessions(worktree)
-          return sessions.map(
-            (session): ChatSession => ({
-              sessionId: session.sessionId,
-              providerId: provider.id,
-              worktreeId: worktree.worktreeId,
-              title: session.title,
-              description: session.description,
-              updatedAt: session.updatedAt,
-            }),
+          const history = await provider.listHistory(worktree)
+          return history.map(
+            (entry): Chat =>
+              this.withTerminal({
+                chatId: entry.chatId,
+                providerId: provider.id,
+                status: CHAT_STATUS.dormant,
+                worktreeId: worktree.worktreeId,
+                title: entry.title,
+                description: entry.description,
+                updatedAt: entry.updatedAt,
+              }),
           )
         } catch (error) {
           this.log.warn(
             { err: error, provider: provider.id, path: worktree.path },
-            'failed to list chat sessions',
+            'failed to list chat history',
           )
           return []
         }
@@ -272,12 +277,12 @@ export class ChatRegistry {
    * given session when provided, otherwise starting a fresh chat. Returns null
    * for an unknown provider id.
    */
-  getLaunch(providerId: string, sessionId?: string): ChatLaunch | null {
+  getLaunch(providerId: string, chatId?: string): ChatLaunch | null {
     const provider = this.providers.get(providerId)
     if (!provider) {
       return null
     }
-    return sessionId ? provider.resumeLaunch(sessionId) : provider.newLaunch()
+    return chatId ? provider.resumeLaunch(chatId) : provider.newLaunch()
   }
 
   getSnapshot(): ChatSnapshot {

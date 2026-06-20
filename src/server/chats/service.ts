@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   DEFAULT_CHAT_PROVIDER,
+  type Chat,
   type ChatCommand,
-  type ChatSession,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import { type Terminal } from '../../api/server/terminals'
@@ -60,11 +60,11 @@ export class ChatService {
     private readonly log: Logger,
   ) {
     this.registry.setTerminalResolver((providerId, chatId) =>
-      this.terminals.terminalIdForSession(providerId, chatId),
+      this.terminals.terminalIdForChat(providerId, chatId),
     )
     this.registry.setTerminalSessionBinder(
       (providerId, worktreeId, chatId, hookAncestorPids) =>
-        this.terminals.bindSessionToTerminal(
+        this.terminals.bindChatToTerminal(
           providerId,
           worktreeId,
           chatId,
@@ -114,7 +114,7 @@ export class ChatService {
   focusChat(target?: { providerId: string; chatId: string }): void {
     let command: ChatCommand = { type: 'focus' }
     if (target) {
-      const terminalId = this.terminals.terminalIdForSession(
+      const terminalId = this.terminals.terminalIdForChat(
         target.providerId,
         target.chatId,
       )
@@ -139,17 +139,17 @@ export class ChatService {
     this.log.info('chat show emitted')
   }
 
-  /** Historical, on-disk sessions for a worktree, most-recent first. */
-  async listSessions(worktreeId: string): Promise<ChatSession[]> {
+  /** Historical, on-disk chats for a worktree, most-recent first. */
+  async listHistory(worktreeId: string): Promise<Chat[]> {
     const worktree = await this.worktrees.getWorktreeById(worktreeId)
-    return this.registry.listSessions(worktree)
+    return this.registry.listHistory(worktree)
   }
 
-  /** Start a terminal running a new or resumed chat session in the worktree. */
+  /** Start a terminal running a new or resumed chat in the worktree. */
   async createTerminal(options: {
     worktreeId: string
     providerId?: string
-    resumeSessionId?: string
+    resumeChatId?: string
     title?: string
   }): Promise<Terminal> {
     if (this.shuttingDown) {
@@ -157,18 +157,17 @@ export class ChatService {
     }
     const worktree = await this.worktrees.getWorktreeById(options.worktreeId)
     const providerId = options.providerId ?? DEFAULT_CHAT_PROVIDER
-    const launch = this.registry.getLaunch(providerId, options.resumeSessionId)
+    const launch = this.registry.getLaunch(providerId, options.resumeChatId)
     if (!launch) {
       throw new HttpError(400, `Unknown chat provider: ${providerId}`)
     }
-    const sessionId = launch.sessionId ?? options.resumeSessionId
-    if (sessionId) {
+    const chatId = launch.chatId ?? options.resumeChatId
+    if (chatId) {
       const existing = this.terminals
         .list(options.worktreeId)
         .find(
           (terminal) =>
-            terminal.providerId === providerId &&
-            terminal.sessionId === sessionId,
+            terminal.providerId === providerId && terminal.chatId === chatId,
         )
       if (existing) {
         return existing
@@ -181,11 +180,11 @@ export class ChatService {
     return this.terminals.create({
       worktreeId: options.worktreeId,
       providerId,
-      // Prefer the launch's pinned session id (a resumed id, or a fresh one the
+      // Prefer the launch's pinned chat id (a resumed id, or a fresh one the
       // provider named) so the terminal links to its live chat; fall back to the
       // requested resume id.
-      sessionId,
-      resumed: !!options.resumeSessionId,
+      chatId,
+      resumed: !!options.resumeChatId,
       title: options.title,
       cwd: worktree.path,
       command: launch.command,

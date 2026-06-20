@@ -86,20 +86,11 @@ type ChatEvent = {
   snapshot: { chats: Chat[] }
 }
 
-type ChatSession = {
-  sessionId: string
-  providerId: string
-  worktreeId: string
-  title?: string
-  description?: string
-  updatedAt: number
-}
-
 type Terminal = {
   terminalId: string
   worktreeId: string
   providerId: string
-  sessionId?: string
+  chatId?: string
   title?: string
   status: 'running' | 'exited'
 }
@@ -247,7 +238,7 @@ showChat(
 historicalChats({
   worktreeId: string
 }):
-  { sessions: ChatSession[] }
+  { chats: Chat[] }
 
 // GET /chats/commands
 chatCommands():
@@ -285,7 +276,7 @@ terminalEvents():
 createTerminal({
   worktreeId: string
   providerId?: string
-  resumeSessionId?: string
+  resumeChatId?: string
   title?: string
 }):
   Terminal

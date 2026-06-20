@@ -80,7 +80,7 @@ export const CHAT_STREAM_PATH = '/chats/live'
  * (`src/api/server/editor.ts`):
  *   - `POST /showChat` spawns + brings the chat app forward.
  *   - `GET /chats/live` streams live chat status.
- *   - `GET /chats/history` lists a worktree's historical (on-disk) sessions.
+ *   - `GET /chats/history` lists a worktree's historical (on-disk) chats.
  *   - `GET /chats/commands` is the SSE stream the chat process listens to.
  *   - `POST /chats/ready` is a hidden app-internal readiness signal.
  */
@@ -139,17 +139,8 @@ export const ChatHookResponse = z.object({
   ok: z.boolean(),
 })
 
-export const ChatSession = z.object({
-  sessionId: z.string(),
-  providerId: z.string(),
-  worktreeId: z.string(),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  updatedAt: z.number(),
-})
-
 export const ChatHistoryResponse = z.object({
-  sessions: z.array(ChatSession),
+  chats: z.array(Chat),
 })
 
 export const ChatShowRequest = z.union([
@@ -233,6 +224,5 @@ export const ChatCommandSseEvents = defineSseEvents({
 export type Chat = z.infer<typeof Chat>
 export type ChatSnapshot = z.infer<typeof ChatSnapshot>
 export type ChatEvent = z.infer<typeof ChatEvent>
-export type ChatSession = z.infer<typeof ChatSession>
 export type ChatSseEvents = typeof ChatSseEvents
 export type ChatCommandSseEvents = typeof ChatCommandSseEvents
