@@ -97,6 +97,7 @@ export type ChatDetails = {
 export type ChatSessionSummary = {
   sessionId: string
   title?: string
+  description?: string
   /** Epoch milliseconds of the session's last activity (for sorting). */
   updatedAt: number
 }

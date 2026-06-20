@@ -452,6 +452,7 @@ test('lists Codex sessions with large session metadata records', async () => {
     assert.equal(sessions.length, 1)
     assert.equal(sessions[0].sessionId, sessionId)
     assert.equal(sessions[0].title, 'hello from codex history')
+    assert.equal(sessions[0].description, 'hello from codex history')
     assert.equal(sessions[0].updatedAt, (await stat(sessionPath)).mtimeMs)
   } finally {
     if (originalHome === undefined) {

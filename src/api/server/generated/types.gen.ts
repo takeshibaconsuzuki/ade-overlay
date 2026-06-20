@@ -587,6 +587,7 @@ export type HistoricalChatsResponses = {
             providerId: string;
             worktreeId: string;
             title?: string;
+            description?: string;
             updatedAt: number;
         }>;
     };

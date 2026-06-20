@@ -144,6 +144,7 @@ export const ChatSession = z.object({
   providerId: z.string(),
   worktreeId: z.string(),
   title: z.string().optional(),
+  description: z.string().optional(),
   updatedAt: z.number(),
 })
 

@@ -199,6 +199,7 @@ export class ChatRegistry {
               providerId: provider.id,
               worktreeId: worktree.worktreeId,
               title: session.title,
+              description: session.description,
               updatedAt: session.updatedAt,
             }),
           )

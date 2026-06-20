@@ -159,6 +159,7 @@ export class CodexChatProvider implements ChatProvider {
         return {
           sessionId: meta.id,
           title: details.title,
+          description: details.description,
           updatedAt: info.mtimeMs,
         }
       }),

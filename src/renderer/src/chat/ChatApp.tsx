@@ -47,6 +47,7 @@ type ChatSession = {
   providerId: string
   worktreeId: string
   title?: string
+  description?: string
   updatedAt: number
 }
 
@@ -411,6 +412,13 @@ function SessionRow({
             {formatShortAge(session.updatedAt)}
           </Text>
         </HBox>
+        {session.description ? (
+          <HBox minWidth="0">
+            <Text size="1" color="gray" truncate style={{ minWidth: 0 }}>
+              {session.description}
+            </Text>
+          </HBox>
+        ) : null}
         <HBox minWidth="0" justify="start">
           <Badge size="1" variant="soft" radius="full" color="gray">
             {chatProviderLabel(parseChatProviderId(session.providerId))}

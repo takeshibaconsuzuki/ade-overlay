@@ -178,6 +178,7 @@ export class ClaudeChatProvider implements ChatProvider {
             return {
               sessionId: name.slice(0, -'.jsonl'.length),
               title: details.title,
+              description: details.description,
               updatedAt: info.mtimeMs,
             }
           } catch {
