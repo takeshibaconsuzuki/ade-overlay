@@ -138,11 +138,11 @@ export class ClaudeChatProvider implements ChatProvider {
   }
 
   /**
-   * Read the transcript for a title (Claude Code's own conversation summary, or
-   * the first genuine user message) and a description (the latest genuine user
-   * message). This backfills details that live events don't carry — in
-   * particular the description after a restart, when the chat reappears via a
-   * status-only event rather than a fresh `UserPromptSubmit`.
+   * Read the transcript for a title (Claude Code's own AI-generated title, or
+   * the first genuine user message) and a description (the latest assistant text
+   * or prompt, whichever is most recent). This backfills details that live
+   * events don't carry — in particular the description after a restart, when the
+   * chat reappears via a status-only event rather than a fresh `UserPromptSubmit`.
    */
   resolveDetails(payload: Record<string, unknown>): Promise<ChatDetails> {
     return readTranscriptDetails(asString(payload.transcript_path))
@@ -236,9 +236,12 @@ export class ClaudeChatProvider implements ChatProvider {
 
 /**
  * Derive title and description from a Claude Code transcript JSONL file:
- *   - title:       the latest `summary` entry (Claude's own conversation title,
- *                  written on compaction), else the first genuine user message.
- *   - description: the latest genuine user message — what the chat is doing now.
+ *   - title:       Claude Code's own AI-generated title (`ai-title` entry), else
+ *                  the first genuine user message.
+ *   - description: the latest assistant text or genuine user prompt — whichever
+ *                  comes last — describing what the chat is doing now. These
+ *                  entries are appended in conversation order, so the last such
+ *                  text we scan is the most recent.
  * Each field is `undefined` if the file is missing/unreadable or holds nothing
  * usable for it yet.
  */
@@ -256,9 +259,11 @@ async function readTranscriptDetails(
     return {}
   }
 
-  let summary: string | undefined
+  let aiTitle: string | undefined
   let firstUserMessage: string | undefined
-  let lastUserMessage: string | undefined
+  // Overwritten by each genuine user prompt and assistant text in file order,
+  // so it ends on the most recent of the two — what the chat is doing now.
+  let description: string | undefined
   for (const line of contents.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) {
@@ -275,23 +280,54 @@ async function readTranscriptDetails(
       continue
     }
 
-    if (entry.type === 'summary' && typeof entry.summary === 'string') {
-      // Keep scanning; the last summary in the file is the most recent.
-      summary = entry.summary
+    if (entry.type === 'ai-title' && typeof entry.aiTitle === 'string') {
+      // Keep scanning; the last ai-title in the file is the most recent.
+      aiTitle = entry.aiTitle
     } else if (entry.type === 'user') {
       const text = userMessageText(entry)
       if (text) {
         firstUserMessage ??= text
-        // Keep overwriting; the last genuine user message is the most recent.
-        lastUserMessage = text
+        description = text
+      }
+    } else if (entry.type === 'assistant') {
+      const text = assistantMessageText(entry)
+      if (text) {
+        description = text
       }
     }
   }
 
   return {
-    title: firstLine(summary ?? firstUserMessage),
-    description: firstLine(lastUserMessage),
+    title: firstLine(aiTitle ?? firstUserMessage),
+    description: firstLine(description),
   }
+}
+
+/**
+ * Extract the plain-text reply from a transcript `assistant` entry, ignoring
+ * thinking and tool-use blocks that aren't part of the visible answer.
+ */
+function assistantMessageText(
+  entry: Record<string, unknown>,
+): string | undefined {
+  const message = isRecord(entry.message) ? entry.message : undefined
+  const content = message?.content
+
+  let text: string | undefined
+  if (typeof content === 'string') {
+    text = content
+  } else if (Array.isArray(content)) {
+    const parts: string[] = []
+    for (const block of content) {
+      if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text)
+      }
+    }
+    text = parts.join(' ')
+  }
+
+  text = text?.trim()
+  return text ? text : undefined
 }
 
 /**
