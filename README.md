@@ -1,5 +1,11 @@
 # ADE Overlay
 
+## Permissions
+
+Mac:
+
+- Enable notifications in system settings.
+
 ## Controls
 
 The launcher is the small controller window used to jump between ADE views.
