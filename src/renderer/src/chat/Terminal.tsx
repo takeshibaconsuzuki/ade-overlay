@@ -76,14 +76,7 @@ export function Terminal({
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
-      // Effectively unlimited history so output is never trimmed before the
-      // underlying agent runs out of context. This is a memory ceiling, not an
-      // up-front cost: scripts/patch-xterm-scrollback.mjs makes xterm's buffer
-      // grow lazily, so a quiet terminal pays ~nothing and only a genuinely
-      // full 1M-line scrollback approaches the cap. Keep it finite: Infinity
-      // would disable xterm's trim-on-full logic and let the buffer grow without
-      // bound.
-      scrollback: 1_000_000_000,
+      scrollback: 1_000_000,
       theme: { background: '#111113' },
     })
     const fit = new FitAddon()
