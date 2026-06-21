@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "upgrade": "NO_UPDATE_NOTIFIER=1 ncu --peer --removeRange -u && npm install",
     "rebuild:native": "electron-rebuild -f -w node-pty",
-    "postinstall": "node scripts/patch-xterm-scrollback.mjs && install-electron && npm run rebuild:native"
+    "postinstall": "install-electron && npm run rebuild:native"
   },
   "dependencies": {
     "@fastify/cors": "11.2.0",
