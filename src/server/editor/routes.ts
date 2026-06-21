@@ -157,7 +157,9 @@ export function registerEditorRoutes(
       const mainWorktreeId = await registry.resolveMainWorktreeId(
         job.mainWorktreePath,
       )
+      await opener.openWorktree(mainWorktreeId, { focus: false })
       await editor.openFile(mainWorktreeId, job.logPath)
+      editor.focusEditor()
       return { ok: true as const }
     },
   })

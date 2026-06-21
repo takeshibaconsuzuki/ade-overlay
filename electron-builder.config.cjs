@@ -14,6 +14,9 @@ module.exports = {
   afterPack: 'scripts/electron-builder-after-pack.mjs',
   mac: {
     category: 'public.app-category.developer-tools',
+    extendInfo: {
+      NSUserNotificationAlertStyle: 'alert',
+    },
     hardenedRuntime: codesignIdentity === '-' ? false : undefined,
     icon: 'resources/icons/controller.icns',
     identity: codesignIdentity,

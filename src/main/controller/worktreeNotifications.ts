@@ -203,6 +203,7 @@ function handleWorktreeEvent(
       body: event.worktree.path,
       dialogType: 'info',
       log,
+      notificationAction: false,
       title: `Worktree created: ${worktreeName(event.worktree)}`,
       worktreeId: event.worktree.worktreeId,
     })
@@ -243,6 +244,7 @@ function handleWorktreeEvent(
     body: worktree.creationError ?? worktree.path,
     dialogType: 'error',
     log,
+    notificationAction: false,
     title: `Worktree creation failed: ${worktreeName(worktree)}`,
     worktreeId: worktree.worktreeId,
   })
@@ -255,6 +257,7 @@ function showWorktreeNotification({
   body,
   dialogType,
   log,
+  notificationAction = true,
   title,
   worktreeId,
 }: {
@@ -264,6 +267,7 @@ function showWorktreeNotification({
   body: string
   dialogType: MessageBoxOptions['type']
   log: Logger
+  notificationAction?: boolean
   title: string
   worktreeId: string
 }): void {
@@ -286,7 +290,9 @@ function showWorktreeNotification({
       title,
       body,
       groupId: NOTIFICATION_GROUP_ID,
-      actions: [{ type: 'button', text: actionText }],
+      actions: notificationAction
+        ? [{ type: 'button', text: actionText }]
+        : undefined,
     },
     action,
     activeNotifications,

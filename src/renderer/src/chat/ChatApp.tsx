@@ -142,25 +142,28 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
   // Clicking a live chat asks the server to switch to its worktree and focus the
   // chat window. `terminalId` is stamped by the server, so a chat is openable
   // exactly when it is set.
-  const openLiveChat = useCallback(async (chat: Chat): Promise<void> => {
-    if (!chat.terminalId || !chat.worktreeId) {
-      return
-    }
-    selectTerminal(chat.terminalId)
-    const { error } = await showChat({
-      body: {
-        worktreeId: chat.worktreeId,
-        providerId: chat.providerId,
-        chatId: chat.chatId,
-      },
-    })
-    if (error) {
-      logger.error(
-        { err: error, worktreeId: chat.worktreeId },
-        'failed to open live chat',
-      )
-    }
-  }, [selectTerminal])
+  const openLiveChat = useCallback(
+    async (chat: Chat): Promise<void> => {
+      if (!chat.terminalId || !chat.worktreeId) {
+        return
+      }
+      selectTerminal(chat.terminalId)
+      const { error } = await showChat({
+        body: {
+          worktreeId: chat.worktreeId,
+          providerId: chat.providerId,
+          chatId: chat.chatId,
+        },
+      })
+      if (error) {
+        logger.error(
+          { err: error, worktreeId: chat.worktreeId },
+          'failed to open live chat',
+        )
+      }
+    },
+    [selectTerminal],
+  )
 
   const startTerminal = async (body: {
     providerId?: string
