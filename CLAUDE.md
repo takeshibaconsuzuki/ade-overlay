@@ -3,7 +3,21 @@
 ## Commands
 
 - `python3 bootstrap.py`: install or refresh the vendored Node.js runtime.
-- `eval "$(python3 bootstrap.py --print-env)"`: put vendored Node first on `PATH`.
+
+Before running any Node/npm command, put vendored Node first on `PATH`.
+
+Posix:
+
+```sh
+eval "$(python3 bootstrap.py --print-env)"
+```
+
+Windows:
+
+```pwsh
+iex (python3 bootstrap.py --print-env | Out-String)
+```
+
 - `npm install`
 - `npm run dev`: run the Electron/Vite development app.
 - `npm run build`: build production output into `out/`.
