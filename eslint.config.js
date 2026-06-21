@@ -146,6 +146,7 @@ export default tseslint.config(
   },
   {
     files: [
+      'electron-builder.config.cjs',
       'electron.vite.config.ts',
       'openapi-ts.config.ts',
       'scripts/**/*.mjs',

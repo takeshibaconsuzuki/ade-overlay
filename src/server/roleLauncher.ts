@@ -4,7 +4,7 @@ import { type AdeAppRole } from '../api/server/appFocus'
 
 /**
  * Display name of each spawned role's helper `.app` bundle. Must match the
- * bundles built by scripts/package-mac.mjs.
+ * bundles built by Electron Builder's afterPack hook.
  */
 const ROLE_BUNDLE_NAME: Record<AdeAppRole, string> = {
   editor: 'ADE Editor',
