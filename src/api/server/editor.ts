@@ -10,6 +10,8 @@ export const EDITOR_EXTENSION_COMMAND_STREAM_PATH = '/editorExtensionCommands'
 export const EDITOR_SESSION_STREAM_PATH = '/editorSessions'
 export const EDITOR_SHOW_PATH = '/showEditor'
 export const EDITOR_READY_PATH = `${EDITOR_BASE_PATH}/ready`
+export const VSCODE_SERVER_STOP_PATH =
+  '/worktrees/:worktreeId/vscode-server/stop'
 
 export type EditorSwitchCommand = {
   type: 'switch'
@@ -167,6 +169,10 @@ export const OpenCreationLogsResponse = z.object({
   ok: z.literal(true),
 })
 
+export const StopVscodeServerResponse = z.object({
+  ok: z.literal(true),
+})
+
 export { ErrorResponse }
 
 export type EditorCommandAckRequest = z.infer<typeof EditorCommandAckRequest>
@@ -182,6 +188,7 @@ export type EditorExtensionOpenFileCommand = z.infer<
 export type EditorSessionSnapshot = z.infer<typeof EditorSessionSnapshot>
 export type EditorWorktreeRequest = z.infer<typeof EditorWorktreeRequest>
 export type EditorWorktreeResponse = z.infer<typeof EditorWorktreeResponse>
+export type StopVscodeServerResponse = z.infer<typeof StopVscodeServerResponse>
 export type EditorCommandSseEvents = typeof EditorCommandSseEvents
 export type EditorSessionSseEvents = typeof EditorSessionSseEvents
 export type EditorExtensionCommandSseEvents =

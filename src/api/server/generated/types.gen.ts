@@ -532,6 +532,45 @@ export type OpenCreationLogsResponses = {
 
 export type OpenCreationLogsResponse = OpenCreationLogsResponses[keyof OpenCreationLogsResponses];
 
+export type StopVscodeServerData = {
+    body?: never;
+    path: {
+        worktreeId: string;
+    };
+    query?: never;
+    url: '/worktrees/{worktreeId}/vscode-server/stop';
+};
+
+export type StopVscodeServerErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type StopVscodeServerError = StopVscodeServerErrors[keyof StopVscodeServerErrors];
+
+export type StopVscodeServerResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        ok: true;
+    };
+};
+
+export type StopVscodeServerResponse = StopVscodeServerResponses[keyof StopVscodeServerResponses];
+
 export type LiveChatsData = {
     body?: never;
     path?: never;

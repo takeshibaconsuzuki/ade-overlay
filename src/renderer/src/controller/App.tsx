@@ -18,6 +18,7 @@ import {
   openCreationLogs,
   openWorktree,
   removeRepository,
+  stopVscodeServer,
   type CreateWorktreeData,
 } from '../../../api/server/generated'
 import { HBox, VBox } from '../components/Box'
@@ -206,6 +207,21 @@ export function App(): React.JSX.Element {
     [],
   )
 
+  const handleStopVscodeServer = useCallback(
+    async (worktreeId: string): Promise<void> => {
+      setError(null)
+      logger.info({ worktreeId }, 'stopping vscode server')
+      markBusy(worktreeId, true)
+      const { error } = await stopVscodeServer({ path: { worktreeId } })
+      if (error) {
+        logger.error({ worktreeId, err: error }, 'stop vscode server failed')
+        setError(messageOf(error, 'Failed to stop VS Code server'))
+      }
+      markBusy(worktreeId, false)
+    },
+    [markBusy],
+  )
+
   const handleOpenWorktree = useCallback(
     async (worktreeId: string): Promise<void> => {
       setError(null)
@@ -262,6 +278,7 @@ export function App(): React.JSX.Element {
         onRemoveRepository={handleRemoveRepository}
         onOpenCreationLogs={handleOpenCreationLogs}
         onDismissCreationError={handleDismissCreationError}
+        onStopVscodeServer={handleStopVscodeServer}
       />
 
       <CreateWorktreeForm

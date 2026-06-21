@@ -210,6 +210,17 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
     .waitFor()
   const row = page.getByRole('option', { name: /project-feature/ })
   await row.getByRole('button', { name: 'Worktree actions' }).click()
+  await page.getByRole('menuitem', { name: 'Stop VS Code server' }).click()
+
+  await page.waitForFunction(() =>
+    window.__apiCalls.some(
+      (call) =>
+        call.method === 'POST' &&
+        call.path === '/worktrees/bbbbbbbbbbbb/vscode-server/stop',
+    ),
+  )
+
+  await row.getByRole('button', { name: 'Worktree actions' }).click()
   await page
     .getByRole('menuitem', { name: 'Delete worktree', exact: true })
     .click()
@@ -231,6 +242,13 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
   assert.equal(deletes.length, 2)
   assert.equal((deletes[0].body as { force?: boolean }).force, false)
   assert.equal((deletes[1].body as { force?: boolean }).force, true)
+  assert.ok(
+    (await page.evaluate(() => window.__apiCalls)).some(
+      (call) =>
+        call.method === 'POST' &&
+        call.path === '/worktrees/bbbbbbbbbbbb/vscode-server/stop',
+    ),
+  )
 
   await page.close()
 })

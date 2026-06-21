@@ -20,6 +20,7 @@ type WorktreeRowProps = {
   onRemoveRepository: () => void
   onOpenCreationLogs: () => void
   onDismissCreationError: () => void
+  onStopVscodeServer: () => void
 }
 
 export function WorktreeRow({
@@ -31,6 +32,7 @@ export function WorktreeRow({
   onRemoveRepository,
   onOpenCreationLogs,
   onDismissCreationError,
+  onStopVscodeServer,
 }: WorktreeRowProps): React.JSX.Element {
   const isMain = worktree.isMain
   const isFailed = worktree.creationState === 'failed'
@@ -38,6 +40,7 @@ export function WorktreeRow({
   const isBootstrapping = worktree.creationState === 'bootstrapping'
   const isCreationPending = isCreating || isBootstrapping
   const showDestructiveActions = !isCreationPending
+  const canStopVscodeServer = sessionStatus !== 'off'
   const secondary =
     isFailed && worktree.creationError
       ? worktree.creationError
@@ -98,14 +101,23 @@ export function WorktreeRow({
             </IconButton>
           </DropdownMenu.Trigger>
           <DropdownMenu.Content onClick={(event) => event.stopPropagation()}>
+            <DropdownMenu.Item
+              disabled={!canStopVscodeServer}
+              onSelect={() => onStopVscodeServer()}
+            >
+              Stop VS Code server
+            </DropdownMenu.Item>
             {worktree.hasCreationLogs && (
-              <DropdownMenu.Item onSelect={() => onOpenCreationLogs()}>
-                Open creation logs
-              </DropdownMenu.Item>
+              <>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item onSelect={() => onOpenCreationLogs()}>
+                  Open creation logs
+                </DropdownMenu.Item>
+              </>
             )}
             {showDestructiveActions && (
               <>
-                {worktree.hasCreationLogs && <DropdownMenu.Separator />}
+                <DropdownMenu.Separator />
                 {!isMain && (
                   <DropdownMenu.Item onSelect={() => onDelete(false)}>
                     Delete worktree

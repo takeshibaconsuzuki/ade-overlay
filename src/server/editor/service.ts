@@ -464,6 +464,20 @@ export class EditorService {
     this.log.info({ worktreeId }, 'editor worktree closed')
   }
 
+  async stopVscodeServer(worktreeId: string): Promise<void> {
+    await this.registry.getWorktreeById(worktreeId)
+    try {
+      await this.closeWorktreeView(worktreeId)
+    } catch (error) {
+      this.log.warn(
+        { err: error, worktreeId },
+        'failed to close editor view before stopping vscode server',
+      )
+    }
+    await this.stopWorktreeSession(worktreeId)
+    this.log.info({ worktreeId }, 'vscode server stopped')
+  }
+
   private async closeWorktreeView(worktreeId: string): Promise<void> {
     const commandId = randomUUID()
     const ackPromise =
@@ -476,19 +490,16 @@ export class EditorService {
 
   private async stopWorktreeSession(worktreeId: string): Promise<void> {
     const pending = this.pendingSessions.get(worktreeId)
+    let pendingSession: EditorSession | undefined
     if (pending) {
-      void pending
-        .then((session) =>
-          killChildProcessTree(
-            session.process,
-            this.log,
-            `vscode serve-web ${worktreeId}`,
-          ),
-        )
-        .catch(() => undefined)
+      try {
+        pendingSession = await pending
+      } catch {
+        pendingSession = undefined
+      }
     }
 
-    const existing = this.sessions.get(worktreeId)
+    const existing = this.sessions.get(worktreeId) ?? pendingSession
     this.sessions.delete(worktreeId)
     this.setSessionStatus(worktreeId, 'off')
     if (existing) {
