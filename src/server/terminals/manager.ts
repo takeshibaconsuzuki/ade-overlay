@@ -365,9 +365,9 @@ export class TerminalManager {
  * through a login+interactive shell sources the user's profile so those CLIs
  * resolve, exactly as worktree bootstrap commands do. `exec` replaces the shell
  * with the CLI so it becomes the PTY's controlling process — input, resize, and
- * exit all behave as if it were spawned directly. On Windows there is no such
- * `PATH` stripping, so spawn the command directly unless a repository
- * pre-command needs a shell to carry environment changes into the CLI.
+ * exit all behave as if it were spawned directly. On Windows node-pty has no
+ * `shell: true`, so run through profile-loaded PowerShell for the same user
+ * shell initialization model.
  */
 export function resolveChatTerminalSpawn(
   command: string,
@@ -375,13 +375,7 @@ export function resolveChatTerminalSpawn(
   preChatCommand?: string,
 ): { file: string; args: string[] } {
   if (platform() === 'win32') {
-    if (!preChatCommand) {
-      return { file: command, args }
-    }
-    return {
-      file: process.env.ComSpec ?? 'cmd.exe',
-      args: ['/d', '/s', '/c', windowsScript(command, args, preChatCommand)],
-    }
+    return windowsShellTarget(windowsScript(command, args, preChatCommand))
   }
   const shell = getUserLoginShell()
   if (!shell) {
@@ -397,6 +391,25 @@ export function resolveChatTerminalSpawn(
     file: shell,
     args: ['-lic', shellScript(command, args, preChatCommand)],
   }
+}
+
+function windowsShellTarget(script: string): { file: string; args: string[] } {
+  return {
+    file: 'powershell.exe',
+    // Do not pass -NoProfile: profile loading is the Windows equivalent of
+    // macOS `shell -lic`, and is how user aliases/functions/PATH edits appear.
+    args: ['-NoLogo', '-Command', windowsPowerShellScript(script)],
+  }
+}
+
+function windowsPowerShellScript(commandScript: string): string {
+  return `& {
+${commandScript}
+$__ade_success = $?
+$__ade_status = $global:LASTEXITCODE
+if ($null -ne $__ade_status) { exit $__ade_status }
+if (-not $__ade_success) { exit 1 }
+}`
 }
 
 function shellScript(
@@ -419,14 +432,17 @@ exec ${line}`
 function windowsScript(
   command: string,
   args: string[],
-  preChatCommand: string,
+  preChatCommand?: string,
 ): string {
-  const line = [command, ...args].map(windowsShellQuote).join(' ')
-  return `${preChatCommand}\r\nif errorlevel 1 exit /b %errorlevel%\r\n${line}`
+  const line = `$global:LASTEXITCODE = $null\r\n& ${[command, ...args].map(windowsPowerShellQuote).join(' ')}`
+  if (!preChatCommand) {
+    return line
+  }
+  return `${preChatCommand}\r\nif (-not $?) { exit 1 }\r\n${line}`
 }
 
-function windowsShellQuote(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`
+function windowsPowerShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
 }
 
 /**

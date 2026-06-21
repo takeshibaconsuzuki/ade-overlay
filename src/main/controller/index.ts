@@ -1,7 +1,9 @@
 import { app, BrowserWindow, globalShortcut } from 'electron'
 import { logger } from '../../server/logger'
 import { loadRenderer, webPreferences } from '../browser'
+import { hasOpenNativeDialog } from '../ipc'
 import { focusWindowOnCurrentWorkspace } from '../windowFocus'
+import { shouldCloseWorktreesWindowOnBlur } from './worktreesWindowPolicy'
 
 const log = logger.child({ process: 'main' })
 
@@ -145,7 +147,13 @@ export function openWorktreesWindow(): void {
   })
 
   window.on('blur', () => {
-    window.close()
+    if (
+      shouldCloseWorktreesWindowOnBlur({
+        hasOpenNativeDialog: hasOpenNativeDialog(window),
+      })
+    ) {
+      window.close()
+    }
   })
 
   window.on('closed', () => {

@@ -7,3 +7,5 @@
 - Use `show` + `moveTop` + temporary always-on-top for Windows focus.
 - Create worktrees popup hidden, then show via the focus helper.
 - Record server focus intent when emitting `showEditor`/`showChat`.
+- Pin worktrees window while adding repository
+- Execute in user environment

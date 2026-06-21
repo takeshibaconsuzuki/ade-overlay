@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer } from 'node:http'
@@ -19,6 +19,7 @@ import {
   CHAT_STATUS,
 } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import { shouldCloseWorktreesWindowOnBlur } from '../../src/main/controller/worktreesWindowPolicy'
 import {
   ensureHookForwarderWrapper,
   hookForwardCommand,
@@ -328,6 +329,32 @@ exec 'claude' '--resume' 'session'\\''1'`,
   }
 })
 
+test('launches Windows chat commands through PowerShell profile', () => {
+  if (process.platform !== 'win32') {
+    return
+  }
+
+  const target = resolveChatTerminalSpawn('claude', ['--resume', 'session-1'])
+
+  assert.equal(target.file, 'powershell.exe')
+  assert.deepEqual(target.args, [
+    '-NoLogo',
+    '-Command',
+    "& {\n$global:LASTEXITCODE = $null\r\n& 'claude' '--resume' 'session-1'\n$__ade_success = $?\n$__ade_status = $global:LASTEXITCODE\nif ($null -ne $__ade_status) { exit $__ade_status }\nif (-not $__ade_success) { exit 1 }\n}",
+  ])
+})
+
+test('worktrees window stays open while its native picker owns focus', () => {
+  assert.equal(
+    shouldCloseWorktreesWindowOnBlur({ hasOpenNativeDialog: true }),
+    false,
+  )
+  assert.equal(
+    shouldCloseWorktreesWindowOnBlur({ hasOpenNativeDialog: false }),
+    true,
+  )
+})
+
 test('reports terminal identity when a terminal is closed', () => {
   const changes: TerminalManagerChange[] = []
   const manager = new TerminalManager(
@@ -555,10 +582,7 @@ test('hook forward command augments and posts payload using app Node runtime', a
       hook_event_name: 'UserPromptSubmit',
       session_id: 'session-1',
     })
-    await execFileAsync('sh', [
-      '-c',
-      `printf %s ${shellQuote(payload)} | ${command}`,
-    ])
+    await runHookCommand(command, payload)
 
     assert.equal(received?.hook_event_name, 'UserPromptSubmit')
     assert.equal(received?.session_id, 'session-1')
@@ -624,7 +648,9 @@ test('lists Codex sessions with large session metadata records', async () => {
   )
 
   const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
   process.env.HOME = home
+  process.env.USERPROFILE = home
   try {
     const provider = new CodexChatProvider({
       info() {},
@@ -647,6 +673,11 @@ test('lists Codex sessions with large session metadata records', async () => {
       delete process.env.HOME
     } else {
       process.env.HOME = originalHome
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE
+    } else {
+      process.env.USERPROFILE = originalUserProfile
     }
   }
 })
@@ -736,8 +767,22 @@ async function createGitRepository(): Promise<string> {
   return realpath(repoPath)
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`
+async function runHookCommand(command: string, input: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, {
+      shell: true,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`Hook command exited with code ${code ?? 'unknown'}`))
+      }
+    })
+    child.stdin.end(input)
+  })
 }
 
 async function readFirstSseEvent<T>(
