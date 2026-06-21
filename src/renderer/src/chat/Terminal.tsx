@@ -23,10 +23,12 @@ const WS_ORIGIN = SERVER_ORIGIN.replace(/^http/, 'ws')
 export function Terminal({
   terminalId,
   active,
+  focusToken,
   onExit,
 }: {
   terminalId: string
   active: boolean
+  focusToken: number
   /** Called when the underlying PTY exits, so the tab can be closed. */
   onExit?: () => void
 }): React.JSX.Element {
@@ -320,15 +322,19 @@ export function Terminal({
     // never reconnects the socket; it is here only to satisfy exhaustive-deps.
   }, [terminalId, viewerId])
 
-  // When this tab becomes active again, refit after layout settles in case the
-  // window was resized while it was hidden.
+  // When this tab becomes active again or is explicitly selected, refit after
+  // layout settles in case the window was resized while it was hidden, then put
+  // keyboard focus back into xterm.
   useEffect(() => {
     if (!active) {
       return
     }
-    const handle = requestAnimationFrame(() => refitRef.current?.())
+    const handle = requestAnimationFrame(() => {
+      refitRef.current?.()
+      termRef.current?.focus()
+    })
     return () => cancelAnimationFrame(handle)
-  }, [active])
+  }, [active, focusToken])
 
   const dropFiles = useCallback((files: FileList): void => {
     const input = droppedFilePathInput([...files], (file) => {

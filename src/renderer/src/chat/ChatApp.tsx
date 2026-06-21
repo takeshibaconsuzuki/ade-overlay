@@ -71,9 +71,15 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
 
   const [historyChats, setHistoryChats] = useState<Chat[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [focusToken, setFocusToken] = useState(0)
   const [newChatProviderId, setNewChatProviderId] = useState<ChatProviderId>(
     DEFAULT_CHAT_PROVIDER,
   )
+
+  const selectTerminal = useCallback((terminalId: string): void => {
+    setActiveId(terminalId)
+    setFocusToken((current) => current + 1)
+  }, [])
 
   // Historical chats are read from disk, so they load separately from the live
   // stream and only on mount / worktree change; a slow read never delays
@@ -124,14 +130,14 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     }
     const unsubscribe = window.desktop.onChatCommand((command: ChatCommand) => {
       if (command.type === 'focus' && 'terminalId' in command) {
-        setActiveId(command.terminalId)
+        selectTerminal(command.terminalId)
       }
     })
     void window.desktop.chatRendererReady().catch((error: unknown) => {
       logger.error({ err: error }, 'failed to signal chat renderer readiness')
     })
     return unsubscribe
-  }, [])
+  }, [selectTerminal])
 
   // Clicking a live chat asks the server to switch to its worktree and focus the
   // chat window. `terminalId` is stamped by the server, so a chat is openable
@@ -140,7 +146,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
     if (!chat.terminalId || !chat.worktreeId) {
       return
     }
-    setActiveId(chat.terminalId)
+    selectTerminal(chat.terminalId)
     const { error } = await showChat({
       body: {
         worktreeId: chat.worktreeId,
@@ -154,7 +160,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
         'failed to open live chat',
       )
     }
-  }, [])
+  }, [selectTerminal])
 
   const startTerminal = async (body: {
     providerId?: string
@@ -171,7 +177,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
       logger.error({ err: error }, 'failed to start chat terminal')
       return
     }
-    setActiveId(data.terminalId)
+    selectTerminal(data.terminalId)
   }
 
   // Launch a chat with the given provider and remember it as the default for the
@@ -338,7 +344,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                     terminal.terminalId === activeTerminalId ? 'solid' : 'soft'
                   }
                   onClick={() => {
-                    setActiveId(terminal.terminalId)
+                    selectTerminal(terminal.terminalId)
                   }}
                 >
                   {terminalLabel(terminal)}
@@ -375,6 +381,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                     <Terminal
                       terminalId={terminal.terminalId}
                       active={isActive}
+                      focusToken={focusToken}
                       onExit={() => {
                         if (activeTerminalId === terminal.terminalId) {
                           setActiveId(null)
