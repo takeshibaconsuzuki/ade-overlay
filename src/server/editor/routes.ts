@@ -33,6 +33,8 @@ import {
   EditorWorktreeResponse,
   ErrorResponse,
   OpenCreationLogsResponse,
+  StopVscodeServerResponse,
+  VSCODE_SERVER_STOP_PATH,
   type EditorCommand,
   type EditorExtensionOpenFileCommand,
   type EditorSessionStatus,
@@ -156,6 +158,24 @@ export function registerEditorRoutes(
         job.mainWorktreePath,
       )
       await editor.openFile(mainWorktreeId, job.logPath)
+      return { ok: true as const }
+    },
+  })
+
+  routes.route({
+    method: 'POST',
+    url: VSCODE_SERVER_STOP_PATH,
+    schema: {
+      operationId: 'stopVscodeServer',
+      params: WorktreeIdParams,
+      response: {
+        200: StopVscodeServerResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    handler: async (request) => {
+      await editor.stopVscodeServer(request.params.worktreeId)
       return { ok: true as const }
     },
   })
