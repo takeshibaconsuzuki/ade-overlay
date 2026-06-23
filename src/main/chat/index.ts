@@ -42,6 +42,7 @@ export function createWindow(): BrowserWindow {
   window = new BrowserWindow({
     width: 1200,
     height: 800,
+    acceptFirstMouse: true,
     show: false,
     title: 'ADE Chat',
     backgroundColor: WINDOW_BACKGROUND,
