@@ -2,5 +2,5 @@
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque
 - Live-chat focus rewrites app config every time
-- Notify when a chat becomes idle
-- Close worktree creation form on create
+- Update terminal tab text
+- Double clicking on launcher app

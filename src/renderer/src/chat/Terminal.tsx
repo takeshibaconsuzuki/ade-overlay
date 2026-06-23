@@ -1,4 +1,3 @@
-import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -13,6 +12,125 @@ import { droppedFilePathInput, isFileDropItem } from './imageDrop'
 
 // The terminal WebSocket shares the server origin, swapped to the ws scheme.
 const WS_ORIGIN = SERVER_ORIGIN.replace(/^http/, 'ws')
+const MINIMUM_COLS = 2
+const MINIMUM_ROWS = 1
+const COLUMN_FIT_GUARD_PX = 1
+const RENDER_GUARD_COLS = 1
+
+type TerminalFitDimensions = {
+  cols: number
+  renderCols: number
+  rows: number
+}
+
+type XTermRenderService = {
+  clear?: () => void
+  dimensions?: {
+    css?: {
+      cell?: {
+        width?: number
+        height?: number
+      }
+    }
+  }
+}
+
+type XTermWithCore = XTerm & {
+  _core?: {
+    _renderService?: XTermRenderService
+  }
+}
+
+function terminalRenderService(term: XTerm): XTermRenderService | undefined {
+  return (term as XTermWithCore)._core?._renderService
+}
+
+function cssPixels(style: CSSStyleDeclaration, property: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(property))
+  return Number.isFinite(value) ? value : 0
+}
+
+function terminalViewport(term: XTerm): HTMLElement | null {
+  return term.element?.querySelector<HTMLElement>('.xterm-viewport') ?? null
+}
+
+function measuredScrollbarWidth(term: XTerm): number {
+  const viewport = terminalViewport(term)
+  if (!viewport) {
+    return 0
+  }
+  return Math.max(0, viewport.offsetWidth - viewport.clientWidth)
+}
+
+function proposeTerminalDimensions(
+  term: XTerm,
+): TerminalFitDimensions | null {
+  const element = term.element
+  const parent = element?.parentElement
+  if (!element || !parent) {
+    return null
+  }
+
+  const renderDimensions = terminalRenderService(term)?.dimensions
+  const cellWidth = renderDimensions?.css?.cell?.width
+  const cellHeight = renderDimensions?.css?.cell?.height
+  if (
+    !Number.isFinite(cellWidth) ||
+    !Number.isFinite(cellHeight) ||
+    !cellWidth ||
+    !cellHeight
+  ) {
+    return null
+  }
+
+  const parentRect = parent.getBoundingClientRect()
+  if (parentRect.width <= 0 || parentRect.height <= 0) {
+    return null
+  }
+
+  const elementStyle = window.getComputedStyle(element)
+  const horizontalPadding =
+    cssPixels(elementStyle, 'padding-left') +
+    cssPixels(elementStyle, 'padding-right')
+  const verticalPadding =
+    cssPixels(elementStyle, 'padding-top') +
+    cssPixels(elementStyle, 'padding-bottom')
+
+  const availableWidth =
+    parentRect.width -
+    horizontalPadding -
+    measuredScrollbarWidth(term) -
+    COLUMN_FIT_GUARD_PX
+  const availableHeight = parentRect.height - verticalPadding
+  if (availableWidth <= 0 || availableHeight <= 0) {
+    return null
+  }
+
+  const renderCols = Math.max(
+    MINIMUM_COLS + RENDER_GUARD_COLS,
+    Math.floor(availableWidth / cellWidth),
+  )
+  // Keep one xterm-only column at the right edge. The PTY gets `cols`, while
+  // xterm renders `renderCols`, so the logical last cell is not painted flush
+  // against the canvas/scrollbar clipping boundary.
+  return {
+    cols: Math.max(MINIMUM_COLS, renderCols - RENDER_GUARD_COLS),
+    renderCols,
+    rows: Math.max(MINIMUM_ROWS, Math.floor(availableHeight / cellHeight)),
+  }
+}
+
+function fitTerminal(term: XTerm): TerminalFitDimensions | null {
+  const dimensions = proposeTerminalDimensions(term)
+  if (!dimensions) {
+    return null
+  }
+  if (term.cols !== dimensions.renderCols || term.rows !== dimensions.rows) {
+    terminalRenderService(term)?.clear?.()
+    term.resize(dimensions.renderCols, dimensions.rows)
+  }
+  return dimensions
+}
 
 /**
  * A single xterm terminal bound to a server-hosted PTY over a WebSocket. The
@@ -79,8 +197,6 @@ export function Terminal({
       scrollback: 1_000_000,
       theme: { background: '#111113' },
     })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
     term.open(container)
     termRef.current = term
 
@@ -112,10 +228,10 @@ export function Terminal({
     sendInputRef.current = (data) => send({ type: 'input', data })
 
     // Fit + report size only when the terminal is actually measurable. A hidden
-    // or zero-size element makes the fit addon propose a 1-column layout; pushing
-    // that to the PTY would reflow the CLI's UI into a useless single column.
+    // or zero-size element must not be pushed to the PTY, since that would
+    // reflow the CLI's UI into a useless tiny layout.
     const refit = (): void => {
-      const dims = fit.proposeDimensions()
+      const dims = fitTerminal(term)
       if (
         !dims ||
         !Number.isFinite(dims.cols) ||
@@ -125,8 +241,7 @@ export function Terminal({
       ) {
         return
       }
-      fit.fit()
-      send({ type: 'resize', cols: term.cols, rows: term.rows })
+      send({ type: 'resize', cols: dims.cols, rows: dims.rows })
     }
     refitRef.current = refit
 

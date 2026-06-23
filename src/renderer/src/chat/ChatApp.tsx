@@ -289,6 +289,9 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                   className={styles.liveChats}
                   onSelect={(chat) => void openLiveChat(chat)}
                   isChatDisabled={(chat) => !chat.terminalId}
+                  isChatCurrent={(chat) =>
+                    !!chat.terminalId && chat.terminalId === activeTerminalId
+                  }
                   resolveWorktreeName={resolveWorktreeName}
                 />
               </VBox>
@@ -339,20 +342,34 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                 overflowX: 'auto',
               }}
             >
-              {worktreeTerminals.map((terminal) => (
-                <Button
-                  key={terminal.terminalId}
-                  size="1"
-                  variant={
-                    terminal.terminalId === activeTerminalId ? 'solid' : 'soft'
-                  }
-                  onClick={() => {
-                    selectTerminal(terminal.terminalId)
-                  }}
-                >
-                  {terminalLabel(terminal)}
-                </Button>
-              ))}
+              {worktreeTerminals.map((terminal) => {
+                const label = terminalLabel(terminal)
+                return (
+                  <Button
+                    key={terminal.terminalId}
+                    size="1"
+                    variant={
+                      terminal.terminalId === activeTerminalId
+                        ? 'solid'
+                        : 'soft'
+                    }
+                    title={label}
+                    className={styles.terminalTab}
+                    onClick={() => {
+                      selectTerminal(terminal.terminalId)
+                    }}
+                  >
+                    <Text
+                      as="span"
+                      size="1"
+                      truncate
+                      className={styles.terminalTabLabel}
+                    >
+                      {label}
+                    </Text>
+                  </Button>
+                )
+              })}
             </HBox>
           )}
           <Box position="relative" flexGrow="1" minHeight="0" p="2">

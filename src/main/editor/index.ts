@@ -27,6 +27,7 @@ export function createWindow(): BrowserWindow {
   window = new BrowserWindow({
     width: 1280,
     height: 900,
+    acceptFirstMouse: true,
     show: false,
     title: 'ADE Editor',
     backgroundColor: '#111113',

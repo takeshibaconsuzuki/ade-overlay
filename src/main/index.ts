@@ -7,6 +7,7 @@ import {
   registerChatIpcHandlers,
 } from './chat'
 import { createWindow as createControllerWindow } from './controller'
+import { registerChatIdleNotifications } from './controller/chatNotifications'
 import { registerControllerIpcHandlers } from './controller/ipc'
 import { registerWorktreeCreationNotifications } from './controller/worktreeNotifications'
 import { setRoleDockIcon } from './dockIcon'
@@ -16,6 +17,7 @@ import { registerMainIpcHandlers } from './ipc'
 const log = logger.child({ process: 'main' })
 const cliOptions = parseAppCliOptions(process.argv)
 let server: Awaited<ReturnType<typeof startServer>> | null = null
+let stopChatIdleNotifications: (() => void) | null = null
 let stopWorktreeCreationNotifications: (() => void) | null = null
 let quitInProgress = false
 let shutdownComplete = false
@@ -88,6 +90,7 @@ async function main(): Promise<void> {
       server = await startServer()
       await app.whenReady()
       setRoleDockIcon('controller')
+      stopChatIdleNotifications = registerChatIdleNotifications(log)
       stopWorktreeCreationNotifications =
         registerWorktreeCreationNotifications(log)
       registerMainIpcHandlers()
@@ -105,6 +108,8 @@ async function shutdown(): Promise<void> {
 
   stopWorktreeCreationNotifications?.()
   stopWorktreeCreationNotifications = null
+  stopChatIdleNotifications?.()
+  stopChatIdleNotifications = null
 
   const serverToClose = server
   server = null
