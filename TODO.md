@@ -2,5 +2,5 @@
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque
 - Live-chat focus rewrites app config every time
-- Fix cut off text at right edge of terminal
 - Update terminal tab text
+- Double clicking on launcher app
