@@ -30,6 +30,7 @@ export function LiveChats({
   className,
   onSelect,
   isChatDisabled,
+  isChatCurrent,
   resolveWorktreeName,
   emptyLabel,
 }: {
@@ -40,6 +41,8 @@ export function LiveChats({
   onSelect?: (chat: Chat) => void
   /** Disables a row's button, e.g. when the chat has no attachable terminal. */
   isChatDisabled?: (chat: Chat) => boolean
+  /** Marks the row that corresponds to the currently selected chat terminal. */
+  isChatCurrent?: (chat: Chat) => boolean
   /** Resolves a chat's worktree id to a display name, shown as a row badge. */
   resolveWorktreeName?: (worktreeId: string | undefined) => string | undefined
   /** Message shown inside the card when there are no live chats. */
@@ -68,6 +71,7 @@ export function LiveChats({
                 chat={chat}
                 onSelect={onSelect}
                 disabled={isChatDisabled?.(chat) ?? false}
+                current={isChatCurrent?.(chat) ?? false}
                 worktreeName={resolveWorktreeName?.(chat.worktreeId)}
               />
             ))}
@@ -82,11 +86,13 @@ function ChatRow({
   chat,
   onSelect,
   disabled,
+  current,
   worktreeName,
 }: {
   chat: Chat
   onSelect?: (chat: Chat) => void
   disabled: boolean
+  current: boolean
   worktreeName?: string
 }): React.JSX.Element {
   const secondary = chat.description || undefined
@@ -96,6 +102,8 @@ function ChatRow({
       type="button"
       className={styles.row}
       disabled={disabled}
+      aria-current={current ? 'true' : undefined}
+      data-active={current ? 'true' : undefined}
       onClick={onSelect ? () => onSelect(chat) : undefined}
     >
       <Grid

@@ -26,10 +26,17 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .row:hover:not(:disabled) {
   background-color: var(--gray-a3);
+}
+
+.row[data-active='true'] {
+  box-shadow: inset 3px 0 0 var(--accent-9);
 }
 
 .row:disabled {

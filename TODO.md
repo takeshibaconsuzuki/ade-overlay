@@ -5,4 +5,3 @@
 - Notify when a chat becomes idle
 - Close worktree creation form on create
 - Fix cut off text at right edge of terminal
-- Highlight current chat

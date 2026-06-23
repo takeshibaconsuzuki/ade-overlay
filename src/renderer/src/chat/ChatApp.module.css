@@ -33,3 +33,13 @@
   flex-grow: 1;
   min-height: 0;
 }
+
+.terminalTab {
+  max-width: min(220px, 40vw);
+  min-width: 0;
+}
+
+.terminalTabLabel {
+  max-width: 100%;
+  min-width: 0;
+}
