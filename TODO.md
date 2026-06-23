@@ -2,5 +2,6 @@
 - Historical chat refresh frequency
 - Make worktree name and chat status more opaque
 - Live-chat focus rewrites app config every time
-- Notify when a chat becomes idle
 - Fix cut off text at right edge of terminal
+- Single click focus on editor (currently have to double click to focus file, terminal, etc)
+- Update terminal tab text
