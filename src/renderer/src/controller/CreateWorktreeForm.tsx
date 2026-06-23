@@ -163,6 +163,7 @@ export function CreateWorktreeForm({
     if (!canSubmit) {
       return
     }
+    setOpen(false)
     const created = await onCreate({
       mainWorktreePath: selectedRepository,
       baseBranch: baseBranch.trim(),
