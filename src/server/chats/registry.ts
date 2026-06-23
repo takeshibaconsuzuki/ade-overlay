@@ -7,7 +7,7 @@ import {
   type ChatSnapshot,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
-import { hookAncestorPids } from './hookForwarder'
+import { hookAncestorPids, hookCwd } from './hookForwarder'
 import {
   type ChatHookContext,
   type ChatLaunch,
@@ -43,10 +43,11 @@ export class ChatRegistry {
   ) => string | undefined = () => undefined
   private bindTerminalSession: (
     providerId: string,
-    worktreeId: string,
+    worktreeId: string | undefined,
     chatId: string,
     hookAncestorPids?: number[],
-  ) => string | undefined = () => undefined
+    hookCwd?: string,
+  ) => Promise<string | undefined> | string | undefined = () => undefined
 
   constructor(
     private readonly log: Logger,
@@ -84,28 +85,35 @@ export class ChatRegistry {
    * description are read from the transcript once, lazily, the first time a
    * chat appears (see {@link scheduleDetails}).
    */
-  applyHook(
+  async applyHook(
     providerId: string,
     payload: Record<string, unknown>,
     context: ChatHookContext = {},
-  ): void {
+  ): Promise<void> {
     const provider = this.providers.get(providerId)
     if (!provider) {
       this.log.warn({ providerId }, 'hook for unknown chat provider')
       return
     }
 
+    const cwd = hookCwd(payload)
     const hookChatId = provider.hookChatId(payload)
-    if (hookChatId && context.worktreeId) {
-      this.bindTerminalSession(
-        providerId,
-        context.worktreeId,
-        hookChatId,
-        hookAncestorPids(payload),
-      )
+    const resolvedWorktreeId = hookChatId
+      ? await this.bindTerminalSession(
+          providerId,
+          context.worktreeId,
+          hookChatId,
+          hookAncestorPids(payload),
+          cwd,
+        )
+      : context.worktreeId
+
+    const resolvedContext = {
+      ...context,
+      worktreeId: resolvedWorktreeId ?? context.worktreeId,
     }
 
-    const update = provider.mapHook(payload, context)
+    const update = provider.mapHook(payload, resolvedContext)
     if (!update) {
       return
     }
@@ -341,10 +349,11 @@ export class ChatRegistry {
   setTerminalSessionBinder(
     bind: (
       providerId: string,
-      worktreeId: string,
+      worktreeId: string | undefined,
       chatId: string,
       hookAncestorPids?: number[],
-    ) => string | undefined,
+      hookCwd?: string,
+    ) => Promise<string | undefined> | string | undefined,
   ): void {
     this.bindTerminalSession = bind
   }

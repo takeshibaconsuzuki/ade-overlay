@@ -129,10 +129,6 @@ export const ChatHookParams = z.object({
   providerId: z.string().min(1),
 })
 
-export const ChatHookQuery = z.object({
-  worktreeId: z.string().optional(),
-})
-
 export const ChatHookPayload = z.looseObject({})
 
 export const ChatHookResponse = z.object({

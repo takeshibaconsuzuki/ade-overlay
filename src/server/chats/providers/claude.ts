@@ -22,6 +22,11 @@ import {
   hookForwardCommand,
 } from '../hookForwarder'
 import {
+  readJsonRecordFile,
+  removeManagedHookGroups,
+  upsertManagedHookGroups,
+} from './hookConfig'
+import {
   type ChatDetails,
   type ChatHookContext,
   type ChatLaunch,
@@ -90,44 +95,53 @@ export class ClaudeChatProvider implements ChatProvider {
   constructor(private readonly log: Logger) {}
 
   async configureWorktree(worktree: WorktreeRef): Promise<void> {
-    // `settings.local.json` is the machine-local, git-ignored settings file
-    // Claude Code merges at runtime — writing here keeps the worktree's tracked
-    // `settings.json` untouched.
-    const settingsPath = join(worktree.path, '.claude', 'settings.local.json')
-
-    let settings: Record<string, unknown> = {}
-    try {
-      settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<
-        string,
-        unknown
-      >
-    } catch {
-      // No (or unreadable) existing settings — start from an empty object.
-    }
-
     const hookEndpoint = new URL(`${SERVER_ORIGIN}${this.marker}`)
     const wrapperPath = await ensureHookForwarderWrapper(
       this.id,
       hookEndpoint.toString(),
     )
-    const hooks = isRecord(settings.hooks) ? { ...settings.hooks } : {}
-    for (const event of HOOK_EVENTS) {
-      const existing = Array.isArray(hooks[event])
-        ? (hooks[event] as unknown[])
-        : []
-      // Drop any prior group we added, then append a fresh one. This preserves
-      // the user's own hooks while keeping ours idempotent.
-      const preserved = existing.filter((group) => !this.isManagedGroup(group))
-      hooks[event] = [
-        ...preserved,
-        { hooks: [this.hook(worktree.worktreeId, wrapperPath)] },
-      ]
-    }
+    await this.configureUserHooks(wrapperPath)
+    await this.clearProjectHooks(worktree.path)
+  }
+
+  private async configureUserHooks(wrapperPath: string): Promise<void> {
+    const settingsPath = join(homedir(), '.claude', 'settings.json')
+    const settings = (await readJsonRecordFile(settingsPath)) ?? {}
+    const hooks = upsertManagedHookGroups(
+      settings.hooks,
+      HOOK_EVENTS,
+      () => this.hook(wrapperPath),
+      (group) => this.isManagedGroup(group),
+    )
 
     const next = { ...settings, hooks }
     await mkdir(dirname(settingsPath), { recursive: true })
     await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
-    this.log.info({ settingsPath }, 'configured claude chat hooks')
+    this.log.info({ settingsPath }, 'configured claude user chat hooks')
+  }
+
+  private async clearProjectHooks(worktreePath: string): Promise<void> {
+    const settingsPath = join(worktreePath, '.claude', 'settings.local.json')
+    const settings = await readJsonRecordFile(settingsPath)
+    if (!settings) {
+      return
+    }
+
+    const result = removeManagedHookGroups(settings.hooks, (group) =>
+      this.isManagedGroup(group),
+    )
+    if (!result.changed) {
+      return
+    }
+
+    const next = { ...settings }
+    if (Object.keys(result.hooks).length > 0) {
+      next.hooks = result.hooks
+    } else {
+      delete next.hooks
+    }
+    await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+    this.log.info({ settingsPath }, 'cleared claude project chat hooks')
   }
 
   mapHook(
@@ -151,7 +165,6 @@ export class ClaudeChatProvider implements ChatProvider {
       // No payload carries the assistant's text, so the description is always
       // read from the transcript (see resolveDescription) rather than the event.
       refreshDescription: HOOK_REFRESH_DESCRIPTION.has(eventName),
-      // Authoritative worktree identity from the hook URL we configured.
       worktreeId: context.worktreeId,
     }
   }
@@ -233,19 +246,14 @@ export class ClaudeChatProvider implements ChatProvider {
   }
 
   /**
-   * A Claude Code command hook using the same managed forwarder as Codex. The
-   * worktree id is carried as a query param so we can attribute the call without
-   * trusting the payload's reported cwd.
+   * A Claude Code command hook using the same managed forwarder as Codex.
    */
-  private hook(
-    worktreeId: string,
-    wrapperPath: string,
-  ): {
+  private hook(wrapperPath: string): {
     type: 'command'
     command: string
     timeout: number
   } {
-    return hookForwardCommand(wrapperPath, worktreeId)
+    return hookForwardCommand(wrapperPath)
   }
 
   private isManagedGroup(group: unknown): boolean {
