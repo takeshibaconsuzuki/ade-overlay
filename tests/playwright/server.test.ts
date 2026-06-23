@@ -1,7 +1,15 @@
 import { strict as assert } from 'node:assert'
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -23,6 +31,7 @@ import {
   ensureHookForwarderWrapper,
   hookForwardCommand,
 } from '../../src/server/chats/hookForwarder'
+import { ClaudeChatProvider } from '../../src/server/chats/providers/claude'
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
 import { ChatRegistry } from '../../src/server/chats/registry'
 import { ChatService } from '../../src/server/chats/service'
@@ -162,16 +171,13 @@ test('reloads tracked repositories when config.json changes', async () => {
 })
 
 test('maps provider hooks into live chat snapshots', async () => {
-  const hook = await api.post(
-    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
-    {
-      data: {
-        hook_event_name: 'UserPromptSubmit',
-        session_id: 'session-1',
-        prompt: 'Investigate failing test\nwith details',
-      },
+  const hook = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
+    data: {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'session-1',
+      prompt: 'Investigate failing test\nwith details',
     },
-  )
+  })
   assert.equal(hook.status(), 200)
   assert.deepEqual(await hook.json(), { ok: true })
 
@@ -181,7 +187,6 @@ test('maps provider hooks into live chat snapshots', async () => {
       providerId: string
       status: string
       description?: string
-      worktreeId?: string
       updatedAt: number
     }>
   }>('/chats/live')
@@ -193,22 +198,42 @@ test('maps provider hooks into live chat snapshots', async () => {
       chatId: 'session-1',
       providerId: 'claude',
       status: 'busy',
-      worktreeId: 'bbbbbbbbbbbb',
       updatedAt: snapshot.data.chats[0].updatedAt,
     },
   ])
 })
 
-test('does not surface a live chat from session start alone', async () => {
-  const hook = await api.post(
-    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
-    {
-      data: {
-        hook_event_name: 'SessionStart',
-        session_id: 'session-start-only',
-      },
+test('maps no-query hooks using the resolved hook cwd worktree', async () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  let forwardedCwd: string | undefined
+  registry.setTerminalSessionBinder(
+    (_providerId, _worktreeId, _chatId, _hookAncestorPids, hookCwd) => {
+      forwardedCwd = hookCwd
+      return 'worktree-from-cwd'
     },
   )
+
+  await registry.applyHook('codex', {
+    hook_event_name: 'UserPromptSubmit',
+    session_id: 'session-1',
+    prompt: 'hello',
+    _ade_overlay: {
+      hook_cwd: '/repo/worktrees/feature',
+    },
+  })
+
+  assert.equal(forwardedCwd, '/repo/worktrees/feature')
+  assert.equal(registry.getSnapshot().chats[0].worktreeId, 'worktree-from-cwd')
+})
+
+test('does not surface a live chat from session start alone', async () => {
+  const hook = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
+    data: {
+      hook_event_name: 'SessionStart',
+      session_id: 'session-start-only',
+    },
+  })
   assert.equal(hook.status(), 200)
   assert.deepEqual(await hook.json(), { ok: true })
 
@@ -224,27 +249,21 @@ test('does not surface a live chat from session start alone', async () => {
 })
 
 test('does not create a dormant chat from session end alone', async () => {
-  const start = await api.post(
-    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
-    {
-      data: {
-        hook_event_name: 'SessionStart',
-        session_id: 'session-start-end-only',
-      },
+  const start = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
+    data: {
+      hook_event_name: 'SessionStart',
+      session_id: 'session-start-end-only',
     },
-  )
+  })
   assert.equal(start.status(), 200)
   assert.deepEqual(await start.json(), { ok: true })
 
-  const end = await api.post(
-    `${CHAT_HOOKS_PATH}/claude?worktreeId=bbbbbbbbbbbb`,
-    {
-      data: {
-        hook_event_name: 'SessionEnd',
-        session_id: 'session-start-end-only',
-      },
+  const end = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
+    data: {
+      hook_event_name: 'SessionEnd',
+      session_id: 'session-start-end-only',
     },
-  )
+  })
   assert.equal(end.status(), 200)
   assert.deepEqual(await end.json(), { ok: true })
 
@@ -282,10 +301,12 @@ test('finds a terminal by hook process ancestry', () => {
     pty: { pid: 202 },
   })
 
-  assert.equal(
-    manager.terminalIdForHookProcess('worktree-1', [303, 202, 1]),
-    'terminal-2',
-  )
+  assert.deepEqual(manager.terminalForHookProcess([303, 202, 1]), {
+    terminalId: 'terminal-2',
+    worktreeId: 'worktree-1',
+    title: undefined,
+    status: 'running',
+  })
 })
 
 test('wraps chat launch with preChatCommand in the same shell', () => {
@@ -359,14 +380,19 @@ test('reports terminal identity when a terminal is closed', () => {
   ])
 })
 
-test('chat service owns chat-to-terminal binding', () => {
+test('chat service owns chat-to-terminal binding', async () => {
   const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
   const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
   const terminalEvents = new EventEmitter()
   const terminals = {
     events: terminalEvents,
-    terminalIdForHookProcess() {
-      return 'terminal-1'
+    terminalForHookProcess() {
+      return {
+        terminalId: 'terminal-1',
+        worktreeId: 'worktree-1',
+        title: 'New codex chat',
+        status: 'running',
+      }
     },
     list() {
       return [
@@ -398,21 +424,21 @@ test('chat service owns chat-to-terminal binding', () => {
   })
 
   assert.equal(
-    (
+    await (
       service as unknown as {
         bindChatToTerminal: (
           providerId: string,
-          worktreeId: string,
+          worktreeId: string | undefined,
           chatId: string,
           hookAncestorPids?: number[],
-        ) => string | undefined
+        ) => Promise<string | undefined>
         terminalIdForChat: (
           providerId: string,
           chatId: string,
         ) => string | undefined
       }
-    ).bindChatToTerminal('codex', 'worktree-1', 'session-1', [101]),
-    'terminal-1',
+    ).bindChatToTerminal('codex', undefined, 'session-1', [101]),
+    'worktree-1',
   )
   assert.equal(
     (
@@ -428,15 +454,69 @@ test('chat service owns chat-to-terminal binding', () => {
   assert.equal(registry.getSnapshot().chats.length, 0)
 })
 
-test('marks live chat dormant when its owned terminal ends', () => {
+test('chat service resolves a hook cwd to a worktree', async () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+  const terminals = {
+    events: new EventEmitter(),
+    terminalForHookProcess() {
+      return undefined
+    },
+    list() {
+      return []
+    },
+  }
+  let requestedPath: string | undefined
+  const service = new ChatService(
+    registry,
+    {
+      events: new EventEmitter(),
+      findWorktreeByPath(path: string) {
+        requestedPath = path
+        return { worktreeId: 'worktree-from-cwd' }
+      },
+    } as never,
+    terminals as never,
+    logger,
+  )
+
+  assert.equal(
+    await (
+      service as unknown as {
+        bindChatToTerminal: (
+          providerId: string,
+          worktreeId: string | undefined,
+          chatId: string,
+          hookAncestorPids?: number[],
+          hookCwd?: string,
+        ) => Promise<string | undefined>
+      }
+    ).bindChatToTerminal(
+      'codex',
+      undefined,
+      'session-1',
+      undefined,
+      '/repo/worktrees/feature/subdir',
+    ),
+    'worktree-from-cwd',
+  )
+  assert.equal(requestedPath, '/repo/worktrees/feature/subdir')
+})
+
+test('marks live chat dormant when its owned terminal ends', async () => {
   const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
   const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
   let terminalRunning = true
   const terminalEvents = new EventEmitter()
   const terminals = {
     events: terminalEvents,
-    terminalIdForHookProcess() {
-      return 'terminal-1'
+    terminalForHookProcess() {
+      return {
+        terminalId: 'terminal-1',
+        worktreeId: 'worktree-1',
+        title: 'New codex chat',
+        status: 'running',
+      }
     },
     list() {
       return terminalRunning
@@ -469,14 +549,17 @@ test('marks live chat dormant when its owned terminal ends', () => {
     worktreeId: 'worktree-1',
   })
 
-  registry.applyHook(
+  await registry.applyHook(
     'codex',
     {
       hook_event_name: 'UserPromptSubmit',
       session_id: 'session-1',
       prompt: 'hello',
+      _ade_overlay: {
+        hook_ancestor_pids: [101],
+      },
     },
-    { worktreeId: 'worktree-1' },
+    {},
   )
   assert.equal(registry.getSnapshot().chats[0].status, CHAT_STATUS.busy)
   assert.equal(registry.getSnapshot().chats[0].terminalId, 'terminal-1')
@@ -511,6 +594,177 @@ test('marks live chat dormant when its owned terminal ends', () => {
   assert.equal(dormantEvent?.snapshot.chats[0].terminalId, undefined)
 })
 
+test('configures Codex user hooks and clears managed project hooks', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const userHooksPath = join(home, '.codex', 'hooks.json')
+  const projectHooksPath = join(worktreePath, '.codex', 'hooks.json')
+  await mkdir(dirname(userHooksPath), { recursive: true })
+  await mkdir(dirname(projectHooksPath), { recursive: true })
+  await writeFile(
+    userHooksPath,
+    `${JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: 'echo user' }] },
+        ],
+      },
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    projectHooksPath,
+    `${JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command:
+                  '/tmp/ade-overlay-chat-hook-codex.sh stale-worktree-id',
+              },
+            ],
+          },
+          { hooks: [{ type: 'command', command: 'echo project' }] },
+        ],
+        Stop: [
+          {
+            hooks: [
+              {
+                type: 'http',
+                url: 'http://127.0.0.1:0/chats/hooks/codex?worktreeId=old',
+              },
+            ],
+          },
+        ],
+      },
+    })}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    await new CodexChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never).configureWorktree({
+      worktreeId: 'worktree-1',
+      path: worktreePath,
+    })
+  } finally {
+    restoreHome(originalHome)
+  }
+
+  const userConfig = JSON.parse(
+    await readFile(userHooksPath, 'utf8'),
+  ) as Record<string, { UserPromptSubmit: Array<{ hooks: unknown[] }> }>
+  const promptHooks = userConfig.hooks.UserPromptSubmit
+  assert.equal(promptHooks.length, 2)
+  assert.deepEqual(promptHooks[0], {
+    hooks: [{ type: 'command', command: 'echo user' }],
+  })
+  const managedCommand = (promptHooks[1].hooks[0] as { command?: string })
+    .command
+  assert.ok(managedCommand?.includes('ade-overlay-chat-hook-codex'))
+  assert.ok(!managedCommand?.includes('worktree-1'))
+
+  const projectConfig = JSON.parse(
+    await readFile(projectHooksPath, 'utf8'),
+  ) as Record<string, { UserPromptSubmit?: unknown[]; Stop?: unknown[] }>
+  assert.deepEqual(projectConfig.hooks.UserPromptSubmit, [
+    { hooks: [{ type: 'command', command: 'echo project' }] },
+  ])
+  assert.equal(projectConfig.hooks.Stop, undefined)
+})
+
+test('configures Claude user hooks and clears managed project hooks', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const userSettingsPath = join(home, '.claude', 'settings.json')
+  const projectSettingsPath = join(
+    worktreePath,
+    '.claude',
+    'settings.local.json',
+  )
+  await mkdir(dirname(userSettingsPath), { recursive: true })
+  await mkdir(dirname(projectSettingsPath), { recursive: true })
+  await writeFile(
+    userSettingsPath,
+    `${JSON.stringify({
+      theme: 'dark',
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'echo user' }] }],
+      },
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    projectSettingsPath,
+    `${JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command:
+                  '/tmp/ade-overlay-chat-hook-claude.sh stale-worktree-id',
+              },
+            ],
+          },
+          { hooks: [{ type: 'command', command: 'echo project' }] },
+        ],
+      },
+    })}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    await new ClaudeChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never).configureWorktree({
+      worktreeId: 'worktree-1',
+      path: worktreePath,
+    })
+  } finally {
+    restoreHome(originalHome)
+  }
+
+  const userSettings = JSON.parse(
+    await readFile(userSettingsPath, 'utf8'),
+  ) as Record<string, unknown>
+  assert.equal(userSettings.theme, 'dark')
+  const userHooks = userSettings.hooks as {
+    Stop: Array<{ hooks: Array<{ command?: string }> }>
+  }
+  assert.equal(userHooks.Stop.length, 2)
+  assert.deepEqual(userHooks.Stop[0], {
+    hooks: [{ type: 'command', command: 'echo user' }],
+  })
+  assert.ok(
+    userHooks.Stop[1].hooks[0].command?.includes(
+      'ade-overlay-chat-hook-claude',
+    ),
+  )
+  assert.ok(!userHooks.Stop[1].hooks[0].command?.includes('worktree-1'))
+
+  const projectSettings = JSON.parse(
+    await readFile(projectSettingsPath, 'utf8'),
+  ) as Record<string, { Stop?: unknown[] }>
+  assert.deepEqual(projectSettings.hooks.Stop, [
+    { hooks: [{ type: 'command', command: 'echo project' }] },
+  ])
+})
+
 test('hook forward command augments and posts payload using app Node runtime', async () => {
   let received: Record<string, unknown> | undefined
   let receivedUrl: string | undefined
@@ -543,7 +797,7 @@ test('hook forward command augments and posts payload using app Node runtime', a
       'test',
       `http://127.0.0.1:${address.port}/hook`,
     )
-    const { command } = hookForwardCommand(wrapperPath, 'worktree-1')
+    const { command } = hookForwardCommand(wrapperPath)
     assert.ok(!command.includes(' -e '))
     assert.ok(command.includes(wrapperPath))
     assert.ok(!command.includes(`127.0.0.1:${address.port}`))
@@ -558,12 +812,13 @@ test('hook forward command augments and posts payload using app Node runtime', a
 
     assert.equal(received?.hook_event_name, 'UserPromptSubmit')
     assert.equal(received?.session_id, 'session-1')
-    assert.equal(receivedUrl, '/hook?worktreeId=worktree-1')
+    assert.equal(receivedUrl, '/hook')
     const metadata = received?._ade_overlay as
       | Record<string, unknown>
       | undefined
     assert.equal(typeof metadata?.hook_pid, 'number')
     assert.equal(typeof metadata?.hook_ppid, 'number')
+    assert.equal(typeof metadata?.hook_cwd, 'string')
     assert.ok(Array.isArray(metadata?.hook_ancestor_pids))
     assert.ok(metadata.hook_ancestor_pids.length > 0)
   } finally {
@@ -734,6 +989,14 @@ async function createGitRepository(): Promise<string> {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+function restoreHome(originalHome: string | undefined): void {
+  if (originalHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = originalHome
+  }
 }
 
 async function readFirstSseEvent<T>(

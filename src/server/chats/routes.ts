@@ -17,7 +17,6 @@ import {
   ChatHistoryResponse,
   ChatHookParams,
   ChatHookPayload,
-  ChatHookQuery,
   ChatHookResponse,
   ChatReadyRequest,
   ChatReadyResponse,
@@ -50,7 +49,6 @@ export function registerChatRoutes(
     schema: {
       hide: true,
       params: ChatHookParams,
-      querystring: ChatHookQuery,
       body: ChatHookPayload,
       response: {
         200: ChatHookResponse,
@@ -66,14 +64,11 @@ export function registerChatRoutes(
         {
           providerId: request.params.providerId,
           event: body.hook_event_name,
-          worktreeId: request.query.worktreeId,
           hookMetadata: body._ade_overlay,
         },
         'chat hook received',
       )
-      registry.applyHook(request.params.providerId, body, {
-        worktreeId: request.query.worktreeId,
-      })
+      await registry.applyHook(request.params.providerId, body)
       return { ok: true as const }
     },
   })

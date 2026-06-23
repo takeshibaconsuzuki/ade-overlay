@@ -10,8 +10,9 @@ const WINDOWS_WRAPPER_TEMPLATE = new URL('./hook-wrapper.cmd', import.meta.url)
 
 /**
  * Shared managed hook command for chat providers. The configured provider hook
- * runs a small platform wrapper with only the worktree id as an argument. That
- * wrapper invokes this shared Node script with the provider endpoint baked in.
+ * runs a small platform wrapper. The wrapper invokes this shared Node script
+ * with the provider endpoint baked in, and the forwarder stamps runtime process
+ * metadata (including cwd) onto the hook payload.
  */
 export async function ensureHookForwarderWrapper(
   providerId: string,
@@ -52,20 +53,17 @@ export async function ensureHookForwarderWrapper(
   return wrapperPath
 }
 
-export function hookForwardCommand(
-  wrapperPath: string,
-  worktreeId: string,
-): {
+export function hookForwardCommand(wrapperPath: string): {
   type: 'command'
   command: string
   timeout: number
 } {
+  const command =
+    platform() === 'win32' ? cmdQuote(wrapperPath) : shellQuote(wrapperPath)
+
   return {
     type: 'command',
-    command:
-      platform() === 'win32'
-        ? `${cmdQuote(wrapperPath)} ${cmdQuote(worktreeId)}`
-        : `${shellQuote(wrapperPath)} ${shellQuote(worktreeId)}`,
+    command,
     timeout: 5,
   }
 }
@@ -83,6 +81,15 @@ export function hookAncestorPids(
       typeof pid === 'number' && Number.isInteger(pid) && pid > 0,
   )
   return pids.length > 0 ? pids : undefined
+}
+
+export function hookCwd(payload: Record<string, unknown>): string | undefined {
+  const metadata = payload._ade_overlay
+  if (!isRecord(metadata) || typeof metadata.hook_cwd !== 'string') {
+    return undefined
+  }
+
+  return metadata.hook_cwd
 }
 
 function shellQuote(value: string): string {

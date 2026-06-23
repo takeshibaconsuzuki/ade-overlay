@@ -28,9 +28,8 @@ export type WorktreeRef = {
 
 /**
  * Out-of-band context the server knows about a hook call, independent of the
- * payload. `worktreeId` is added to the managed hook request by the wrapper
- * script, so it authoritatively identifies the worktree the chat belongs to —
- * no need to trust the payload's reported working directory.
+ * payload. Managed hooks resolve `worktreeId` from process ancestry or the
+ * forwarded runtime cwd.
  */
 export type ChatHookContext = {
   worktreeId?: string

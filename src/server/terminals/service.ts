@@ -18,11 +18,8 @@ export class TerminalService {
     })
   }
 
-  terminalIdForHookProcess(
-    worktreeId: string,
-    hookAncestorPids?: number[],
-  ): string | undefined {
-    return this.manager.terminalIdForHookProcess(worktreeId, hookAncestorPids)
+  terminalForHookProcess(hookAncestorPids?: number[]): Terminal | undefined {
+    return this.manager.terminalForHookProcess(hookAncestorPids)
   }
 
   create(options: {

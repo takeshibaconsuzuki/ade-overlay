@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { createWriteStream } from 'node:fs'
 import { appendFile, mkdir, rm } from 'node:fs/promises'
 import { platform } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import Mustache from 'mustache'
 import { WORKTREE_DIRTY_ERROR_CODE } from '../../api/server/config'
 import { type Logger } from '../../api/server/logger'
@@ -731,6 +731,15 @@ export class WorktreeRegistry {
     return worktree
   }
 
+  async findWorktreeByPath(path: string): Promise<Worktree | undefined> {
+    const normalizedPath = normalizePath(path)
+    const snapshot = await this.getSnapshot()
+    const matches = snapshot.worktrees
+      .filter((worktree) => isSameOrChildPath(normalizedPath, worktree.path))
+      .sort((left, right) => right.path.length - left.path.length)
+    return matches[0]
+  }
+
   async getPreChatCommandForWorktree(
     worktreeId: string,
   ): Promise<string | undefined> {
@@ -1041,6 +1050,16 @@ function getBranchName(branch?: string): string | undefined {
   return branch?.startsWith('refs/heads/')
     ? branch.slice('refs/heads/'.length)
     : undefined
+}
+
+function isSameOrChildPath(path: string, parentPath: string): boolean {
+  const relativePath = relative(normalizePath(parentPath), path)
+  return (
+    relativePath === '' ||
+    (!!relativePath &&
+      !relativePath.startsWith('..') &&
+      !isAbsolute(relativePath))
+  )
 }
 
 /**

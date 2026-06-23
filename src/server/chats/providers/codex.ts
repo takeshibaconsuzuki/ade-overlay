@@ -22,6 +22,11 @@ import {
   hookForwardCommand,
 } from '../hookForwarder'
 import {
+  readJsonRecordFile,
+  removeManagedHookGroups,
+  upsertManagedHookGroups,
+} from './hookConfig'
+import {
   type ChatDetails,
   type ChatHookContext,
   type ChatLaunch,
@@ -32,9 +37,9 @@ import {
 } from './types'
 
 /**
- * Codex lifecycle hooks are command hooks in `.codex/hooks.json`. Each command
- * receives one event JSON object on stdin, which we forward to ADE Overlay's
- * local hook sink.
+ * Codex lifecycle hooks are command hooks in `~/.codex/hooks.json`. Each
+ * command receives one event JSON object on stdin, which we forward to ADE
+ * Overlay's local hook sink.
  */
 const HOOK_STATUS: Record<string, ChatStatus> = {
   UserPromptSubmit: CHAT_STATUS.busy,
@@ -76,39 +81,53 @@ export class CodexChatProvider implements ChatProvider {
   constructor(private readonly log: Logger) {}
 
   async configureWorktree(worktree: WorktreeRef): Promise<void> {
-    const hooksPath = join(worktree.path, '.codex', 'hooks.json')
-
-    let config: Record<string, unknown> = {}
-    try {
-      const parsed = JSON.parse(await readFile(hooksPath, 'utf8')) as unknown
-      if (isRecord(parsed)) {
-        config = parsed
-      }
-    } catch {
-      // No (or unreadable) existing hooks file -- start from an empty object.
-    }
-
     const hookEndpoint = new URL(`${SERVER_ORIGIN}${this.marker}`)
     const wrapperPath = await ensureHookForwarderWrapper(
       this.id,
       hookEndpoint.toString(),
     )
-    const hooks = isRecord(config.hooks) ? { ...config.hooks } : {}
-    for (const event of HOOK_EVENTS) {
-      const existing = Array.isArray(hooks[event])
-        ? (hooks[event] as unknown[])
-        : []
-      const preserved = existing.filter((group) => !this.isManagedGroup(group))
-      hooks[event] = [
-        ...preserved,
-        { hooks: [this.hook(worktree.worktreeId, wrapperPath)] },
-      ]
-    }
+    await this.configureUserHooks(wrapperPath)
+    await this.clearProjectHooks(worktree.path)
+  }
+
+  private async configureUserHooks(wrapperPath: string): Promise<void> {
+    const hooksPath = join(homedir(), '.codex', 'hooks.json')
+    const config = (await readJsonRecordFile(hooksPath)) ?? {}
+    const hooks = upsertManagedHookGroups(
+      config.hooks,
+      HOOK_EVENTS,
+      () => this.hook(wrapperPath),
+      (group) => this.isManagedGroup(group),
+    )
 
     const next = { ...config, hooks }
     await mkdir(dirname(hooksPath), { recursive: true })
     await writeFile(hooksPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
-    this.log.info({ hooksPath }, 'configured codex chat hooks')
+    this.log.info({ hooksPath }, 'configured codex user chat hooks')
+  }
+
+  private async clearProjectHooks(worktreePath: string): Promise<void> {
+    const hooksPath = join(worktreePath, '.codex', 'hooks.json')
+    const config = await readJsonRecordFile(hooksPath)
+    if (!config) {
+      return
+    }
+
+    const result = removeManagedHookGroups(config.hooks, (group) =>
+      this.isManagedGroup(group),
+    )
+    if (!result.changed) {
+      return
+    }
+
+    const next = { ...config }
+    if (Object.keys(result.hooks).length > 0) {
+      next.hooks = result.hooks
+    } else {
+      delete next.hooks
+    }
+    await writeFile(hooksPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+    this.log.info({ hooksPath }, 'cleared codex project chat hooks')
   }
 
   mapHook(
@@ -208,15 +227,12 @@ export class CodexChatProvider implements ChatProvider {
     return { command: 'codex', args: [] }
   }
 
-  private hook(
-    worktreeId: string,
-    wrapperPath: string,
-  ): {
+  private hook(wrapperPath: string): {
     type: 'command'
     command: string
     timeout: number
   } {
-    return hookForwardCommand(wrapperPath, worktreeId)
+    return hookForwardCommand(wrapperPath)
   }
 
   private isManagedGroup(group: unknown): boolean {
@@ -226,10 +242,13 @@ export class CodexChatProvider implements ChatProvider {
     return group.hooks.some(
       (hook) =>
         isRecord(hook) &&
-        hook.type === 'command' &&
-        typeof hook.command === 'string' &&
-        (hook.command.includes(this.marker) ||
-          hook.command.includes(this.wrapperMarker)),
+        ((hook.type === 'http' &&
+          typeof hook.url === 'string' &&
+          hook.url.includes(this.marker)) ||
+          (hook.type === 'command' &&
+            typeof hook.command === 'string' &&
+            (hook.command.includes(this.marker) ||
+              hook.command.includes(this.wrapperMarker)))),
     )
   }
 }

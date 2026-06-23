@@ -29,15 +29,13 @@ process.stdin.on('end', () => {
         hook_pid: process.pid,
         hook_ppid: process.ppid,
         hook_ancestor_pids: pids,
+        hook_cwd: process.cwd(),
       }
       raw = Buffer.from(JSON.stringify(data))
     }
   } catch {}
 
   const url = new URL(process.argv[2])
-  if (process.argv[3]) {
-    url.searchParams.set('worktreeId', process.argv[3])
-  }
 
   const req = http.request(
     url,

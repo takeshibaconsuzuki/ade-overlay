@@ -99,22 +99,18 @@ export class TerminalManager {
     ) => void = () => {},
   ) {}
 
-  terminalIdForHookProcess(
-    worktreeId: string,
+  terminalForHookProcess(
     hookAncestorPids: number[] | undefined,
-  ): string | undefined {
+  ): Terminal | undefined {
     if (!hookAncestorPids || hookAncestorPids.length === 0) {
       return undefined
     }
 
     const ancestors = new Set(hookAncestorPids)
     const matches = [...this.terminals.values()].filter(
-      (record) =>
-        record.status === 'running' &&
-        record.worktreeId === worktreeId &&
-        ancestors.has(record.pty.pid),
+      (record) => record.status === 'running' && ancestors.has(record.pty.pid),
     )
-    return matches.length === 1 ? matches[0].id : undefined
+    return matches.length === 1 ? toDescriptor(matches[0]) : undefined
   }
 
   create(options: CreateTerminalOptions): Terminal {

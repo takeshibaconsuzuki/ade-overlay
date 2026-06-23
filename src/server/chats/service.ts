@@ -75,12 +75,13 @@ export class ChatService {
       this.terminalIdForChat(providerId, chatId),
     )
     this.registry.setTerminalSessionBinder(
-      (providerId, worktreeId, chatId, hookAncestorPids) =>
+      (providerId, worktreeId, chatId, hookAncestorPids, hookCwd) =>
         this.bindChatToTerminal(
           providerId,
           worktreeId,
           chatId,
           hookAncestorPids,
+          hookCwd,
         ),
     )
     this.terminals.events.on('terminal-snapshot', this.onTerminalSnapshot)
@@ -243,29 +244,52 @@ export class ChatService {
     return terminalId
   }
 
-  private bindChatToTerminal(
+  private async bindChatToTerminal(
     providerId: string,
-    worktreeId: string,
+    worktreeId: string | undefined,
     chatId: string,
     hookAncestorPids?: number[],
-  ): string | undefined {
+    hookCwd?: string,
+  ): Promise<string | undefined> {
     const existing = this.terminalIdForChat(providerId, chatId)
     if (existing) {
-      return existing
+      return this.terminals
+        .list()
+        .find((terminal) => terminal.terminalId === existing)?.worktreeId
     }
 
-    const owned = this.terminals.terminalIdForHookProcess(
-      worktreeId,
-      hookAncestorPids,
-    )
-    if (owned && this.canBindTerminal(owned, providerId, worktreeId)) {
-      this.recordChatBinding(owned, providerId, worktreeId, chatId)
+    const owned = this.terminals.terminalForHookProcess(hookAncestorPids)
+    if (
+      owned &&
+      this.canBindTerminal(owned.terminalId, providerId, owned.worktreeId)
+    ) {
+      this.recordChatBinding(
+        owned.terminalId,
+        providerId,
+        owned.worktreeId,
+        chatId,
+      )
       this.log.info(
-        { terminalId: owned, providerId, worktreeId, chatId, hookAncestorPids },
+        {
+          terminalId: owned.terminalId,
+          providerId,
+          worktreeId: owned.worktreeId,
+          chatId,
+          hookAncestorPids,
+        },
         'chat terminal bound to chat by process ancestry',
       )
       this.registry.notifyTerminalsChanged()
-      return owned
+      return owned.worktreeId
+    }
+
+    if (hookCwd) {
+      const worktree = await this.worktrees.findWorktreeByPath(hookCwd)
+      worktreeId = worktree?.worktreeId ?? worktreeId
+    }
+
+    if (!worktreeId) {
+      return undefined
     }
 
     const candidates = this.terminals
@@ -274,7 +298,7 @@ export class ChatService {
         this.canBindTerminal(terminal.terminalId, providerId, worktreeId),
       )
     if (candidates.length !== 1) {
-      return undefined
+      return worktreeId
     }
 
     const [terminal] = candidates
@@ -284,7 +308,7 @@ export class ChatService {
       'chat terminal bound to chat',
     )
     this.registry.notifyTerminalsChanged()
-    return terminal.terminalId
+    return terminal.worktreeId
   }
 
   private canBindTerminal(
