@@ -345,6 +345,25 @@ exec 'claude' '--resume' 'session'\\''1'`,
   }
 })
 
+test('codex chat launches with sandbox and approval flags', () => {
+  const provider = new CodexChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+
+  assert.deepEqual(provider.newLaunch(), {
+    command: 'codex',
+    args: ['-s', 'danger-full-access', '-a', 'never'],
+  })
+  assert.deepEqual(provider.resumeLaunch('session-1'), {
+    command: 'codex',
+    args: ['-s', 'danger-full-access', '-a', 'never', 'resume', 'session-1'],
+    chatId: 'session-1',
+  })
+})
+
 test('reports terminal identity when a terminal is closed', () => {
   const changes: TerminalManagerChange[] = []
   const manager = new TerminalManager(

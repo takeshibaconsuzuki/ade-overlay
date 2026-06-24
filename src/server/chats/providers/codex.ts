@@ -71,6 +71,7 @@ const HOOK_REFRESH_DESCRIPTION = new Set([
 // Read at most this many bytes from the end of a transcript when refreshing the
 // live description; the latest entries we need sit at the very end of the file.
 const TRANSCRIPT_TAIL_BYTES = 64 * 1024
+const CODEX_LAUNCH_ARGS = ['-s', 'danger-full-access', '-a', 'never']
 
 export class CodexChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.codex
@@ -220,11 +221,15 @@ export class CodexChatProvider implements ChatProvider {
 
   resumeLaunch(chatId: string): ChatLaunch {
     // Codex resumes by its native session id, which is our chat id.
-    return { command: 'codex', args: ['resume', chatId], chatId }
+    return {
+      command: 'codex',
+      args: [...CODEX_LAUNCH_ARGS, 'resume', chatId],
+      chatId,
+    }
   }
 
   newLaunch(): ChatLaunch {
-    return { command: 'codex', args: [] }
+    return { command: 'codex', args: [...CODEX_LAUNCH_ARGS] }
   }
 
   private hook(wrapperPath: string): {
