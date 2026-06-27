@@ -125,7 +125,9 @@ export function registerEditorRoutes(
       const response = await opener.openWorktree(request.body.worktreeId, {
         focus: false,
       })
-      editor.focusEditor()
+      // Foreground the editor and record the focus intent so the launcher
+      // knows the editor (not chat) should be the active role.
+      opener.focusEditor()
       return {
         worktreeId: response.worktreeId,
         url: response.url,

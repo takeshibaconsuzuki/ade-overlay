@@ -7,4 +7,5 @@
  */
 export const CONTROLLER_IPC_CHANNELS = {
   openWorktreesWindow: 'controller:open-worktrees-window',
+  setLauncherDormant: 'controller:set-launcher-dormant',
 } as const

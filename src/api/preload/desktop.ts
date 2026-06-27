@@ -21,6 +21,8 @@ export interface DesktopApi {
   getPathForFile(file: unknown): string
   /** Opens the worktrees window (focusing it if already open). */
   openWorktreesWindow(): Promise<void>
+  /** Drops the launcher back to its dormant, non-interactive state. */
+  setLauncherDormant(): Promise<void>
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow(): Promise<void>
   /** Subscribes to validated chat commands forwarded by Electron main. */
