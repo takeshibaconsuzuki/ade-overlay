@@ -200,6 +200,56 @@ export function Terminal({
     term.open(container)
     termRef.current = term
 
+    const copySelection = async (): Promise<void> => {
+      if (!term.hasSelection()) {
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(term.getSelection())
+        term.clearSelection()
+      } catch (error) {
+        logger.warn({ err: error, terminalId }, 'failed to copy terminal text')
+      }
+    }
+
+    const pasteClipboard = async (): Promise<void> => {
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text) {
+          // Let xterm encode bracketed paste when the running CLI requests it.
+          term.paste(text)
+        }
+        term.focus()
+      } catch (error) {
+        logger.warn({ err: error, terminalId }, 'failed to paste terminal text')
+      }
+    }
+
+    term.attachCustomKeyEventHandler((event) => {
+      const isCopyShortcut =
+        event.type === 'keydown' &&
+        event.key.toLowerCase() === 'c' &&
+        (event.ctrlKey || event.metaKey) &&
+        term.hasSelection()
+      if (!isCopyShortcut) {
+        return true
+      }
+
+      event.preventDefault()
+      void copySelection()
+      return false
+    })
+
+    const onContextMenu = (event: MouseEvent): void => {
+      event.preventDefault()
+      if (term.hasSelection()) {
+        void copySelection()
+      } else {
+        void pasteClipboard()
+      }
+    }
+    term.element?.addEventListener('contextmenu', onContextMenu)
+
     // A single terminal reconnects across the life of this effect, so the socket
     // and its heartbeat timers are mutable. `disposed` guards against the
     // unmount cleanup racing a queued reconnect; `exited` stops reconnecting
@@ -417,6 +467,7 @@ export function Terminal({
       }
       observer.disconnect()
       onData.dispose()
+      term.element?.removeEventListener('contextmenu', onContextMenu)
       if (socket) {
         socket.onclose = null
         socket.close()
