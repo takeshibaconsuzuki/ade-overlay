@@ -102,6 +102,10 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     }
   }, [])
 
+  const deactivateLauncher = useCallback((): void => {
+    void window.desktop?.setLauncherDormant()
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
@@ -111,19 +115,27 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       const key = event.key.toLowerCase()
       if (key === 's') {
         event.preventDefault()
+        deactivateLauncher()
         void handleOpenWorktrees()
       } else if (key === 'w') {
         event.preventDefault()
+        deactivateLauncher()
         void handleShowEditor()
       } else if (key === 'c') {
         event.preventDefault()
+        deactivateLauncher()
         void handleOpenChat()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleOpenChat, handleShowEditor, handleOpenWorktrees])
+  }, [
+    deactivateLauncher,
+    handleOpenChat,
+    handleShowEditor,
+    handleOpenWorktrees,
+  ])
 
   return (
     <VBox gap="0" height="100%">

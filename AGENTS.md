@@ -12,6 +12,12 @@ Posix:
 eval "$(python3 bootstrap.py --print-env)"
 ```
 
+Windows:
+
+```pwsh
+iex (python3 bootstrap.py --print-env | Out-String)
+```
+
 - `npm install`
 - `npm run dev`: run the Electron/Vite development app.
 - `npm run build`: build production output into `out/`.

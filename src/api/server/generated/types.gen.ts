@@ -26,6 +26,7 @@ export type RemoveRepositoryResponses = {
             }>;
             worktrees: Array<{
                 worktreeId: string;
+                name: string;
                 path: string;
                 mainWorktreePath: string;
                 isMain: boolean;
@@ -85,6 +86,7 @@ export type AddRepositoryResponses = {
             }>;
             worktrees: Array<{
                 worktreeId: string;
+                name: string;
                 path: string;
                 mainWorktreePath: string;
                 isMain: boolean;
@@ -170,6 +172,7 @@ export type CreateWorktreeResponses = {
         worktreeId: string;
         worktree: {
             worktreeId: string;
+            name: string;
             path: string;
             mainWorktreePath: string;
             isMain: boolean;
@@ -264,6 +267,7 @@ export type DismissCreationErrorResponses = {
             }>;
             worktrees: Array<{
                 worktreeId: string;
+                name: string;
                 path: string;
                 mainWorktreePath: string;
                 isMain: boolean;

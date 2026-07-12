@@ -77,6 +77,7 @@ export const WorktreeCreationState = z.enum([
 
 export const Worktree = z.object({
   worktreeId: WorktreeId,
+  name: z.string(),
   path: z.string(),
   mainWorktreePath: z.string(),
   isMain: z.boolean(),

@@ -62,7 +62,7 @@ export async function listGitWorktrees(
 
     switch (key) {
       case 'worktree':
-        current.path = value
+        current.path = normalizePath(value)
         break
       case 'HEAD':
         current.head = value
