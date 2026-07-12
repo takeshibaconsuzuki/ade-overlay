@@ -1,16 +1,43 @@
 const http = require('node:http')
 const { execFileSync } = require('node:child_process')
 
+function windowsParentPids() {
+  try {
+    const script =
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress'
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', timeout: 1500 },
+    )
+    const rows = JSON.parse(out)
+    return new Map(
+      (Array.isArray(rows) ? rows : [rows]).map((row) => [
+        row.ProcessId,
+        row.ParentProcessId,
+      ]),
+    )
+  } catch {
+    return new Map()
+  }
+}
+
 const chunks = []
 process.stdin.on('data', (chunk) => chunks.push(chunk))
 process.stdin.on('end', () => {
   let raw = Buffer.concat(chunks)
   const pids = []
   const seen = new Set()
+  const windowsParents =
+    process.platform === 'win32' ? windowsParentPids() : undefined
   let pid = process.pid
   while (pid && !seen.has(pid)) {
     seen.add(pid)
     pids.push(pid)
+    if (windowsParents) {
+      pid = windowsParents.get(pid) || 0
+      continue
+    }
     try {
       const out = execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], {
         encoding: 'utf8',

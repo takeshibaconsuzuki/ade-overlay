@@ -7,6 +7,7 @@ import {
   type ChatSnapshot,
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
+import { isProcessAlive } from '../processes'
 import { hookAncestorPids, hookCwd } from './hookForwarder'
 import {
   type ChatHookContext,
@@ -21,6 +22,14 @@ import {
  * immediately lags a step behind; this delay lets the write land first.
  */
 const TRANSCRIPT_READ_DELAY_MS = 1000
+const PROCESS_SWEEP_INTERVAL_MS = 5000
+const PROCESS_IDENTITY_SETTLE_MS = 1000
+
+type ChatProcesses = {
+  ancestorPids: number[]
+  capturedAt: number
+  processPid?: number
+}
 
 /**
  * In-memory map of live chats across every agentic coding system. Hook events
@@ -32,6 +41,7 @@ export class ChatRegistry {
 
   private readonly chats = new Map<string, Chat>()
   private readonly providers = new Map<string, ChatProvider>()
+  private readonly chatProcesses = new Map<string, ChatProcesses>()
   // Chats whose detail read has already been scheduled, so we only do it once.
   private readonly detailsResolved = new Set<string>()
   // Resolves the terminal a chat is running in, injected by the owner that holds
@@ -48,6 +58,7 @@ export class ChatRegistry {
     hookAncestorPids?: number[],
     hookCwd?: string,
   ) => Promise<string | undefined> | string | undefined = () => undefined
+  private readonly processSweepTimer: NodeJS.Timeout
 
   constructor(
     private readonly log: Logger,
@@ -56,6 +67,10 @@ export class ChatRegistry {
     for (const provider of providers) {
       this.providers.set(provider.id, provider)
     }
+    this.processSweepTimer = setInterval(() => {
+      this.purgeChatsWithoutLiveProcesses()
+    }, PROCESS_SWEEP_INTERVAL_MS)
+    this.processSweepTimer.unref()
   }
 
   /** Merge every provider's hook endpoint into a worktree's config files. */
@@ -135,6 +150,19 @@ export class ChatRegistry {
       updatedAt: Date.now(),
     }
     this.chats.set(chatKey, chat)
+    const ancestorPids = hookAncestorPids(payload)
+    if (ancestorPids) {
+      const previousProcesses = this.chatProcesses.get(chatKey)
+      this.chatProcesses.set(chatKey, {
+        ancestorPids,
+        capturedAt: Date.now(),
+        processPid:
+          previousProcesses?.processPid !== undefined &&
+          ancestorPids.includes(previousProcesses.processPid)
+            ? previousProcesses.processPid
+            : undefined,
+      })
+    }
 
     this.log.info(
       { chatId: chat.chatId, providerId, status: chat.status },
@@ -302,6 +330,58 @@ export class ChatRegistry {
       .map((chat) => this.withTerminal(chat))
       .sort((left, right) => right.updatedAt - left.updatedAt)
     return { chats }
+  }
+
+  /**
+   * Remove chats whose hook-owning process has exited. Hook ancestry begins
+   * with short-lived forwarding processes, so the first sweep after they have
+   * settled selects the nearest surviving ancestor as the chat process. Later
+   * sweeps track only that process; longer-lived shells and the server itself
+   * must not keep a dead chat in the registry.
+   */
+  purgeChatsWithoutLiveProcesses(
+    processIsAlive: (pid: number) => boolean = isProcessAlive,
+  ): void {
+    let changed = false
+    const now = Date.now()
+
+    for (const [chatKey, processes] of this.chatProcesses) {
+      if (processes.processPid !== undefined) {
+        if (processIsAlive(processes.processPid)) {
+          continue
+        }
+      } else {
+        if (now - processes.capturedAt < PROCESS_IDENTITY_SETTLE_MS) {
+          continue
+        }
+        const processPid = processes.ancestorPids.find(processIsAlive)
+        if (processPid !== undefined) {
+          processes.processPid = processPid
+          continue
+        }
+      }
+
+      const chat = this.chats.get(chatKey)
+      this.chatProcesses.delete(chatKey)
+      this.detailsResolved.delete(chatKey)
+      if (!chat) {
+        continue
+      }
+      this.chats.delete(chatKey)
+      changed = true
+      this.log.info(
+        { chatId: chat.chatId, providerId: chat.providerId },
+        'purged chat without a live process',
+      )
+    }
+
+    if (changed) {
+      this.events.emit('chat-snapshot', this.getSnapshot())
+    }
+  }
+
+  shutdown(): void {
+    clearInterval(this.processSweepTimer)
   }
 
   /**

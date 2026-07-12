@@ -110,6 +110,7 @@ export function createServer() {
     appConfig.shutdown()
     await editor.shutdown()
     await chatService.shutdown()
+    chatRegistry.shutdown()
     terminalService.shutdown()
   })
   server.addHook('onReady', async () => {

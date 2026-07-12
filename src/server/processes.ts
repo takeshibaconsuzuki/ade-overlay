@@ -6,6 +6,17 @@ export function isChildAlive(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null && !child.killed
 }
 
+/** Check whether an arbitrary process id still identifies a live process. */
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // A permissions failure still proves that the process exists.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 export async function killChildProcessTree(
   child: ChildProcess,
   log: Logger,

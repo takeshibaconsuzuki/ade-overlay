@@ -283,6 +283,42 @@ test('does not create a dormant chat from session end alone', async () => {
   assert.deepEqual(snapshot.data.chats, [])
 })
 
+test('purges a live chat after its hook-owning process exits', async () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CodexChatProvider(logger)])
+
+  await registry.applyHook('codex', {
+    hook_event_name: 'UserPromptSubmit',
+    session_id: 'session-with-process',
+    prompt: 'hello',
+    _ade_overlay: {
+      // The forwarder and its wrapper have already exited; 303 is the nearest
+      // surviving ancestor and therefore the chat process.
+      hook_ancestor_pids: [101, 202, 303, 404],
+    },
+  })
+
+  const processes = (
+    registry as unknown as {
+      chatProcesses: Map<string, { capturedAt: number }>
+    }
+  ).chatProcesses
+  processes.get('codex:session-with-process')!.capturedAt = 0
+
+  registry.purgeChatsWithoutLiveProcesses((pid) => pid >= 303)
+  assert.equal(registry.getSnapshot().chats.length, 1)
+
+  let purgedSnapshot: { chats: unknown[] } | undefined
+  registry.events.once('chat-snapshot', (snapshot) => {
+    purgedSnapshot = snapshot as { chats: unknown[] }
+  })
+  registry.purgeChatsWithoutLiveProcesses((pid) => pid === 404)
+
+  assert.deepEqual(registry.getSnapshot(), { chats: [] })
+  assert.deepEqual(purgedSnapshot, { chats: [] })
+  registry.shutdown()
+})
+
 test('finds a terminal by hook process ancestry', () => {
   const manager = new TerminalManager({
     info() {},
@@ -875,6 +911,7 @@ test('hook forward command augments and posts payload using app Node runtime', a
     assert.equal(typeof metadata?.hook_cwd, 'string')
     assert.ok(Array.isArray(metadata?.hook_ancestor_pids))
     assert.ok(metadata.hook_ancestor_pids.length > 0)
+    assert.ok(metadata.hook_ancestor_pids.includes(process.pid))
   } finally {
     await new Promise<void>((resolve) => hookServer.close(() => resolve()))
   }
