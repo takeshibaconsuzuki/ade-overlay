@@ -59,7 +59,9 @@ export function hookForwardCommand(wrapperPath: string): {
   timeout: number
 } {
   const command =
-    platform() === 'win32' ? cmdQuote(wrapperPath) : shellQuote(wrapperPath)
+    platform() === 'win32'
+      ? `cmd.exe /d /s /c call ${cmdQuote(wrapperPath)}`
+      : shellQuote(wrapperPath)
 
   return {
     type: 'command',

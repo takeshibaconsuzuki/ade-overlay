@@ -11,7 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { createServer as createHttpServer } from 'node:http'
-import { tmpdir } from 'node:os'
+import { platform, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
 import { promisify } from 'node:util'
@@ -694,7 +694,9 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
   )
 
   const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
   process.env.HOME = home
+  process.env.USERPROFILE = home
   try {
     await new CodexChatProvider({
       info() {},
@@ -706,7 +708,7 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
       path: worktreePath,
     })
   } finally {
-    restoreHome(originalHome)
+    restoreHome(originalHome, originalUserProfile)
   }
 
   const userConfig = JSON.parse(
@@ -774,7 +776,9 @@ test('configures Claude user hooks and clears managed project hooks', async () =
   )
 
   const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
   process.env.HOME = home
+  process.env.USERPROFILE = home
   try {
     await new ClaudeChatProvider({
       info() {},
@@ -786,7 +790,7 @@ test('configures Claude user hooks and clears managed project hooks', async () =
       path: worktreePath,
     })
   } finally {
-    restoreHome(originalHome)
+    restoreHome(originalHome, originalUserProfile)
   }
 
   const userSettings = JSON.parse(
@@ -851,6 +855,9 @@ test('hook forward command augments and posts payload using app Node runtime', a
     assert.ok(!command.includes(' -e '))
     assert.ok(command.includes(wrapperPath))
     assert.ok(!command.includes(`127.0.0.1:${address.port}`))
+    if (platform() === 'win32') {
+      assert.ok(command.startsWith('cmd.exe /d /s /c call '))
+    }
     const payload = JSON.stringify({
       hook_event_name: 'UserPromptSubmit',
       session_id: 'session-1',
@@ -1043,10 +1050,20 @@ async function createGitRepository(): Promise<string> {
 
 async function runHookCommand(command: string, input: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, {
-      shell: true,
-      stdio: ['pipe', 'ignore', 'inherit'],
-    })
+    // Codex evaluates Windows hook commands with PowerShell. Exercise that
+    // exact behavior so a quoted batch path cannot silently become string
+    // output instead of an invocation.
+    const child =
+      platform() === 'win32'
+        ? spawn(
+            'powershell.exe',
+            ['-NoProfile', '-NonInteractive', '-Command', command],
+            { stdio: ['pipe', 'ignore', 'inherit'] },
+          )
+        : spawn(command, {
+            shell: true,
+            stdio: ['pipe', 'ignore', 'inherit'],
+          })
     child.on('error', reject)
     child.on('close', (code) => {
       if (code === 0) {
@@ -1059,11 +1076,19 @@ async function runHookCommand(command: string, input: string): Promise<void> {
   })
 }
 
-function restoreHome(originalHome: string | undefined): void {
+function restoreHome(
+  originalHome: string | undefined,
+  originalUserProfile: string | undefined,
+): void {
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
+  }
+  if (originalUserProfile === undefined) {
+    delete process.env.USERPROFILE
+  } else {
+    process.env.USERPROFILE = originalUserProfile
   }
 }
 
