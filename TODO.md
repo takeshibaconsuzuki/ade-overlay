@@ -4,3 +4,9 @@
 - Live-chat focus rewrites app config every time
 - Update terminal tab text
 - Double clicking on launcher app
+- mkdir -p for worktree
+- Include origins/ in search
+- Purge live chats which no longer have live processes
+- Focus file / terminal on switch to code
+- Alt+k for pasting file reference to chat
+- Manual terminal reconnect button
