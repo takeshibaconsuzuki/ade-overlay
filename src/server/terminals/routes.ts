@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws'
 import {
   parseTerminalSocketUrl,
   Terminal,
+  TERMINAL_SOCKET_MAX_MESSAGE_BYTES,
   TERMINAL_STREAM_PATH,
   TerminalCreateRequest,
   TERMINALS_PATH,
@@ -84,7 +85,10 @@ function registerTerminalSocket(
   server: FastifyInstance,
   terminals: TerminalService,
 ): void {
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: TERMINAL_SOCKET_MAX_MESSAGE_BYTES,
+  })
 
   server.server.on('upgrade', (request, socket, head) => {
     const target = parseTerminalSocketUrl(request.url)

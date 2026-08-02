@@ -27,6 +27,10 @@ import {
   CHAT_STATUS,
 } from '../../src/api/server/chats'
 import { OPENAPI_PATH } from '../../src/api/server/config'
+import {
+  TerminalPasteMessage,
+  type TerminalPastePart,
+} from '../../src/api/server/terminals'
 import { shouldCloseWorktreesWindowOnBlur } from '../../src/main/controller/worktreesWindowPolicy'
 import {
   ensureHookForwarderWrapper,
@@ -497,6 +501,275 @@ test('codex chat launches with sandbox and approval flags', () => {
     args: ['-s', 'danger-full-access', '-a', 'never', 'resume', 'session-1'],
     chatId: 'session-1',
   })
+})
+
+test('providers format image paths and reject unsupported attachments', () => {
+  const log = {
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never
+  const claude = new ClaudeChatProvider(log)
+  const codex = new CodexChatProvider(log)
+  const windowsPath = String.raw`C:\Users\me\image.png`
+  const parts = [
+    {
+      type: 'image' as const,
+      path: windowsPath,
+      mimeType: 'image/png',
+    },
+    {
+      type: 'image' as const,
+      path: '/tmp/diagram.svg',
+      mimeType: 'image/svg+xml',
+      alt: 'diagram',
+    },
+  ]
+
+  assert.deepEqual(claude.terminalPaste(parts), [
+    {
+      type: 'paste',
+      text: String.raw`C:\\Users\\me\\image.png`,
+    },
+    { type: 'paste', text: 'diagram' },
+  ])
+  assert.deepEqual(codex.terminalPaste(parts), [
+    { type: 'paste', text: windowsPath },
+    { type: 'paste', text: 'diagram' },
+  ])
+})
+
+test('accepts plain-text paste parts larger than one MiB', () => {
+  const text = 'x'.repeat(1024 * 1024 + 1)
+  assert.equal(
+    TerminalPasteMessage.safeParse({
+      type: 'paste',
+      parts: [{ type: 'text', text }],
+      bracketedPasteMode: false,
+    }).success,
+    true,
+  )
+})
+
+test('rejects paste parts whose aggregate encoding exceeds the socket limit', () => {
+  const dataBase64 = 'a'.repeat(12 * 1024 * 1024)
+  assert.equal(
+    TerminalPasteMessage.safeParse({
+      type: 'paste',
+      parts: Array.from({ length: 3 }, () => ({
+        type: 'image',
+        mimeType: 'image/png',
+        dataBase64,
+      })),
+      bracketedPasteMode: false,
+    }).success,
+    false,
+  )
+})
+
+test('materializes ordered terminal paste parts for the provider', async () => {
+  const manager = new TerminalManager({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  const provider = new CodexChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  const writes: string[] = []
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-paste', {
+    id: 'terminal-paste',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    exitCode: null,
+    terminalPaste: provider.terminalPaste,
+    inputTail: Promise.resolve(),
+    pty: {
+      write(data: string) {
+        writes.push(data)
+      },
+      kill() {},
+    },
+    outputBuffer: new TerminalOutputBuffer(() => {}),
+    buffer: [],
+    socket: null,
+    socketId: null,
+    viewerId: null,
+  })
+
+  const socket = terminalSocket()
+  manager.attach('terminal-paste', socket as never)
+  await emitTerminalPaste(
+    socket,
+    [
+      { type: 'text', text: 'before\n' },
+      {
+        type: 'image',
+        mimeType: 'image/png',
+        dataBase64: Buffer.from('pixels').toString('base64'),
+        filename: 'browser-name.png',
+      },
+      { type: 'text', text: 'after' },
+    ],
+    true,
+    writes,
+  )
+
+  assert.equal(writes.length, 1)
+  const pasteStart = '\x1b[200~'
+  const pasteEnd = '\x1b[201~'
+  const imagePath = writes[0].split(pasteStart)[2]?.split(pasteEnd, 1)[0]
+  assert.ok(imagePath)
+  assert.equal(await readFile(imagePath, 'utf8'), 'pixels')
+  assert.equal(
+    writes[0],
+    `\x1b[200~before\r\x1b[201~\x1b[200~${imagePath}\x1b[201~\x1b[200~after\x1b[201~`,
+  )
+
+  await emitTerminalPaste(
+    socket,
+    [{ type: 'text', text: 'raw\npaste' }],
+    false,
+    writes,
+  )
+  assert.equal(writes[1], 'raw\rpaste')
+
+  manager.close('terminal-paste')
+})
+
+test('bounds retained image files for a long-lived terminal', async () => {
+  const manager = new TerminalManager({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  const writes: string[] = []
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-paste-retention', {
+    id: 'terminal-paste-retention',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    exitCode: null,
+    terminalPaste: new CodexChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never).terminalPaste,
+    inputTail: Promise.resolve(),
+    pty: {
+      write(data: string) {
+        writes.push(data)
+      },
+      kill() {},
+    },
+    outputBuffer: new TerminalOutputBuffer(() => {}),
+    buffer: [],
+    socket: null,
+    socketId: null,
+    viewerId: null,
+  })
+
+  const socket = terminalSocket()
+  manager.attach('terminal-paste-retention', socket as never)
+  for (let index = 0; index < 65; index += 1) {
+    await emitTerminalPaste(
+      socket,
+      [
+        {
+          type: 'image',
+          mimeType: 'image/png',
+          dataBase64: Buffer.from(String(index)).toString('base64'),
+        },
+      ],
+      false,
+      writes,
+    )
+  }
+
+  assert.equal(writes.length, 65)
+  await assert.rejects(stat(writes[0]), { code: 'ENOENT' })
+  assert.equal(await readFile(writes.at(-1)!, 'utf8'), '64')
+
+  manager.close('terminal-paste-retention')
+})
+
+test('orders WebSocket input and paste messages on one PTY queue', async () => {
+  const manager = new TerminalManager({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  const events: string[] = []
+  const terminals = (
+    manager as unknown as { terminals: Map<string, Record<string, unknown>> }
+  ).terminals
+  terminals.set('terminal-input-order', {
+    id: 'terminal-input-order',
+    worktreeId: 'worktree-1',
+    status: 'running',
+    exitCode: null,
+    terminalPaste: new CodexChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never).terminalPaste,
+    inputTail: Promise.resolve(),
+    pty: {
+      write(data: string) {
+        events.push(`write:${data}`)
+      },
+      kill() {},
+    },
+    buffer: [],
+    outputBuffer: new TerminalOutputBuffer(() => {}),
+    socket: null,
+    socketId: null,
+    viewerId: null,
+  })
+
+  const socket = terminalSocket()
+  manager.attach('terminal-input-order', socket as never)
+
+  socket.emit(
+    'message',
+    Buffer.from(JSON.stringify({ type: 'input', data: 'before' })),
+  )
+  socket.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'paste',
+        parts: [{ type: 'text', text: 'pasted\ntext' }],
+        bracketedPasteMode: true,
+      }),
+    ),
+  )
+  socket.emit(
+    'message',
+    Buffer.from(JSON.stringify({ type: 'input', data: 'after' })),
+  )
+  await waitFor(() => events.length === 3)
+
+  assert.deepEqual(events, [
+    'write:before',
+    'write:\x1b[200~pasted\rtext\x1b[201~',
+    'write:after',
+  ])
+  manager.close('terminal-input-order')
 })
 
 test('reports terminal identity when a terminal is closed', () => {
@@ -1310,4 +1583,48 @@ function promiseWithTimeout<T>(
       },
     )
   })
+}
+
+function terminalSocket(): EventEmitter & {
+  OPEN: number
+  readyState: number
+  send: (raw: string) => void
+  close: () => void
+} {
+  return Object.assign(new EventEmitter(), {
+    OPEN: 1,
+    readyState: 1,
+    send(_raw: string) {},
+    close() {},
+  })
+}
+
+async function emitTerminalPaste(
+  socket: EventEmitter,
+  parts: readonly TerminalPastePart[],
+  bracketedPasteMode: boolean,
+  writes: readonly string[],
+): Promise<void> {
+  const expectedWrites = writes.length + 1
+  socket.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'paste',
+        parts,
+        bracketedPasteMode,
+      }),
+    ),
+  )
+  await waitFor(() => writes.length >= expectedWrites)
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for test condition')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
 }

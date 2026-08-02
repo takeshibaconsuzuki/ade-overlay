@@ -187,7 +187,8 @@ export class ChatService {
     const worktree = await this.worktrees.getWorktreeById(options.worktreeId)
     const providerId = options.providerId ?? DEFAULT_CHAT_PROVIDER
     const launch = this.registry.getLaunch(providerId, options.resumeChatId)
-    if (!launch) {
+    const terminalPaste = this.registry.getTerminalPaste(providerId)
+    if (!launch || !terminalPaste) {
       throw new HttpError(400, `Unknown chat provider: ${providerId}`)
     }
     const chatId = launch.chatId ?? options.resumeChatId
@@ -213,6 +214,7 @@ export class ChatService {
       cwd: worktree.path,
       command: launch.command,
       args: launch.args,
+      terminalPaste,
       preChatCommand,
     })
     this.terminalBindings.set(terminal.terminalId, {

@@ -1,17 +1,27 @@
 import { randomUUID } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { platform } from 'node:os'
+import { platform, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { type IPty, type spawn as PtySpawn } from 'node-pty'
 import { type WebSocket } from 'ws'
 import { type Logger } from '../../api/server/logger'
 import {
+  TERMINAL_PASTE_MAX_IMAGE_BYTES,
   TerminalClientMessage,
   type Terminal,
+  type TerminalPastePart,
   type TerminalServerMessage,
   type TerminalStatus,
 } from '../../api/server/terminals'
+import { HttpError } from '../errors'
 import { getUserLoginShell } from '../userShell'
 import { TerminalOutputBuffer } from './outputBuffer'
+import {
+  terminalPasteInput,
+  type MaterializedTerminalPastePart,
+  type TerminalPasteProvider,
+} from './paste'
 
 /**
  * How much recent PTY output to retain per terminal so a reconnecting renderer
@@ -20,6 +30,8 @@ import { TerminalOutputBuffer } from './outputBuffer'
  * still dropped from the front as a backstop so memory stays bounded.
  */
 const MAX_BUFFER_BYTES = 64 * 1024 * 1024
+const MAX_RETAINED_PASTE_BYTES = 64 * 1024 * 1024
+const MAX_RETAINED_PASTE_FILES = 64
 
 const DEFAULT_COLS = 80
 const DEFAULT_ROWS = 24
@@ -43,6 +55,11 @@ type TerminalRecord = {
   id: string
   worktreeId: string
   title?: string
+  terminalPaste: TerminalPasteProvider
+  pasteDirectory?: string
+  pasteFiles?: { path: string; bytes: number }[]
+  pasteBytes?: number
+  inputTail: Promise<void>
   status: TerminalStatus
   exitCode: number | null
   pty: IPty
@@ -65,6 +82,7 @@ type TerminalRecord = {
 export type CreateTerminalOptions = {
   worktreeId: string
   title?: string
+  terminalPaste: TerminalPasteProvider
   cwd: string
   command: string
   args: string[]
@@ -139,6 +157,8 @@ export class TerminalManager {
       id,
       worktreeId: options.worktreeId,
       title: options.title,
+      terminalPaste: options.terminalPaste,
+      inputTail: Promise.resolve(),
       status: 'running',
       exitCode: null,
       pty,
@@ -169,6 +189,7 @@ export class TerminalManager {
       // it should not linger in the terminal list or be reattachable. The
       // renderer closes the tab when it sees the `exit` message.
       this.terminals.delete(id)
+      this.cleanupPasteDirectory(record)
       this.log.info(
         { terminalId: id, worktreeId: record.worktreeId, exitCode },
         'chat terminal exited',
@@ -258,7 +279,23 @@ export class TerminalManager {
       if (message.type === 'ping') {
         send(socket, { type: 'pong' })
       } else if (message.type === 'input') {
-        record.pty.write(message.data)
+        void this.enqueueInput(record, () => {
+          record.pty.write(message.data)
+        }).catch((error: unknown) => {
+          this.log.warn(
+            { err: error, terminalId },
+            'chat terminal input failed',
+          )
+        })
+      } else if (message.type === 'paste') {
+        void this.enqueueInput(record, () => {
+          return this.paste(record, message.parts, message.bracketedPasteMode)
+        }).catch((error: unknown) => {
+          this.log.warn(
+            { err: error, terminalId },
+            'chat terminal paste failed',
+          )
+        })
       } else if (message.type === 'resize') {
         try {
           record.pty.resize(
@@ -320,6 +357,7 @@ export class TerminalManager {
     record.outputBuffer.clear()
     record.socket?.close()
     this.killPty(record)
+    this.cleanupPasteDirectory(record)
     this.onChange({ type: 'removed', reason: 'closed', terminal })
   }
 
@@ -336,6 +374,7 @@ export class TerminalManager {
       record.outputBuffer.clear()
       record.socket?.close()
       this.killPty(record)
+      this.cleanupPasteDirectory(record)
     }
     this.terminals.clear()
   }
@@ -349,6 +388,121 @@ export class TerminalManager {
         record.bufferBytes -= Buffer.byteLength(dropped)
       }
     }
+  }
+
+  private enqueueInput(
+    record: TerminalRecord,
+    task: () => Promise<void> | void,
+  ): Promise<void> {
+    const result = record.inputTail.catch(() => {}).then(task)
+    record.inputTail = result.catch(() => {})
+    return result
+  }
+
+  private isLiveRecord(record: TerminalRecord): boolean {
+    return (
+      record.status === 'running' && this.terminals.get(record.id) === record
+    )
+  }
+
+  private async paste(
+    record: TerminalRecord,
+    parts: readonly TerminalPastePart[],
+    bracketedPasteMode: boolean,
+  ): Promise<void> {
+    if (!this.isLiveRecord(record)) {
+      throw new HttpError(404, `Terminal not found: ${record.id}`)
+    }
+    const materialized = await this.materializePasteParts(record, parts)
+    if (!this.isLiveRecord(record)) {
+      this.cleanupPasteDirectory(record)
+      throw new HttpError(404, `Terminal not found: ${record.id}`)
+    }
+    const actions = record.terminalPaste(materialized)
+    if (actions.length === 0) {
+      return
+    }
+    record.pty.write(
+      actions
+        .map((action) => terminalPasteInput(action.text, bracketedPasteMode))
+        .join(''),
+    )
+  }
+
+  private async materializePasteParts(
+    record: TerminalRecord,
+    parts: readonly TerminalPastePart[],
+  ): Promise<MaterializedTerminalPastePart[]> {
+    const materialized: MaterializedTerminalPastePart[] = []
+    for (const part of parts) {
+      if (part.type === 'text') {
+        if (part.text) {
+          materialized.push(part)
+        }
+        continue
+      }
+
+      const bytes = decodeBase64Image(part.dataBase64)
+      const directory = await this.pasteDirectory(record)
+      const path = join(
+        directory,
+        `${randomUUID()}${imageExtension(part.mimeType)}`,
+      )
+      await writeFile(path, bytes)
+      record.pasteFiles ??= []
+      record.pasteFiles.push({ path, bytes: bytes.length })
+      record.pasteBytes = (record.pasteBytes ?? 0) + bytes.length
+      await this.prunePasteFiles(record)
+      materialized.push({
+        type: 'image',
+        path,
+        mimeType: part.mimeType,
+        alt: part.alt,
+      })
+    }
+    return materialized
+  }
+
+  private async pasteDirectory(record: TerminalRecord): Promise<string> {
+    if (!record.pasteDirectory) {
+      record.pasteDirectory = await mkdtemp(
+        join(tmpdir(), 'ade-overlay-terminal-paste-'),
+      )
+    }
+    return record.pasteDirectory
+  }
+
+  private async prunePasteFiles(record: TerminalRecord): Promise<void> {
+    const files = record.pasteFiles ?? []
+    while (
+      files.length > MAX_RETAINED_PASTE_FILES ||
+      (record.pasteBytes ?? 0) > MAX_RETAINED_PASTE_BYTES
+    ) {
+      const oldest = files.shift()
+      if (!oldest) {
+        break
+      }
+      await rm(oldest.path, { force: true })
+      record.pasteBytes = Math.max(0, (record.pasteBytes ?? 0) - oldest.bytes)
+    }
+  }
+
+  private cleanupPasteDirectory(record: TerminalRecord): void {
+    const directory = record.pasteDirectory
+    record.pasteDirectory = undefined
+    record.pasteFiles = undefined
+    record.pasteBytes = undefined
+    if (!directory) {
+      return
+    }
+    void rm(directory, { recursive: true, force: true }).catch(
+      (error: unknown) => {
+        this.log.warn(
+          { err: error, terminalId: record.id, directory },
+          'failed to clean terminal paste files',
+        )
+      },
+    )
   }
 
   private killPty(record: TerminalRecord): void {
@@ -474,6 +628,46 @@ function toDescriptor(record: TerminalRecord): Terminal {
     title: record.title,
     status: record.status,
   }
+}
+
+function decodeBase64Image(data: string): Buffer {
+  if (
+    data.length === 0 ||
+    data.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      data,
+    )
+  ) {
+    throw new HttpError(400, 'Invalid base64 image data')
+  }
+  const bytes = Buffer.from(data, 'base64')
+  if (bytes.length === 0 || bytes.length > TERMINAL_PASTE_MAX_IMAGE_BYTES) {
+    throw new HttpError(
+      413,
+      `Pasted images must be at most ${TERMINAL_PASTE_MAX_IMAGE_BYTES} bytes`,
+    )
+  }
+  return bytes
+}
+
+function imageExtension(mimeType: string): string {
+  const subtype = mimeType.toLowerCase().split('/', 2)[1]?.split('+', 1)[0]
+  const extensions: Record<string, string> = {
+    apng: '.png',
+    avif: '.avif',
+    bmp: '.bmp',
+    gif: '.gif',
+    heic: '.heic',
+    heif: '.heif',
+    jpeg: '.jpg',
+    jpg: '.jpg',
+    png: '.png',
+    svg: '.svg',
+    tiff: '.tiff',
+    webp: '.webp',
+    'x-icon': '.ico',
+  }
+  return extensions[subtype ?? ''] ?? '.img'
 }
 
 function send(socket: WebSocket | null, message: TerminalServerMessage): void {

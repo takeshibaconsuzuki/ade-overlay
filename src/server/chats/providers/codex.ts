@@ -17,6 +17,7 @@ import {
 } from '../../../api/server/chats'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { type Logger } from '../../../api/server/logger'
+import { pasteTextAndImagePaths } from '../../terminals/paste'
 import {
   ensureHookForwarderWrapper,
   hookForwardCommand,
@@ -75,6 +76,7 @@ const CODEX_LAUNCH_ARGS = ['-s', 'danger-full-access', '-a', 'never']
 
 export class CodexChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.codex
+  readonly terminalPaste = pasteTextAndImagePaths
 
   private readonly marker = `${CHAT_HOOKS_PATH}/${this.id}`
   private readonly wrapperMarker = `ade-overlay-chat-hook-${this.id}`
@@ -229,7 +231,10 @@ export class CodexChatProvider implements ChatProvider {
   }
 
   newLaunch(): ChatLaunch {
-    return { command: 'codex', args: [...CODEX_LAUNCH_ARGS] }
+    return {
+      command: 'codex',
+      args: [...CODEX_LAUNCH_ARGS],
+    }
   }
 
   private hook(wrapperPath: string): {

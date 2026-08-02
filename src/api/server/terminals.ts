@@ -4,6 +4,8 @@ import { defineSseEvents, SSE_SNAPSHOT_EVENT } from './sse'
 export const TERMINALS_PATH = '/terminals'
 export const TERMINAL_STREAM_PATH = TERMINALS_PATH
 export const TERMINAL_SOCKET_VIEWER_QUERY = 'viewer'
+export const TERMINAL_PASTE_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+export const TERMINAL_SOCKET_MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 
 export function terminalSocketPath(
   terminalId: string,
@@ -92,12 +94,49 @@ export const TerminalParams = z.object({
   terminalId: z.string().min(1),
 })
 
+export const TerminalPasteTextPart = z.object({
+  type: z.literal('text'),
+  text: z.string().max(TERMINAL_SOCKET_MAX_MESSAGE_BYTES),
+})
+
+export const TerminalPasteImagePart = z.object({
+  type: z.literal('image'),
+  mimeType: z
+    .string()
+    .max(128)
+    .regex(/^image\/[a-z0-9.+-]+$/i),
+  dataBase64: z
+    .string()
+    .max(Math.ceil((TERMINAL_PASTE_MAX_IMAGE_BYTES * 4) / 3) + 4),
+  filename: z.string().min(1).max(255).optional(),
+  alt: z.string().max(4096).optional(),
+})
+
+export const TerminalPastePart = z.discriminatedUnion('type', [
+  TerminalPasteTextPart,
+  TerminalPasteImagePart,
+])
+
+export const TerminalPasteMessage = z
+  .object({
+    type: z.literal('paste'),
+    parts: z.array(TerminalPastePart).min(1).max(64),
+    bracketedPasteMode: z.boolean(),
+  })
+  .refine(
+    (message) =>
+      new TextEncoder().encode(JSON.stringify(message)).byteLength <=
+      TERMINAL_SOCKET_MAX_MESSAGE_BYTES,
+    { message: 'Paste exceeds the terminal socket message limit' },
+  )
+
 export const TerminalSocketQuery = z.object({
   [TERMINAL_SOCKET_VIEWER_QUERY]: z.string().optional(),
 })
 
 export type TerminalClientMessage =
   | { type: 'input'; data: string }
+  | z.infer<typeof TerminalPasteMessage>
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
 
@@ -109,6 +148,7 @@ export type TerminalServerMessage =
 
 export const TerminalClientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('input'), data: z.string() }),
+  TerminalPasteMessage,
   z.object({
     type: z.literal('resize'),
     cols: z.number(),
@@ -125,5 +165,7 @@ export const TerminalServerMessage = z.discriminatedUnion('type', [
 ])
 
 export type Terminal = z.infer<typeof Terminal>
+export type TerminalPastePart = z.infer<typeof TerminalPastePart>
+export type TerminalPasteMessage = z.infer<typeof TerminalPasteMessage>
 export type TerminalSnapshot = z.infer<typeof TerminalSnapshot>
 export type TerminalSseEvents = typeof TerminalSseEvents

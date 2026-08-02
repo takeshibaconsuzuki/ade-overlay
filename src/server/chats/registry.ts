@@ -8,6 +8,7 @@ import {
 } from '../../api/server/chats'
 import { type Logger } from '../../api/server/logger'
 import { isProcessAlive } from '../processes'
+import { type TerminalPasteProvider } from '../terminals/paste'
 import { hookAncestorPids, hookCwd } from './hookForwarder'
 import {
   type ChatHookContext,
@@ -323,6 +324,10 @@ export class ChatRegistry {
       return null
     }
     return chatId ? provider.resumeLaunch(chatId) : provider.newLaunch()
+  }
+
+  getTerminalPaste(providerId: string): TerminalPasteProvider | null {
+    return this.providers.get(providerId)?.terminalPaste ?? null
   }
 
   getSnapshot(): ChatSnapshot {

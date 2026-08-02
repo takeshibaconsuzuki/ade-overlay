@@ -18,6 +18,10 @@ import {
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { type Logger } from '../../../api/server/logger'
 import {
+  pasteTextAndImagePaths,
+  type TerminalPasteProvider,
+} from '../../terminals/paste'
+import {
   ensureHookForwarderWrapper,
   hookForwardCommand,
 } from '../hookForwarder'
@@ -84,8 +88,22 @@ const HOOK_REFRESH_DESCRIPTION = new Set([
 // live description; the latest entries we need sit at the very end of the file.
 const TRANSCRIPT_TAIL_BYTES = 64 * 1024
 
+/**
+ * Claude treats backslashes in a bracketed-pasted path as escapes. Doubling
+ * them preserves Windows image paths through Claude's path parser.
+ */
+const pasteTextAndClaudeImagePaths: TerminalPasteProvider = (parts) =>
+  pasteTextAndImagePaths(
+    parts.map((part) =>
+      part.type === 'image'
+        ? { ...part, path: part.path.replaceAll('\\', '\\\\') }
+        : part,
+    ),
+  )
+
 export class ClaudeChatProvider implements ChatProvider {
   readonly id = CHAT_PROVIDER_ID.claude
+  readonly terminalPaste = pasteTextAndClaudeImagePaths
 
   // Marker substring identifying a hook command we own, so re-configuring a
   // worktree replaces our group instead of stacking duplicates.

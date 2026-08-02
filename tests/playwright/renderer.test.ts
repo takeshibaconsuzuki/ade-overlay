@@ -10,6 +10,7 @@ import {
   type WebSocketRoute,
 } from 'playwright'
 import { createServer, type ViteDevServer } from 'vite'
+import { clipboardReadPasteParts } from '../../src/renderer/src/chat/clipboardPaste'
 import { droppedFilePathInput } from '../../src/renderer/src/chat/imageDrop'
 
 type RecordedRequest = {
@@ -446,12 +447,7 @@ test('chat terminal shows link hover decorations only while its platform modifie
     dottedLinkBox.x + dottedLinkBox.width / 2,
     dottedLinkBox.y + dottedLinkBox.height / 2,
   )
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      }),
-  )
+  await page.waitForTimeout(50)
   await page.waitForFunction(() => {
     const link = document.querySelector(
       '[data-terminal-id="term-live"] .xterm-rows .xterm-underline-4',
@@ -548,6 +544,200 @@ test('chat terminal shows link hover decorations only while its platform modifie
   await page.close()
 })
 
+test('terminal routes ordered rich text and images through its WebSocket', async () => {
+  const page = await newMockedPage({ platform: 'MacIntel' })
+  await page.route('https://example.com/image.png', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-origin': '*',
+        'content-type': 'image/png',
+      },
+      body: 'pixels',
+    }),
+  )
+  const inputs: string[] = []
+  let markControlVReceived: (() => void) | undefined
+  const controlVReceived = new Promise<void>((resolve) => {
+    markControlVReceived = resolve
+  })
+  let markPasteReceived:
+    | ((message: Record<string, unknown>) => void)
+    | undefined
+  const pasteReceived = new Promise<Record<string, unknown>>((resolve) => {
+    markPasteReceived = resolve
+  })
+  await page.routeWebSocket(/\/terminals\/term-live\/socket/, (webSocket) => {
+    webSocket.onMessage((raw) => {
+      if (typeof raw !== 'string') {
+        return
+      }
+      const message = JSON.parse(raw) as {
+        type?: string
+        data?: string
+      }
+      if (message.type === 'paste') {
+        markPasteReceived?.(message)
+        return
+      }
+      if (message.type !== 'input' || message.data === undefined) {
+        return
+      }
+      inputs.push(message.data)
+      if (message.data === '\x16') {
+        markControlVReceived?.()
+      }
+    })
+  })
+
+  await page.goto(`${rendererUrl}/#chat`)
+  const terminal = page.locator('[data-terminal-id="term-live"]')
+  await terminal.waitFor()
+  const textarea = terminal.locator('.xterm-helper-textarea')
+  await textarea.press('Control+v')
+  await controlVReceived
+  await textarea.evaluate((textarea) => {
+    const clipboard = new DataTransfer()
+    clipboard.setData(
+      'text/html',
+      '<pre>    before\n\tline</pre><img src="https://example.com/image.png" alt="diagram"><code>  after\ttext</code>',
+    )
+    clipboard.setData('text/plain', '    before\n\tline\ndiagram  after\ttext')
+    textarea.dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      }),
+    )
+  })
+  assert.deepEqual(await pasteReceived, {
+    type: 'paste',
+    bracketedPasteMode: false,
+    parts: [
+      { type: 'text', text: '    before\n\tline\n' },
+      {
+        type: 'image',
+        mimeType: 'image/png',
+        dataBase64: 'cGl4ZWxz',
+        filename: 'image.png',
+        alt: 'diagram',
+      },
+      { type: 'text', text: '  after\ttext' },
+    ],
+  })
+  assert.deepEqual(inputs, ['\x16'])
+
+  await page.close()
+})
+
+test('retains a paste while the terminal WebSocket reconnects', async () => {
+  const page = await newMockedPage()
+  let firstSocket: WebSocketRoute | undefined
+  let markFirstConnection: (() => void) | undefined
+  const firstConnection = new Promise<void>((resolve) => {
+    markFirstConnection = resolve
+  })
+  let markReconnectedPaste:
+    | ((message: Record<string, unknown>) => void)
+    | undefined
+  const reconnectedPaste = new Promise<Record<string, unknown>>((resolve) => {
+    markReconnectedPaste = resolve
+  })
+  let connectionCount = 0
+  await page.routeWebSocket(/\/terminals\/term-live\/socket/, (webSocket) => {
+    connectionCount += 1
+    const connection = connectionCount
+    if (connection === 1) {
+      firstSocket = webSocket
+      markFirstConnection?.()
+    }
+    webSocket.onMessage((raw) => {
+      if (connection < 2 || typeof raw !== 'string') {
+        return
+      }
+      const message = JSON.parse(raw) as Record<string, unknown>
+      if (message.type === 'paste') {
+        markReconnectedPaste?.(message)
+      }
+    })
+  })
+
+  await page.goto(`${rendererUrl}/#chat`)
+  await firstConnection
+  assert.ok(firstSocket)
+  const textarea = page.locator(
+    '[data-terminal-id="term-live"] .xterm-helper-textarea',
+  )
+  await firstSocket.close()
+
+  await textarea.evaluate((textarea) => {
+    const clipboard = new DataTransfer()
+    clipboard.setData('text/plain', 'paste after reconnect')
+    textarea.dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      }),
+    )
+  })
+
+  assert.deepEqual(await reconnectedPaste, {
+    type: 'paste',
+    bracketedPasteMode: false,
+    parts: [{ type: 'text', text: 'paste after reconnect' }],
+  })
+
+  await page.close()
+})
+
+test('falls back to text for unsupported clipboard image formats', async () => {
+  const requestedTypes: string[] = []
+  const parts = await clipboardReadPasteParts({
+    read: async () => [
+      {
+        types: ['text/plain', 'image/svg+xml'],
+        getType: async (type: string) => {
+          requestedTypes.push(type)
+          return new Blob([type === 'text/plain' ? 'diagram' : '<svg/>'], {
+            type,
+          })
+        },
+      },
+    ],
+    readText: async () => '',
+  } as never)
+
+  assert.deepEqual(parts, [{ type: 'text', text: 'diagram' }])
+  assert.deepEqual(requestedTypes, ['text/plain'])
+})
+
+test('uses one preferred image representation per clipboard item', async () => {
+  const requestedTypes: string[] = []
+  const parts = await clipboardReadPasteParts({
+    read: async () => [
+      {
+        types: ['image/jpeg', 'image/png'],
+        getType: async (type: string) => {
+          requestedTypes.push(type)
+          return new Blob([type], { type })
+        },
+      },
+    ],
+    readText: async () => '',
+  } as never)
+
+  assert.equal(parts.length, 1)
+  assert.equal(parts[0].type, 'image')
+  assert.equal(parts[0].type === 'image' && parts[0].mimeType, 'image/png')
+  assert.equal(
+    parts[0].type === 'image' ? await parts[0].blob.text() : '',
+    'image/png',
+  )
+  assert.deepEqual(requestedTypes, ['image/png'])
+})
+
 test('formats dropped file paths for terminal input', () => {
   const input = droppedFilePathInput(
     [
@@ -568,10 +758,20 @@ test('formats dropped file paths for terminal input', () => {
 
 async function newMockedPage({
   disableWebgl = false,
+  platform,
 }: {
   disableWebgl?: boolean
+  platform?: string
 } = {}): Promise<Page> {
   const page = await browser.newPage()
+  if (platform) {
+    await page.addInitScript((value) => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value,
+      })
+    }, platform)
+  }
   if (disableWebgl) {
     await page.addInitScript(() => {
       const getContext = HTMLCanvasElement.prototype.getContext

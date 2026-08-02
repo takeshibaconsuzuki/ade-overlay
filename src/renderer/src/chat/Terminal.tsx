@@ -7,11 +7,18 @@ import '@xterm/xterm/css/xterm.css'
 import { SERVER_ORIGIN } from '../../../api/server/config'
 import { openFileInEditor } from '../../../api/server/generated'
 import {
+  TerminalPasteMessage,
   TerminalServerMessage,
   terminalSocketPath,
   type TerminalClientMessage,
 } from '../../../api/server/terminals'
 import { logger } from '../logger'
+import {
+  clipboardEventPasteParts,
+  clipboardReadPasteParts,
+  encodeTerminalPasteParts,
+  type ClipboardPastePart,
+} from './clipboardPaste'
 import { droppedFilePathInput, isFileDropItem } from './imageDrop'
 import {
   hasTerminalLinkModifier,
@@ -190,16 +197,65 @@ export function Terminal({
       }
     }
 
-    const pasteClipboard = async (): Promise<void> => {
-      try {
-        const text = await navigator.clipboard.readText()
-        if (text) {
-          term.paste(text)
-        }
-        term.focus()
-      } catch (error) {
-        logger.warn({ err: error, terminalId }, 'failed to paste terminal text')
+    let socket: WebSocket | null = null
+    let lastBracketedPasteMode = term.modes.bracketedPasteMode
+    let pendingInputActions = 0
+    const pendingInputMessages: TerminalClientMessage[] = []
+    let inputTail = Promise.resolve()
+    const enqueueInputAction = (task: () => Promise<void> | void): void => {
+      pendingInputActions += 1
+      inputTail = inputTail
+        .then(task)
+        .catch((error: unknown) => {
+          logger.warn({ err: error, terminalId }, 'terminal paste failed')
+        })
+        .finally(() => {
+          pendingInputActions -= 1
+        })
+    }
+    const sendOrQueueInputMessage = (message: TerminalClientMessage): void => {
+      if (!send(message)) {
+        pendingInputMessages.push(message)
       }
+    }
+    const sendOrQueueInput = (data: string): void => {
+      if (pendingInputActions > 0) {
+        enqueueInputAction(() => {
+          sendOrQueueInputMessage({ type: 'input', data })
+        })
+        return
+      }
+      sendOrQueueInputMessage({ type: 'input', data })
+    }
+    const queuePaste = (partsPromise: Promise<ClipboardPastePart[]>): void => {
+      const bracketedPasteMode = lastBracketedPasteMode
+      const partsResult = partsPromise.then(
+        (parts) => ({ parts }) as const,
+        (error: unknown) => ({ error }) as const,
+      )
+      enqueueInputAction(async () => {
+        const result = await partsResult
+        if ('error' in result) {
+          throw result.error
+        }
+        const { parts } = result
+        if (parts.length === 0) {
+          return
+        }
+        const encodedParts = await encodeTerminalPasteParts(parts)
+        sendOrQueueInputMessage(
+          TerminalPasteMessage.parse({
+            type: 'paste',
+            parts: encodedParts,
+            bracketedPasteMode,
+          }),
+        )
+      })
+    }
+
+    const pasteClipboard = (): void => {
+      queuePaste(clipboardReadPasteParts(navigator.clipboard))
+      term.focus()
     }
 
     term.attachCustomKeyEventHandler((event) => {
@@ -222,12 +278,22 @@ export function Terminal({
       if (term.hasSelection()) {
         void copySelection()
       } else {
-        void pasteClipboard()
+        pasteClipboard()
       }
     }
     term.element?.addEventListener('contextmenu', onContextMenu)
 
-    let socket: WebSocket | null = null
+    const onPasteCapture = (event: ClipboardEvent): void => {
+      if (!event.clipboardData) {
+        return
+      }
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      queuePaste(clipboardEventPasteParts(event.clipboardData))
+      term.focus()
+    }
+    container.addEventListener('paste', onPasteCapture, true)
+
     let pingTimer: ReturnType<typeof setInterval> | null = null
     let pongTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -239,16 +305,18 @@ export function Terminal({
     let generation = 0
     let lastTickAt: number | null = null
 
-    const send = (message: TerminalClientMessage): boolean => {
+    function send(message: TerminalClientMessage): boolean {
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         return false
       }
-      socket.send(JSON.stringify(message))
-      return true
+      try {
+        socket.send(JSON.stringify(message))
+        return true
+      } catch {
+        return false
+      }
     }
-    sendInputRef.current = (data) => {
-      send({ type: 'input', data })
-    }
+    sendInputRef.current = sendOrQueueInput
 
     const fitAndResizePty = (): void => {
       const rect = container.getBoundingClientRect()
@@ -359,6 +427,13 @@ export function Terminal({
           )
         }
         lastTickAt = now
+        if (
+          !socket ||
+          socket.readyState !== WebSocket.OPEN ||
+          socket.bufferedAmount > 0
+        ) {
+          return
+        }
         send({ type: 'ping' })
         if (pongTimer === null) {
           pongTimer = setTimeout(() => {
@@ -379,6 +454,7 @@ export function Terminal({
       const attempt = ++generation
       logger.info({ terminalId, viewerId, attempt }, 'terminal connecting')
 
+      lastBracketedPasteMode = term.modes.bracketedPasteMode
       term.reset()
       const next = new WebSocket(
         `${WS_ORIGIN}${terminalSocketPath(terminalId, viewerId)}`,
@@ -387,6 +463,12 @@ export function Terminal({
 
       next.onopen = () => {
         logger.info({ terminalId, viewerId, attempt }, 'terminal connected')
+        while (
+          pendingInputMessages.length > 0 &&
+          send(pendingInputMessages[0])
+        ) {
+          pendingInputMessages.shift()
+        }
         startHeartbeat()
         scheduleFit()
       }
@@ -406,7 +488,9 @@ export function Terminal({
         }
         const message = result.data
         if (message.type === 'output') {
-          term.write(message.data)
+          term.write(message.data, () => {
+            lastBracketedPasteMode = term.modes.bracketedPasteMode
+          })
         } else if (message.type === 'pong') {
           if (pongTimer !== null) {
             clearTimeout(pongTimer)
@@ -450,7 +534,7 @@ export function Terminal({
     }
 
     const onData = term.onData((data) => {
-      send({ type: 'input', data })
+      sendOrQueueInput(data)
     })
     const observer = new ResizeObserver(scheduleFit)
     observer.observe(container)
@@ -476,6 +560,7 @@ export function Terminal({
       window.removeEventListener('blur', clearLinkModifier)
       container.removeEventListener('mousemove', updateLinkModifier)
       term.element?.removeEventListener('contextmenu', onContextMenu)
+      container.removeEventListener('paste', onPasteCapture, true)
       fileLinks.dispose()
       if (socket) {
         socket.onclose = null

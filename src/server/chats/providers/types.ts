@@ -1,4 +1,5 @@
 import { type ChatStatus } from '../../../api/server/chats'
+import { type TerminalPasteProvider } from '../../terminals/paste'
 
 /**
  * The result of interpreting a single provider hook event. Optional fields are
@@ -46,6 +47,7 @@ export type ChatHookContext = {
  */
 export interface ChatProvider {
   readonly id: string
+  readonly terminalPaste: TerminalPasteProvider
 
   /** Merge this server's hook endpoint into the worktree's config files. */
   configureWorktree(worktree: WorktreeRef): Promise<void>

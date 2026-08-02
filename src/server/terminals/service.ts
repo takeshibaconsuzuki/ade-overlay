@@ -3,6 +3,7 @@ import { type WebSocket } from 'ws'
 import { type Logger } from '../../api/server/logger'
 import { type Terminal } from '../../api/server/terminals'
 import { TerminalManager, type TerminalManagerChange } from './manager'
+import { type TerminalPasteProvider } from './paste'
 
 export type TerminalChange = TerminalManagerChange
 
@@ -25,6 +26,7 @@ export class TerminalService {
   create(options: {
     worktreeId: string
     title?: string
+    terminalPaste: TerminalPasteProvider
     cwd: string
     command: string
     args: string[]
