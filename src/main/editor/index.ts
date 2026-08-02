@@ -48,6 +48,7 @@ export function createWindow(): BrowserWindow {
     window = null
   })
   window.on('focus', () => {
+    focusActiveWorktreeView()
     reportAppFocus(ADE_APP_ROLE.editor, APP_FOCUS_EVENT.focused, log)
   })
   window.on('resize', resizeViews)
@@ -173,6 +174,9 @@ function switchWorktree(
   const view = getOrCreateWorktreeView(command)
   if (activeWorktreeId === command.worktreeId) {
     view.setVisible(true)
+    if (window.isFocused()) {
+      focusActiveWorktreeView()
+    }
     return
   }
 
@@ -187,6 +191,9 @@ function switchWorktree(
   window.contentView.addChildView(view)
   view.setVisible(true)
   activeWorktreeId = command.worktreeId
+  if (window.isFocused()) {
+    focusActiveWorktreeView()
+  }
 }
 
 function showEditorWindow(): void {
@@ -201,6 +208,18 @@ function focusEditorWindow(): void {
     return
   }
   showWindowOnCurrentWorkspace(window, { focus: true })
+  focusActiveWorktreeView()
+}
+
+function focusActiveWorktreeView(): void {
+  if (!activeWorktreeId) {
+    return
+  }
+
+  const view = views.get(activeWorktreeId)
+  if (view && !view.webContents.isDestroyed()) {
+    view.webContents.focus()
+  }
 }
 
 async function postReadyIfPossible(): Promise<void> {

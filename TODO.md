@@ -5,7 +5,8 @@
 - Update terminal tab text
 - Double clicking on launcher app (mac only)
 - Include origins/ in search
-- Focus file / terminal on switch to code
 - Alt+k for pasting file reference to chat
 - Right click on word selects and copies instantly instead of pasting (mac only)
 - Working tooltip on live chat jitters
+- Hovering link without meta key takes away dotted underline
+- Text getting cut off on right hand side
