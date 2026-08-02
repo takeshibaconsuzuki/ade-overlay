@@ -11,6 +11,7 @@ import {
   type TerminalStatus,
 } from '../../api/server/terminals'
 import { getUserLoginShell } from '../userShell'
+import { TerminalOutputBuffer } from './outputBuffer'
 
 /**
  * How much recent PTY output to retain per terminal so a reconnecting renderer
@@ -48,6 +49,8 @@ type TerminalRecord = {
   // Bounded ring buffer of recent output, replayed to a (re)attaching socket.
   buffer: string[]
   bufferBytes: number
+  // Short live-output buffer that keeps multi-write TUI repaints together.
+  outputBuffer: TerminalOutputBuffer
   // At most one renderer views a terminal at a time; a fresh attach replaces it.
   socket: WebSocket | null
   // Identity of the currently-attached socket, so supersede/detach logs can name
@@ -141,6 +144,9 @@ export class TerminalManager {
       pty,
       buffer: [],
       bufferBytes: 0,
+      outputBuffer: new TerminalOutputBuffer((data) => {
+        send(record.socket, { type: 'output', data })
+      }),
       socket: null,
       socketId: null,
       viewerId: null,
@@ -149,9 +155,12 @@ export class TerminalManager {
 
     pty.onData((data) => {
       this.appendBuffer(record, data)
-      send(record.socket, { type: 'output', data })
+      if (record.socket) {
+        record.outputBuffer.write(data)
+      }
     })
     pty.onExit(({ exitCode }) => {
+      record.outputBuffer.flush()
       record.status = 'exited'
       record.exitCode = exitCode
       const terminal = toDescriptor(record)
@@ -199,6 +208,10 @@ export class TerminalManager {
       socket.close()
       return
     }
+
+    // Pending live output is already present in the replay buffer. Drop the
+    // pending batch before replaying so the new viewer receives it exactly once.
+    record.outputBuffer.clear()
 
     // Replace any prior viewer so only one socket receives output. Capture the
     // evicted socket's identity first: a perpetual reconnect war shows up here as
@@ -267,6 +280,7 @@ export class TerminalManager {
       // `wasOwner:false` distinguishes "the viewer left" from "we evicted it".
       const wasOwner = record.socket === socket
       if (wasOwner) {
+        record.outputBuffer.clear()
         record.socket = null
         record.socketId = null
         record.viewerId = null
@@ -278,6 +292,7 @@ export class TerminalManager {
     })
     socket.on('error', (error) => {
       if (record.socket === socket) {
+        record.outputBuffer.clear()
         record.socket = null
         record.socketId = null
         record.viewerId = null
@@ -302,6 +317,7 @@ export class TerminalManager {
     }
     const terminal = toDescriptor(record)
     this.terminals.delete(terminalId)
+    record.outputBuffer.clear()
     record.socket?.close()
     this.killPty(record)
     this.onChange({ type: 'removed', reason: 'closed', terminal })
@@ -317,6 +333,7 @@ export class TerminalManager {
 
   shutdown(): void {
     for (const record of [...this.terminals.values()]) {
+      record.outputBuffer.clear()
       record.socket?.close()
       this.killPty(record)
     }

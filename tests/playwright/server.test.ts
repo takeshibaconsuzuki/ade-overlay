@@ -43,6 +43,7 @@ import {
   TerminalManager,
   type TerminalManagerChange,
 } from '../../src/server/terminals/manager'
+import { TerminalOutputBuffer } from '../../src/server/terminals/outputBuffer'
 
 const execFileAsync = promisify(execFile)
 
@@ -350,6 +351,28 @@ test('finds a terminal by hook process ancestry', () => {
   })
 })
 
+test('coalesces adjacent terminal output in order', () => {
+  const output: string[] = []
+  const buffer = new TerminalOutputBuffer((data) => output.push(data))
+
+  buffer.write('screen diff')
+  buffer.write('final cursor')
+  buffer.flush()
+
+  assert.deepEqual(output, ['screen difffinal cursor'])
+})
+
+test('clears terminal output without delivering a pending batch', async () => {
+  const output: string[] = []
+  const buffer = new TerminalOutputBuffer((data) => output.push(data), 1)
+
+  buffer.write('stale viewer output')
+  buffer.clear()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+
+  assert.deepEqual(output, [])
+})
+
 test('wraps chat launch with preChatCommand in the same shell', () => {
   if (process.platform === 'win32') {
     return
@@ -448,6 +471,7 @@ test('reports terminal identity when a terminal is closed', () => {
     status: 'running',
     exitCode: null,
     pty: { kill() {} },
+    outputBuffer: new TerminalOutputBuffer(() => {}),
   })
 
   manager.close('terminal-1')
