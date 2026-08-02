@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -277,6 +278,31 @@ export function Terminal({
         fitFrame = null
         fitAndResizePty()
       })
+    }
+
+    let webglAddon: WebglAddon | null = null
+    try {
+      const addon = new WebglAddon()
+      webglAddon = addon
+      addon.onContextLoss(() => {
+        logger.warn(
+          { terminalId, viewerId },
+          'terminal WebGL context lost; falling back to DOM renderer',
+        )
+        addon.dispose()
+        if (webglAddon === addon) {
+          webglAddon = null
+        }
+        scheduleFit()
+      })
+      term.loadAddon(addon)
+    } catch (error) {
+      webglAddon?.dispose()
+      webglAddon = null
+      logger.warn(
+        { err: error, terminalId, viewerId },
+        'failed to enable terminal WebGL renderer; using DOM renderer',
+      )
     }
 
     const stopHeartbeat = (): void => {

@@ -8,4 +8,3 @@
 - Alt+k for pasting file reference to chat
 - Right click on word selects and copies instantly instead of pasting (mac only)
 - Working tooltip on live chat jitters
-- Text getting cut off on right hand side

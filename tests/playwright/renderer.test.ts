@@ -337,7 +337,9 @@ test('chat app shows live terminals and resumes historical sessions', async () =
 })
 
 test('chat terminal shows link hover decorations only while its platform modifier is pressed', async () => {
-  const page = await newMockedPage()
+  // This test inspects the DOM renderer's ANSI decoration spans directly.
+  // Production prefers WebGL, but must preserve this behavior in its fallback.
+  const page = await newMockedPage({ disableWebgl: true })
   let terminalWebSocket: WebSocketRoute | undefined
   await page.routeWebSocket(/\/terminals\/term-live\/socket/, (webSocket) => {
     terminalWebSocket = webSocket
@@ -564,8 +566,23 @@ test('formats dropped file paths for terminal input', () => {
   )
 })
 
-async function newMockedPage(): Promise<Page> {
+async function newMockedPage({
+  disableWebgl = false,
+}: {
+  disableWebgl?: boolean
+} = {}): Promise<Page> {
   const page = await browser.newPage()
+  if (disableWebgl) {
+    await page.addInitScript(() => {
+      const getContext = HTMLCanvasElement.prototype.getContext
+      HTMLCanvasElement.prototype.getContext = function (...args) {
+        if (args[0] === 'webgl2') {
+          return null
+        }
+        return Reflect.apply(getContext, this, args)
+      } as typeof getContext
+    })
+  }
   await page.addInitScript(() => {
     window.__desktopCalls = []
     window.__apiCalls = []
