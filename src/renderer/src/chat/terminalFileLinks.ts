@@ -15,6 +15,17 @@ export type TerminalFileLink = {
   column?: number
 }
 
+export function isMacTerminalPlatform(platform: string): boolean {
+  return platform.startsWith('Mac')
+}
+
+export function hasTerminalLinkModifier(
+  event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'>,
+  isMac: boolean,
+): boolean {
+  return isMac ? event.metaKey : event.ctrlKey
+}
+
 const FILE_TOKEN =
   /(?:(?:[A-Za-z]:[\\/](?![\\/])|[/~]|\.{1,2}[\\/])[^ \t\r\n"'`<>|]+|(?:[\w@.+-]+[\\/])+[\w@.+-]+|[\w@+.-]*[\w@+-]\.[A-Za-z][A-Za-z0-9]{0,11})(?::\d+(?::\d+)?|#L\d+(?:C\d+)?)?/g
 const TRAILING_PUNCTUATION = /[),.;!?\]}]+$/
@@ -71,7 +82,7 @@ export function findTerminalFileLinks(text: string): TerminalFileLink[] {
 
 export function terminalFileLinkProvider(
   terminal: Terminal,
-  activate: (link: TerminalFileLink) => void,
+  activate: (event: MouseEvent, link: TerminalFileLink) => void,
 ): ILinkProvider {
   return {
     provideLinks(bufferLineNumber, callback) {
@@ -96,7 +107,7 @@ export function terminalFileLinkProvider(
           return {
             range: { start, end },
             text: link.text,
-            activate: () => activate(link),
+            activate: (event) => activate(event, link),
           }
         })
         .filter((link): link is ILink => link !== undefined)

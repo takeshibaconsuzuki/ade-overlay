@@ -330,6 +330,75 @@ test('chat app shows live terminals and resumes historical sessions', async () =
   await page.close()
 })
 
+test('chat terminal underlines links only while its platform modifier is pressed', async () => {
+  const page = await newMockedPage()
+
+  await page.goto(`${rendererUrl}/#chat`)
+  const terminal = page.locator('[data-terminal-id="term-live"]')
+  await terminal.waitFor()
+  await terminal.evaluate((element) => {
+    const xterm = document.createElement('div')
+    xterm.className = 'xterm xterm-cursor-pointer'
+    xterm.dataset.testTerminalLinkCursor = ''
+    const rows = document.createElement('div')
+    rows.className = 'xterm-rows'
+    const link = document.createElement('span')
+    link.dataset.testTerminalLink = ''
+    link.style.textDecoration = 'underline'
+    link.textContent = 'https://example.com'
+    rows.append(link)
+    xterm.append(rows)
+    element.append(xterm)
+  })
+  const link = terminal.locator('[data-test-terminal-link]')
+  const linkCursor = terminal.locator('[data-test-terminal-link-cursor]')
+
+  assert.equal(
+    await link.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    ),
+    'none',
+  )
+  assert.equal(
+    await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
+    'text',
+  )
+  await page.evaluate(() => {
+    const isMac = navigator.platform.startsWith('Mac')
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        ctrlKey: !isMac,
+        metaKey: isMac,
+      }),
+    )
+  })
+  assert.equal(
+    await link.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    ),
+    'underline',
+  )
+  assert.equal(
+    await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
+    'pointer',
+  )
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keyup'))
+  })
+  assert.equal(
+    await link.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    ),
+    'none',
+  )
+  assert.equal(
+    await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
+    'text',
+  )
+
+  await page.close()
+})
+
 test('formats dropped file paths for terminal input', () => {
   const input = droppedFilePathInput(
     [

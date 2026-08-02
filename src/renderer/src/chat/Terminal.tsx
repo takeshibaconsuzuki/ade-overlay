@@ -12,7 +12,10 @@ import {
 } from '../../../api/server/terminals'
 import { logger } from '../logger'
 import { droppedFilePathInput, isFileDropItem } from './imageDrop'
+import styles from './Terminal.module.css'
 import {
+  hasTerminalLinkModifier,
+  isMacTerminalPlatform,
   terminalFileLinkProvider,
   type TerminalFileLink,
 } from './terminalFileLinks'
@@ -65,7 +68,28 @@ export function Terminal({
 
     logger.info({ terminalId, viewerId }, 'terminal viewer mounted')
 
-    const openExternalUrl = (url: string): void => {
+    const isMac = isMacTerminalPlatform(navigator.platform)
+    const term = new XTerm({
+      cursorBlink: false,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontSize: 13,
+      linkHandler: {
+        activate: (event, url) => openExternalUrl(event, url),
+      },
+      scrollback: 1_000_000,
+      theme: { background: '#111113' },
+    })
+    function restoreTerminalLinkHover(): void {
+      requestAnimationFrame(() => {
+        term.refresh(0, term.rows - 1)
+      })
+    }
+    function openExternalUrl(event: MouseEvent, url: string): void {
+      if (!hasTerminalLinkModifier(event, isMac)) {
+        restoreTerminalLinkHover()
+        return
+      }
       void window.desktop.openExternalUrl(url).catch((error: unknown) => {
         logger.warn(
           { err: error, terminalId, url },
@@ -73,25 +97,18 @@ export function Terminal({
         )
       })
     }
-    const term = new XTerm({
-      cursorBlink: false,
-      fontFamily:
-        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: 13,
-      linkHandler: {
-        activate: (_event, url) => openExternalUrl(url),
-      },
-      scrollback: 1_000_000,
-      theme: { background: '#111113' },
-    })
     const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon((_event, url) =>
-      openExternalUrl(url),
+    const webLinksAddon = new WebLinksAddon((event, url) =>
+      openExternalUrl(event, url),
     )
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     const fileLinks = term.registerLinkProvider(
-      terminalFileLinkProvider(term, (link: TerminalFileLink) => {
+      terminalFileLinkProvider(term, (event, link: TerminalFileLink) => {
+        if (!hasTerminalLinkModifier(event, isMac)) {
+          restoreTerminalLinkHover()
+          return
+        }
         void openFileInEditor({
           body: {
             worktreeId,
@@ -118,6 +135,20 @@ export function Terminal({
     )
     term.open(container)
     termRef.current = term
+
+    const updateLinkModifier = (event: KeyboardEvent | MouseEvent): void => {
+      container.classList.toggle(
+        styles.linkModifierPressed,
+        hasTerminalLinkModifier(event, isMac),
+      )
+    }
+    const clearLinkModifier = (): void => {
+      container.classList.remove(styles.linkModifierPressed)
+    }
+    window.addEventListener('keydown', updateLinkModifier)
+    window.addEventListener('keyup', updateLinkModifier)
+    window.addEventListener('blur', clearLinkModifier)
+    container.addEventListener('mousemove', updateLinkModifier)
 
     const copySelection = async (): Promise<void> => {
       if (!term.hasSelection()) {
@@ -386,6 +417,10 @@ export function Terminal({
       }
       observer.disconnect()
       onData.dispose()
+      window.removeEventListener('keydown', updateLinkModifier)
+      window.removeEventListener('keyup', updateLinkModifier)
+      window.removeEventListener('blur', clearLinkModifier)
+      container.removeEventListener('mousemove', updateLinkModifier)
       term.element?.removeEventListener('contextmenu', onContextMenu)
       fileLinks.dispose()
       if (socket) {
@@ -462,6 +497,7 @@ export function Terminal({
   return (
     <div
       ref={containerRef}
+      className={styles.root}
       data-terminal-id={terminalId}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}

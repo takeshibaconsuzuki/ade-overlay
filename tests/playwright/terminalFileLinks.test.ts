@@ -1,6 +1,31 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { findTerminalFileLinks } from '../../src/renderer/src/chat/terminalFileLinks'
+import {
+  findTerminalFileLinks,
+  hasTerminalLinkModifier,
+  isMacTerminalPlatform,
+} from '../../src/renderer/src/chat/terminalFileLinks'
+
+test('uses Command on macOS and Control on other platforms for terminal links', () => {
+  assert.equal(isMacTerminalPlatform('MacIntel'), true)
+  assert.equal(isMacTerminalPlatform('Win32'), false)
+  assert.equal(
+    hasTerminalLinkModifier({ ctrlKey: false, metaKey: true }, true),
+    true,
+  )
+  assert.equal(
+    hasTerminalLinkModifier({ ctrlKey: true, metaKey: false }, true),
+    false,
+  )
+  assert.equal(
+    hasTerminalLinkModifier({ ctrlKey: true, metaKey: false }, false),
+    true,
+  )
+  assert.equal(
+    hasTerminalLinkModifier({ ctrlKey: false, metaKey: true }, false),
+    false,
+  )
+})
 
 test('finds terminal file paths and source locations', () => {
   assert.deepEqual(
