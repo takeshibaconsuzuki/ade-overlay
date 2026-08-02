@@ -51,9 +51,15 @@ let tempDir: string
 let server: ReturnType<typeof createServer>
 let api: APIRequestContext
 let baseUrl: string
+let originalHome: string | undefined
+let originalUserProfile: string | undefined
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'ade-overlay-test-'))
+  originalHome = process.env.HOME
+  originalUserProfile = process.env.USERPROFILE
+  process.env.HOME = join(tempDir, 'home')
+  process.env.USERPROFILE = process.env.HOME
   process.env.ADE_OVERLAY_DATA_DIR = join(tempDir, 'data')
   server = createServer()
   await server.listen({ host: '127.0.0.1', port: 0 })
@@ -68,6 +74,7 @@ afterEach(async () => {
   await api?.dispose()
   await server?.close()
   delete process.env.ADE_OVERLAY_DATA_DIR
+  restoreHome(originalHome, originalUserProfile)
   await rm(tempDir, { recursive: true, force: true })
 })
 
