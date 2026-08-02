@@ -12,7 +12,6 @@ import {
 } from '../../../api/server/terminals'
 import { logger } from '../logger'
 import { droppedFilePathInput, isFileDropItem } from './imageDrop'
-import styles from './Terminal.module.css'
 import {
   hasTerminalLinkModifier,
   isMacTerminalPlatform,
@@ -28,6 +27,35 @@ const RECONNECT_DELAY_MS = 1_000
 type TerminalSize = {
   cols: number
   rows: number
+}
+
+type XTermWithLinkifier = {
+  _core?: {
+    linkifier?: {
+      currentLink?: {
+        link?: {
+          decorations?: {
+            pointerCursor: boolean
+            underline: boolean
+          }
+        }
+      }
+    }
+  }
+}
+
+function setHoveredLinkDecorations(term: XTerm, enabled: boolean): void {
+  // xterm's public API can update ILink.decorations but does not expose the
+  // currently hovered link. Its internal linkifier does, including for OSC 8
+  // and addon-provided links. Updating the decorations makes xterm rerender the
+  // original cell attributes instead of trying to reconstruct ANSI styles.
+  const decorations = (term as unknown as XTermWithLinkifier)._core?.linkifier
+    ?.currentLink?.link?.decorations
+  if (!decorations) {
+    return
+  }
+  decorations.underline = enabled
+  decorations.pointerCursor = enabled
 }
 
 /**
@@ -80,14 +108,8 @@ export function Terminal({
       scrollback: 1_000_000,
       theme: { background: '#111113' },
     })
-    function restoreTerminalLinkHover(): void {
-      requestAnimationFrame(() => {
-        term.refresh(0, term.rows - 1)
-      })
-    }
     function openExternalUrl(event: MouseEvent, url: string): void {
       if (!hasTerminalLinkModifier(event, isMac)) {
-        restoreTerminalLinkHover()
         return
       }
       void window.desktop.openExternalUrl(url).catch((error: unknown) => {
@@ -106,7 +128,6 @@ export function Terminal({
     const fileLinks = term.registerLinkProvider(
       terminalFileLinkProvider(term, (event, link: TerminalFileLink) => {
         if (!hasTerminalLinkModifier(event, isMac)) {
-          restoreTerminalLinkHover()
           return
         }
         void openFileInEditor({
@@ -136,15 +157,21 @@ export function Terminal({
     term.open(container)
     termRef.current = term
 
+    let linkModifierPressed = false
+    const applyLinkModifier = (): void => {
+      setHoveredLinkDecorations(term, linkModifierPressed)
+    }
     const updateLinkModifier = (event: KeyboardEvent | MouseEvent): void => {
-      container.classList.toggle(
-        styles.linkModifierPressed,
-        hasTerminalLinkModifier(event, isMac),
-      )
+      linkModifierPressed = hasTerminalLinkModifier(event, isMac)
+      applyLinkModifier()
     }
     const clearLinkModifier = (): void => {
-      container.classList.remove(styles.linkModifierPressed)
+      linkModifierPressed = false
+      applyLinkModifier()
     }
+    const linkRender = term.onRender(() => {
+      queueMicrotask(applyLinkModifier)
+    })
     window.addEventListener('keydown', updateLinkModifier)
     window.addEventListener('keyup', updateLinkModifier)
     window.addEventListener('blur', clearLinkModifier)
@@ -417,6 +444,7 @@ export function Terminal({
       }
       observer.disconnect()
       onData.dispose()
+      linkRender.dispose()
       window.removeEventListener('keydown', updateLinkModifier)
       window.removeEventListener('keyup', updateLinkModifier)
       window.removeEventListener('blur', clearLinkModifier)
@@ -497,7 +525,6 @@ export function Terminal({
   return (
     <div
       ref={containerRef}
-      className={styles.root}
       data-terminal-id={terminalId}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}

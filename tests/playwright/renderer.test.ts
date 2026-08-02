@@ -2,7 +2,13 @@ import { strict as assert } from 'node:assert'
 import { resolve } from 'node:path'
 import { after, before, test } from 'node:test'
 import react from '@vitejs/plugin-react'
-import { chromium, type Browser, type Page, type Route } from 'playwright'
+import {
+  chromium,
+  type Browser,
+  type Page,
+  type Route,
+  type WebSocketRoute,
+} from 'playwright'
 import { createServer, type ViteDevServer } from 'vite'
 import { droppedFilePathInput } from '../../src/renderer/src/chat/imageDrop'
 
@@ -330,39 +336,161 @@ test('chat app shows live terminals and resumes historical sessions', async () =
   await page.close()
 })
 
-test('chat terminal underlines links only while its platform modifier is pressed', async () => {
+test('chat terminal shows link hover decorations only while its platform modifier is pressed', async () => {
   const page = await newMockedPage()
+  let terminalWebSocket: WebSocketRoute | undefined
+  await page.routeWebSocket(/\/terminals\/term-live\/socket/, (webSocket) => {
+    terminalWebSocket = webSocket
+    webSocket.send(
+      JSON.stringify({
+        type: 'output',
+        data: '\u001b[4:4m\u001b[58:2::255:0:0mhttps://example.com\u001b[0m',
+      }),
+    )
+  })
 
   await page.goto(`${rendererUrl}/#chat`)
   const terminal = page.locator('[data-terminal-id="term-live"]')
   await terminal.waitFor()
-  await terminal.evaluate((element) => {
-    const xterm = document.createElement('div')
-    xterm.className = 'xterm xterm-cursor-pointer'
-    xterm.dataset.testTerminalLinkCursor = ''
-    const rows = document.createElement('div')
-    rows.className = 'xterm-rows'
-    const link = document.createElement('span')
-    link.dataset.testTerminalLink = ''
-    link.style.textDecoration = 'underline'
-    link.textContent = 'https://example.com'
-    rows.append(link)
-    xterm.append(rows)
-    element.append(xterm)
-  })
-  const link = terminal.locator('[data-test-terminal-link]')
-  const linkCursor = terminal.locator('[data-test-terminal-link-cursor]')
+  const dottedLink = terminal.locator('.xterm-rows .xterm-underline-4')
+  await dottedLink.waitFor()
+  const linkCursor = terminal.locator('.xterm-screen')
 
   assert.equal(
-    await link.evaluate(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'dotted',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     ),
-    'none',
+    'underline',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationColor,
+    ),
+    'rgb(255, 0, 0)',
+  )
+
+  const dottedLinkBox = await dottedLink.boundingBox()
+  assert.ok(dottedLinkBox)
+  await page.mouse.move(
+    dottedLinkBox.x + dottedLinkBox.width / 2,
+    dottedLinkBox.y + dottedLinkBox.height / 2,
+  )
+
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'dotted',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationLine,
+    ),
+    'underline',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationColor,
+    ),
+    'rgb(255, 0, 0)',
   )
   assert.equal(
     await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
     'text',
   )
+
+  assert.ok(terminalWebSocket)
+  terminalWebSocket.send(
+    JSON.stringify({
+      type: 'output',
+      data: '\r\u001b[4:4m\u001b[58:2::255:0:0mhttps://openai.com/\u001b[0m',
+    }),
+  )
+  await page.waitForFunction(() =>
+    document
+      .querySelector(
+        '[data-terminal-id="term-live"] .xterm-rows .xterm-underline-4',
+      )
+      ?.textContent?.includes('https://openai.com/'),
+  )
+  await page.evaluate(
+    () => new Promise<void>((resolve) => queueMicrotask(resolve)),
+  )
+
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'dotted',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationColor,
+    ),
+    'rgb(255, 0, 0)',
+  )
+  assert.equal(
+    await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
+    'text',
+  )
+
+  await page.mouse.click(
+    dottedLinkBox.x + dottedLinkBox.width / 2,
+    dottedLinkBox.y + dottedLinkBox.height / 2,
+  )
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
+  await page.waitForFunction(() => {
+    const link = document.querySelector(
+      '[data-terminal-id="term-live"] .xterm-rows .xterm-underline-4',
+    )
+    const screen = document.querySelector(
+      '[data-terminal-id="term-live"] .xterm-screen',
+    )
+    if (!link || !screen) {
+      return false
+    }
+    const decoration = getComputedStyle(link)
+    return (
+      decoration.textDecorationStyle === 'dotted' &&
+      decoration.textDecorationColor === 'rgb(255, 0, 0)' &&
+      getComputedStyle(screen).cursor === 'text'
+    )
+  })
+
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'dotted',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationColor,
+    ),
+    'rgb(255, 0, 0)',
+  )
+  assert.equal(
+    await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
+    'text',
+  )
+  assert.equal(
+    (await page.evaluate(() => window.__desktopCalls)).some((call) =>
+      call.startsWith('openExternalUrl:'),
+    ),
+    false,
+  )
+
   await page.evaluate(() => {
     const isMac = navigator.platform.startsWith('Mac')
     window.dispatchEvent(
@@ -373,7 +501,13 @@ test('chat terminal underlines links only while its platform modifier is pressed
     )
   })
   assert.equal(
-    await link.evaluate(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'solid',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     ),
     'underline',
@@ -382,14 +516,27 @@ test('chat terminal underlines links only while its platform modifier is pressed
     await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
     'pointer',
   )
+
   await page.evaluate(() => {
     window.dispatchEvent(new KeyboardEvent('keyup'))
   })
   assert.equal(
-    await link.evaluate(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationStyle,
+    ),
+    'dotted',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     ),
-    'none',
+    'underline',
+  )
+  assert.equal(
+    await dottedLink.evaluate(
+      (element) => getComputedStyle(element).textDecorationColor,
+    ),
+    'rgb(255, 0, 0)',
   )
   assert.equal(
     await linkCursor.evaluate((element) => getComputedStyle(element).cursor),
