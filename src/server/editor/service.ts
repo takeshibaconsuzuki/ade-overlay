@@ -49,7 +49,10 @@ export class EditorService {
   private editorClientCount = 0
   // Last file requested per worktree, replayed when the helper extension
   // (re)connects so a cold session start never misses the open.
-  private readonly lastOpenFile = new Map<string, string>()
+  private readonly lastOpenFile = new Map<
+    string,
+    { filePath: string; line?: number; column?: number }
+  >()
   private readonly pendingCommandAcks = new Map<string, () => void>()
   private shuttingDown = false
 
@@ -134,11 +137,15 @@ export class EditorService {
     this.log.info('editor focus emitted')
   }
 
-  async openFile(worktreeId: string, filePath: string): Promise<void> {
+  async openFile(
+    worktreeId: string,
+    filePath: string,
+    position?: { line?: number; column?: number },
+  ): Promise<void> {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
-    this.lastOpenFile.set(worktreeId, filePath)
+    this.lastOpenFile.set(worktreeId, { filePath, ...position })
     const session = await this.ensureSession(worktreeId)
     await this.ensureEditorAppReady()
     this.emitCommand({
@@ -146,11 +153,18 @@ export class EditorService {
       worktreeId,
       url: session.url,
       filePath,
+      line: position?.line,
+      column: position?.column,
     })
-    this.log.info({ worktreeId, filePath }, 'editor open-file emitted')
+    this.log.info(
+      { worktreeId, filePath, ...position },
+      'editor open-file emitted',
+    )
   }
 
-  getLastOpenFile(worktreeId: string): string | undefined {
+  getLastOpenFile(
+    worktreeId: string,
+  ): { filePath: string; line?: number; column?: number } | undefined {
     return this.lastOpenFile.get(worktreeId)
   }
 

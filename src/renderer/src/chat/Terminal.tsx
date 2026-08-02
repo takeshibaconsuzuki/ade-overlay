@@ -4,6 +4,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { SERVER_ORIGIN } from '../../../api/server/config'
+import { openFileInEditor } from '../../../api/server/generated'
 import {
   TerminalServerMessage,
   terminalSocketPath,
@@ -11,6 +12,10 @@ import {
 } from '../../../api/server/terminals'
 import { logger } from '../logger'
 import { droppedFilePathInput, isFileDropItem } from './imageDrop'
+import {
+  terminalFileLinkProvider,
+  type TerminalFileLink,
+} from './terminalFileLinks'
 
 const WS_ORIGIN = SERVER_ORIGIN.replace(/^http/, 'ws')
 const PING_INTERVAL_MS = 5_000
@@ -29,11 +34,13 @@ type TerminalSize = {
  */
 export function Terminal({
   terminalId,
+  worktreeId,
   active,
   focusToken,
   onExit,
 }: {
   terminalId: string
+  worktreeId: string
   active: boolean
   focusToken: number
   onExit?: () => void
@@ -83,6 +90,32 @@ export function Terminal({
     )
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
+    const fileLinks = term.registerLinkProvider(
+      terminalFileLinkProvider(term, (link: TerminalFileLink) => {
+        void openFileInEditor({
+          body: {
+            worktreeId,
+            filePath: link.filePath,
+            line: link.line,
+            column: link.column,
+          },
+        })
+          .then(({ error }) => {
+            if (error) {
+              logger.warn(
+                { err: error, terminalId, worktreeId, filePath: link.filePath },
+                'failed to open terminal file link',
+              )
+            }
+          })
+          .catch((error: unknown) => {
+            logger.warn(
+              { err: error, terminalId, worktreeId, filePath: link.filePath },
+              'failed to request opening terminal file link',
+            )
+          })
+      }),
+    )
     term.open(container)
     termRef.current = term
 
@@ -354,6 +387,7 @@ export function Terminal({
       observer.disconnect()
       onData.dispose()
       term.element?.removeEventListener('contextmenu', onContextMenu)
+      fileLinks.dispose()
       if (socket) {
         socket.onclose = null
         socket.close()
@@ -363,7 +397,7 @@ export function Terminal({
       refitRef.current = null
       sendInputRef.current = null
     }
-  }, [terminalId, viewerId])
+  }, [terminalId, viewerId, worktreeId])
 
   useEffect(() => {
     if (!active) {

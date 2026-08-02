@@ -79,6 +79,10 @@ test('serves OpenAPI and validates app focus and log routes', async () => {
   }
   assert.equal(spec.paths['/worktrees'].get.operationId, 'listWorktrees')
   assert.equal(spec.paths['/terminals'].post.operationId, 'createTerminal')
+  assert.equal(
+    spec.paths['/editor/open-file'].post.operationId,
+    'openFileInEditor',
+  )
 
   const logs = await api.post('/logs', {
     data: {

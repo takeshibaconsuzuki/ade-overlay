@@ -88,8 +88,18 @@ function handleEvent(raw) {
   try {
     const payload = JSON.parse(data)
     if (payload && typeof payload.filePath === 'string') {
+      const line = Number.isInteger(payload.line) && payload.line > 0
+        ? payload.line - 1
+        : undefined
+      const column = Number.isInteger(payload.column) && payload.column > 0
+        ? payload.column - 1
+        : 0
+      const selection = line === undefined
+        ? undefined
+        : new vscode.Range(line, column, line, column)
       void vscode.window.showTextDocument(vscode.Uri.file(payload.filePath), {
         preview: false,
+        selection,
       })
     }
   } catch {

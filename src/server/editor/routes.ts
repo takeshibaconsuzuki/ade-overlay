@@ -1,5 +1,7 @@
 import { request as httpRequest } from 'node:http'
 import { createConnection } from 'node:net'
+import { homedir } from 'node:os'
+import { isAbsolute, resolve } from 'node:path'
 import { type Duplex } from 'node:stream'
 import {
   type FastifyInstance,
@@ -15,6 +17,7 @@ import {
   EDITOR_COMMAND_STREAM_PATH,
   EDITOR_EXTENSION_COMMAND_STREAM_PATH,
   EDITOR_EXTENSION_OPEN_FILE_EVENT,
+  EDITOR_OPEN_FILE_PATH,
   EDITOR_READY_PATH,
   EDITOR_SESSION_STATUS_EVENT,
   EDITOR_SESSION_STREAM_PATH,
@@ -25,6 +28,8 @@ import {
   EditorCommandStreamResponse,
   EditorExtensionCommandQuery,
   EditorExtensionCommandSseEvents,
+  EditorOpenFileRequest,
+  EditorOpenFileResponse,
   EditorReadyRequest,
   EditorReadyResponse,
   EditorSessionSseEvents,
@@ -133,6 +138,32 @@ export function registerEditorRoutes(
         url: response.url,
         alreadyStarted: response.editorAlreadyStarted,
       }
+    },
+  })
+
+  routes.route({
+    method: 'POST',
+    url: EDITOR_OPEN_FILE_PATH,
+    schema: {
+      operationId: 'openFileInEditor',
+      body: EditorOpenFileRequest,
+      response: {
+        200: EditorOpenFileResponse,
+        404: ErrorResponse,
+        500: ErrorResponse,
+      },
+    },
+    handler: async (request) => {
+      const { worktreeId, filePath, line, column } = request.body
+      const worktree = await registry.getWorktreeById(worktreeId)
+      const resolvedPath =
+        filePath.startsWith('~/') || filePath.startsWith('~\\')
+          ? resolve(homedir(), filePath.slice(2))
+          : isAbsolute(filePath)
+            ? filePath
+            : resolve(worktree.path, filePath)
+      await editor.openFile(worktreeId, resolvedPath, { line, column })
+      return { ok: true as const }
     },
   })
 
@@ -471,6 +502,8 @@ function streamEditorExtensionCommands(
     if (command.type === 'open-file' && command.worktreeId === worktreeId) {
       const payload: EditorExtensionOpenFileCommand = {
         filePath: command.filePath,
+        line: command.line,
+        column: command.column,
       }
       stream.send(EDITOR_EXTENSION_OPEN_FILE_EVENT, payload)
     }
@@ -483,10 +516,9 @@ function streamEditorExtensionCommands(
 
   // Replay the last requested file so a freshly booted session (whose extension
   // connects after the command was emitted) still opens it.
-  const lastFilePath = editor.getLastOpenFile(worktreeId)
-  if (lastFilePath) {
-    const payload: EditorExtensionOpenFileCommand = { filePath: lastFilePath }
-    stream.send(EDITOR_EXTENSION_OPEN_FILE_EVENT, payload)
+  const lastOpenFile = editor.getLastOpenFile(worktreeId)
+  if (lastOpenFile) {
+    stream.send(EDITOR_EXTENSION_OPEN_FILE_EVENT, lastOpenFile)
   }
 }
 

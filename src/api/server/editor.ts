@@ -9,6 +9,7 @@ export const EDITOR_COMMAND_ACK_PATH = '/editorCommandAcks'
 export const EDITOR_EXTENSION_COMMAND_STREAM_PATH = '/editorExtensionCommands'
 export const EDITOR_SESSION_STREAM_PATH = '/editorSessions'
 export const EDITOR_SHOW_PATH = '/showEditor'
+export const EDITOR_OPEN_FILE_PATH = `${EDITOR_BASE_PATH}/open-file`
 export const EDITOR_READY_PATH = `${EDITOR_BASE_PATH}/ready`
 export const VSCODE_SERVER_STOP_PATH =
   '/worktrees/:worktreeId/vscode-server/stop'
@@ -38,6 +39,8 @@ export type EditorOpenFileCommand = {
   worktreeId: WorktreeId
   url: string
   filePath: string
+  line?: number
+  column?: number
 }
 
 export type EditorCommand =
@@ -72,6 +75,8 @@ export const EditorOpenFileCommand = z.object({
   worktreeId: WorktreeId,
   url: z.string(),
   filePath: z.string(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
 })
 
 export const EditorCommand = z.discriminatedUnion('type', [
@@ -133,6 +138,8 @@ export const EditorExtensionCommandQuery = z.object({
 
 export const EditorExtensionOpenFileCommand = z.object({
   filePath: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
 })
 
 export const EditorExtensionCommandSseEvents = defineSseEvents({
@@ -147,6 +154,17 @@ export const EditorWorktreeResponse = z.object({
   worktreeId: WorktreeId,
   url: z.string(),
   alreadyStarted: z.boolean(),
+})
+
+export const EditorOpenFileRequest = z.object({
+  worktreeId: WorktreeId,
+  filePath: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
+})
+
+export const EditorOpenFileResponse = z.object({
+  ok: z.literal(true),
 })
 
 export const EditorCommandAckRequest = z.object({
@@ -185,6 +203,8 @@ export type EditorExtensionCommandQuery = z.infer<
 export type EditorExtensionOpenFileCommand = z.infer<
   typeof EditorExtensionOpenFileCommand
 >
+export type EditorOpenFileRequest = z.infer<typeof EditorOpenFileRequest>
+export type EditorOpenFileResponse = z.infer<typeof EditorOpenFileResponse>
 export type EditorSessionSnapshot = z.infer<typeof EditorSessionSnapshot>
 export type EditorWorktreeRequest = z.infer<typeof EditorWorktreeRequest>
 export type EditorWorktreeResponse = z.infer<typeof EditorWorktreeResponse>

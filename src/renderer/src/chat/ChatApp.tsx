@@ -400,6 +400,7 @@ export function ChatApp({ title }: { title: string }): React.JSX.Element {
                   >
                     <Terminal
                       terminalId={terminal.terminalId}
+                      worktreeId={terminal.worktreeId}
                       active={isActive}
                       focusToken={focusToken}
                       onExit={() => {

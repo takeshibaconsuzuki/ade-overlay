@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateTerminalData, CreateTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, HistoricalChatsData, HistoricalChatsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, LiveChatsData, LiveChatsResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowChatData, ShowChatResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses, StopVscodeServerData, StopVscodeServerErrors, StopVscodeServerResponses, TerminalEventsData, TerminalEventsResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateTerminalData, CreateTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, HistoricalChatsData, HistoricalChatsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, LiveChatsData, LiveChatsResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenFileInEditorData, OpenFileInEditorErrors, OpenFileInEditorResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowChatData, ShowChatResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses, StopVscodeServerData, StopVscodeServerErrors, StopVscodeServerResponses, TerminalEventsData, TerminalEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -84,6 +84,15 @@ export const editorSessions = <ThrowOnError extends boolean = false>(options?: O
 
 export const showEditor = <ThrowOnError extends boolean = false>(options: Options<ShowEditorData, ThrowOnError>): RequestResult<ShowEditorResponses, ShowEditorErrors, ThrowOnError> => (options.client ?? client).post<ShowEditorResponses, ShowEditorErrors, ThrowOnError>({
     url: '/showEditor',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const openFileInEditor = <ThrowOnError extends boolean = false>(options: Options<OpenFileInEditorData, ThrowOnError>): RequestResult<OpenFileInEditorResponses, OpenFileInEditorErrors, ThrowOnError> => (options.client ?? client).post<OpenFileInEditorResponses, OpenFileInEditorErrors, ThrowOnError>({
+    url: '/editor/open-file',
     ...options,
     headers: {
         'Content-Type': 'application/json',

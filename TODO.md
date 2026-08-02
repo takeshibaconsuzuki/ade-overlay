@@ -3,11 +3,9 @@
 - Make worktree name and chat status more opaque
 - Live-chat focus rewrites app config every time
 - Update terminal tab text
-- Double clicking on launcher app
+- Double clicking on launcher app (mac only)
 - mkdir -p for worktree
 - Include origins/ in search
 - Focus file / terminal on switch to code
 - Alt+k for pasting file reference to chat
-- Manual terminal reconnect button
-- Clickable file paths in chat terminal
 - Right click on word selects and copies instantly instead of pasting (mac only)

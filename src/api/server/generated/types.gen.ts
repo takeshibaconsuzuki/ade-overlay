@@ -493,6 +493,48 @@ export type ShowEditorResponses = {
 
 export type ShowEditorResponse = ShowEditorResponses[keyof ShowEditorResponses];
 
+export type OpenFileInEditorData = {
+    body: {
+        worktreeId: string;
+        filePath: string;
+        line?: number;
+        column?: number;
+    };
+    path?: never;
+    query?: never;
+    url: '/editor/open-file';
+};
+
+export type OpenFileInEditorErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type OpenFileInEditorError = OpenFileInEditorErrors[keyof OpenFileInEditorErrors];
+
+export type OpenFileInEditorResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        ok: true;
+    };
+};
+
+export type OpenFileInEditorResponse = OpenFileInEditorResponses[keyof OpenFileInEditorResponses];
+
 export type OpenCreationLogsData = {
     body?: never;
     path: {
