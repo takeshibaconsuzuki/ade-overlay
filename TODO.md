@@ -10,4 +10,4 @@
 - Alt+k for pasting file reference to chat
 - Manual terminal reconnect button
 - Clickable file paths in chat terminal
-- Open chat terminal links in host browser
+- Right click on word selects and copies instantly instead of pasting (mac only)

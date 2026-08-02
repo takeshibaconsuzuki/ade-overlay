@@ -26,6 +26,9 @@ const desktop: DesktopApi = {
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow: (): Promise<void> =>
     ipcRenderer.invoke(MAIN_IPC_CHANNELS.closeWindow),
+  /** Opens an HTTP(S) URL in the host operating system's default browser. */
+  openExternalUrl: (url): Promise<void> =>
+    ipcRenderer.invoke(MAIN_IPC_CHANNELS.openExternalUrl, url),
   /** Subscribes to validated chat commands forwarded by Electron main. */
   onChatCommand: (handler): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: unknown) => {

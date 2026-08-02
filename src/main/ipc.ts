@@ -5,8 +5,11 @@ import {
   type OpenDialogOptions,
 } from 'electron'
 import { type ChooseFilesOptions } from '../api/preload/desktop'
+import { logger } from '../server/logger'
+import { openUrlInHostBrowser } from './externalUrl'
 import { MAIN_IPC_CHANNELS } from './ipc-channels'
 
+const log = logger.child({ component: 'ipc', process: 'main' })
 const windowsWithOpenDialog = new WeakSet<BrowserWindow>()
 
 export function hasOpenNativeDialog(window: BrowserWindow): boolean {
@@ -46,5 +49,9 @@ export function registerMainIpcHandlers(): void {
 
   ipcMain.handle(MAIN_IPC_CHANNELS.closeWindow, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
+  })
+
+  ipcMain.handle(MAIN_IPC_CHANNELS.openExternalUrl, (_event, url: unknown) => {
+    openUrlInHostBrowser(url, log)
   })
 }

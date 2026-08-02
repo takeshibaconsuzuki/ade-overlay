@@ -7,4 +7,5 @@ export const MAIN_IPC_CHANNELS = {
   chatRendererReady: 'main:chat-renderer-ready',
   chooseFiles: 'main:choose-files',
   closeWindow: 'main:close-window',
+  openExternalUrl: 'main:open-external-url',
 } as const

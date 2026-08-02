@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
@@ -57,16 +58,31 @@ export function Terminal({
 
     logger.info({ terminalId, viewerId }, 'terminal viewer mounted')
 
+    const openExternalUrl = (url: string): void => {
+      void window.desktop.openExternalUrl(url).catch((error: unknown) => {
+        logger.warn(
+          { err: error, terminalId, url },
+          'failed to request opening terminal link',
+        )
+      })
+    }
     const term = new XTerm({
       cursorBlink: false,
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
+      linkHandler: {
+        activate: (_event, url) => openExternalUrl(url),
+      },
       scrollback: 1_000_000,
       theme: { background: '#111113' },
     })
     const fitAddon = new FitAddon()
+    const webLinksAddon = new WebLinksAddon((_event, url) =>
+      openExternalUrl(url),
+    )
     term.loadAddon(fitAddon)
+    term.loadAddon(webLinksAddon)
     term.open(container)
     termRef.current = term
 

@@ -24,6 +24,7 @@ declare global {
       getPathForFile: (file: File) => string
       openWorktreesWindow: () => Promise<void>
       closeWindow: () => Promise<void>
+      openExternalUrl: (url: string) => Promise<void>
     }
   }
 }
@@ -363,6 +364,9 @@ async function newMockedPage(): Promise<Page> {
       },
       closeWindow: async () => {
         window.__desktopCalls.push('closeWindow')
+      },
+      openExternalUrl: async (url) => {
+        window.__desktopCalls.push(`openExternalUrl:${url}`)
       },
     }
   })

@@ -25,6 +25,8 @@ export interface DesktopApi {
   setLauncherDormant(): Promise<void>
   /** Closes the window that invokes this (used by the custom titlebar). */
   closeWindow(): Promise<void>
+  /** Opens an HTTP(S) URL in the host operating system's default browser. */
+  openExternalUrl(url: string): Promise<void>
   /** Subscribes to validated chat commands forwarded by Electron main. */
   onChatCommand(handler: (command: ChatCommand) => void): () => void
   /** Signals that the chat renderer installed its command handler. */
