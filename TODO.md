@@ -4,7 +4,6 @@
 - Live-chat focus rewrites app config every time
 - Update terminal tab text
 - Double clicking on launcher app (mac only)
-- mkdir -p for worktree
 - Include origins/ in search
 - Focus file / terminal on switch to code
 - Alt+k for pasting file reference to chat

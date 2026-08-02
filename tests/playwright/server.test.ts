@@ -146,6 +146,40 @@ test('tracks a real git repository and streams a worktree snapshot', async () =>
   assert.equal(snapshot.data.worktrees[0].branchName, 'main')
 })
 
+test('creates missing parent directories for a new worktree', async () => {
+  const repoPath = await createGitRepository()
+  const added = await api.post('/repositories', {
+    data: { repositoryPath: repoPath },
+  })
+  assert.equal(added.status(), 200)
+
+  const stream = await openSseStream('/worktrees')
+  await stream.next()
+
+  try {
+    const worktreePath = join(tempDir, 'worktrees', 'foo', 'bar')
+    const created = await api.post('/worktrees', {
+      data: {
+        mainWorktreePath: repoPath,
+        newBranch: 'nested-worktree',
+        baseBranch: 'main',
+        worktreePath,
+        bootstrap: false,
+      },
+    })
+    assert.equal(created.status(), 200)
+    assert.equal((await stat(dirname(worktreePath))).isDirectory(), true)
+
+    const queuedEvent = await stream.next()
+    assert.equal(queuedEvent.event, 'worktree-creation-updated')
+    const createdEvent = await stream.next()
+    assert.equal(createdEvent.event, 'worktree-created')
+    assert.equal((await stat(worktreePath)).isDirectory(), true)
+  } finally {
+    stream.close()
+  }
+})
+
 test('reloads tracked repositories when config.json changes', async () => {
   const repoPath = await createGitRepository()
   const stream = await openSseStream('/worktrees')

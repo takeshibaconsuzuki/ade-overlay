@@ -240,11 +240,13 @@ export class WorktreeRegistry {
 
     let canonicalPath: string
     try {
-      canonicalPath = await precanonicalizePath(worktreePath)
-    } catch {
+      const normalizedWorktreePath = normalizePath(worktreePath)
+      await mkdir(dirname(normalizedWorktreePath), { recursive: true })
+      canonicalPath = await precanonicalizePath(normalizedWorktreePath)
+    } catch (error) {
       throw new HttpError(
         400,
-        `Worktree path parent directory does not exist: ${worktreePath}`,
+        `Could not prepare worktree path ${worktreePath}: ${oneLineError(error)}`,
       )
     }
 
