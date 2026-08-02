@@ -1,5 +1,5 @@
 import { request } from 'node:http'
-import { BrowserWindow, WebContentsView } from 'electron'
+import { BrowserWindow, shell, WebContentsView } from 'electron'
 import { ADE_APP_ROLE, APP_FOCUS_EVENT } from '../../api/server/appFocus'
 import { SERVER_ORIGIN } from '../../api/server/config'
 import {
@@ -266,6 +266,10 @@ function getOrCreateWorktreeView(
       sandbox: true,
     },
   })
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    openUrlInHostBrowser(url)
+    return { action: 'deny' }
+  })
   view.setBackgroundColor('#111113')
   view.setVisible(false)
   resizeView(view)
@@ -288,6 +292,27 @@ function getOrCreateWorktreeView(
   })
 
   return view
+}
+
+function openUrlInHostBrowser(url: string): void {
+  let protocol: string
+  try {
+    protocol = new URL(url).protocol
+  } catch {
+    log.warn({ url }, 'blocked invalid external URL')
+    return
+  }
+
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    log.warn({ url }, 'blocked external URL with unsupported protocol')
+    return
+  }
+
+  setImmediate(() => {
+    void shell.openExternal(url).catch((error: unknown) => {
+      log.warn({ err: error, url }, 'failed to open URL in host browser')
+    })
+  })
 }
 
 async function closeWorktreeView(worktreeId: string): Promise<void> {
