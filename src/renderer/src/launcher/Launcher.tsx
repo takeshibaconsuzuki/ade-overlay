@@ -106,6 +106,23 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     void window.desktop?.setLauncherDormant()
   }, [])
 
+  const runShortcutAction = useCallback(
+    async (action: () => Promise<void>, description: string): Promise<void> => {
+      // Keep the controller activated until the requested window has had a
+      // chance to take foreground eligibility from it. This is especially
+      // important on Windows, where foreground permission is tied to the
+      // process handling the user's input.
+      try {
+        await action()
+      } catch (error) {
+        logger.error({ err: error }, `${description} shortcut failed`)
+      } finally {
+        deactivateLauncher()
+      }
+    },
+    [deactivateLauncher],
+  )
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
@@ -115,16 +132,13 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
       const key = event.key.toLowerCase()
       if (key === 's') {
         event.preventDefault()
-        deactivateLauncher()
-        void handleOpenWorktrees()
+        void runShortcutAction(handleOpenWorktrees, 'open worktrees')
       } else if (key === 'w') {
         event.preventDefault()
-        deactivateLauncher()
-        void handleShowEditor()
+        void runShortcutAction(handleShowEditor, 'show editor')
       } else if (key === 'c') {
         event.preventDefault()
-        deactivateLauncher()
-        void handleOpenChat()
+        void runShortcutAction(handleOpenChat, 'open chat')
       }
     }
 
@@ -135,6 +149,7 @@ export function Launcher({ title }: { title: string }): React.JSX.Element {
     handleOpenChat,
     handleShowEditor,
     handleOpenWorktrees,
+    runShortcutAction,
   ])
 
   return (

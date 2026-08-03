@@ -16,6 +16,7 @@ import {
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
+import { allowWindowsForegroundActivation } from '../windowsForeground'
 import { type WorktreeRegistry } from '../worktrees/registry'
 import { renderBootstrapHtml } from './bootstrap'
 import { readUserDataPayload } from './userData'
@@ -132,9 +133,19 @@ export class EditorService {
     this.log.info('editor show emitted')
   }
 
-  focusEditor(): void {
+  async focusEditor(shouldFocus: () => boolean = () => true): Promise<boolean> {
+    if (!shouldFocus()) {
+      this.log.debug('skipping stale editor focus before foreground handoff')
+      return false
+    }
+    await allowWindowsForegroundActivation(this.editorProcess?.pid, this.log)
+    if (!shouldFocus()) {
+      this.log.debug('skipping stale editor focus after foreground handoff')
+      return false
+    }
     this.emitCommand({ type: 'focus' })
     this.log.info('editor focus emitted')
+    return true
   }
 
   async openFile(

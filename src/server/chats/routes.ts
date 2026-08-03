@@ -4,6 +4,7 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
+import { ADE_APP_ROLE } from '../../api/server/appFocus'
 import {
   CHAT_COMMAND_STREAM_PATH,
   CHAT_HISTORY_PATH,
@@ -98,15 +99,16 @@ export function registerChatRoutes(
       },
     },
     handler: async (request) => {
-      await opener.openWorktree(request.body.worktreeId, { focus: false })
-      opener.focusChat(
-        'providerId' in request.body
-          ? {
-              providerId: request.body.providerId,
-              chatId: request.body.chatId,
-            }
-          : undefined,
-      )
+      await opener.openWorktree(request.body.worktreeId, {
+        foregroundRole: ADE_APP_ROLE.chat,
+        chatTarget:
+          'providerId' in request.body
+            ? {
+                providerId: request.body.providerId,
+                chatId: request.body.chatId,
+              }
+            : undefined,
+      })
       return { ok: true as const }
     },
   })

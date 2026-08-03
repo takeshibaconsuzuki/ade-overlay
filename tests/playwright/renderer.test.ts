@@ -22,6 +22,7 @@ type RecordedRequest = {
 declare global {
   interface Window {
     __desktopCalls: string[]
+    __launcherEvents: string[]
     __apiCalls: RecordedRequest[]
     desktop: {
       chooseFiles: (options: {
@@ -30,6 +31,7 @@ declare global {
       }) => Promise<string[]>
       getPathForFile: (file: File) => string
       openWorktreesWindow: () => Promise<void>
+      setLauncherDormant: () => Promise<void>
       closeWindow: () => Promise<void>
       openExternalUrl: (url: string) => Promise<void>
     }
@@ -195,6 +197,22 @@ test('launcher renders current worktree and opens server targets', async () => {
     ),
   )
 
+  await page.close()
+})
+
+test('launcher stays active through the editor response', async () => {
+  const page = await newMockedPage()
+
+  await page.goto(`${rendererUrl}/#launcher`)
+  await page.getByText('project-feature').first().waitFor()
+  await page.keyboard.press('w')
+  await page.waitForFunction(() =>
+    window.__launcherEvents.includes('showEditorResponse'),
+  )
+
+  assert.deepEqual(await page.evaluate(() => window.__launcherEvents), [
+    'showEditorResponse',
+  ])
   await page.close()
 })
 
@@ -785,6 +803,7 @@ async function newMockedPage({
   }
   await page.addInitScript(() => {
     window.__desktopCalls = []
+    window.__launcherEvents = []
     window.__apiCalls = []
     window.desktop = {
       chooseFiles: async () => {
@@ -794,6 +813,10 @@ async function newMockedPage({
       getPathForFile: (file) => `/tmp/${file.name}`,
       openWorktreesWindow: async () => {
         window.__desktopCalls.push('openWorktreesWindow')
+      },
+      setLauncherDormant: async () => {
+        window.__desktopCalls.push('setLauncherDormant')
+        window.__launcherEvents.push('setLauncherDormant')
       },
       closeWindow: async () => {
         window.__desktopCalls.push('closeWindow')
@@ -883,6 +906,13 @@ async function handleApiRoute(route: Route): Promise<void> {
     const worktreeId = isShowEditor
       ? (body as { worktreeId?: string }).worktreeId
       : path.split('/')[2]
+    if (isShowEditor) {
+      await route
+        .request()
+        .frame()
+        ?.page()
+        .evaluate(() => window.__launcherEvents.push('showEditorResponse'))
+    }
     await json(route, {
       worktreeId,
       url: 'http://bbbbbbbbbbbb.localhost:3000/__ade-overlay/editor-bootstrap',

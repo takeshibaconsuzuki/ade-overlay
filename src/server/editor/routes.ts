@@ -9,6 +9,7 @@ import {
   type FastifyRequest,
 } from 'fastify'
 import { type ZodTypeProvider } from 'fastify-type-provider-zod'
+import { ADE_APP_ROLE } from '../../api/server/appFocus'
 import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BASE_PATH,
@@ -128,11 +129,8 @@ export function registerEditorRoutes(
     // consistent with /showChat, then make the editor the foreground app.
     handler: async (request) => {
       const response = await opener.openWorktree(request.body.worktreeId, {
-        focus: false,
+        foregroundRole: ADE_APP_ROLE.editor,
       })
-      // Foreground the editor and record the focus intent so the launcher
-      // knows the editor (not chat) should be the active role.
-      opener.focusEditor()
       return {
         worktreeId: response.worktreeId,
         url: response.url,
@@ -192,7 +190,7 @@ export function registerEditorRoutes(
       )
       await opener.openWorktree(mainWorktreeId, { focus: false })
       await editor.openFile(mainWorktreeId, job.logPath)
-      editor.focusEditor()
+      await opener.focusEditor()
       return { ok: true as const }
     },
   })
