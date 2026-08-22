@@ -90,6 +90,7 @@ export class WorktreeRegistry {
   private readonly repositories = new Map<string, TrackedRepository>()
   private readonly creationJobs = new Map<string, CreationJob>()
   private readonly deletionJobs = new Map<string, DeletionJob>()
+  private readonly deletionReservations = new Set<string>()
   private selectedWorktreeId: string | undefined
   private persistRepositoriesTail = Promise.resolve()
   private applyConfigTail = Promise.resolve()
@@ -103,6 +104,7 @@ export class WorktreeRegistry {
       worktreeId: string
       path: string
     }) => Promise<void>,
+    private readonly runGitCommand: typeof runGit = runGit,
   ) {}
 
   async loadRepositories(): Promise<void> {
@@ -332,7 +334,7 @@ export class WorktreeRegistry {
     args.push(job.canonicalPath, job.baseBranch)
 
     try {
-      await runGit(job.mainWorktreePath, args, this.log, {
+      await this.runGitCommand(job.mainWorktreePath, args, this.log, {
         logFilePath: job.logPath,
       })
 
@@ -460,7 +462,7 @@ export class WorktreeRegistry {
 
   private async bestEffortRemoveWorktree(job: CreationJob): Promise<void> {
     try {
-      await runGit(
+      await this.runGitCommand(
         job.mainWorktreePath,
         ['worktree', 'remove', '--force', job.canonicalPath],
         this.log,
@@ -527,43 +529,51 @@ export class WorktreeRegistry {
     beforeDelete?: () => Promise<void> | undefined,
   ): Promise<{ worktreeId: string; worktree: Worktree }> {
     const activeJob = this.deletionJobs.get(worktreeId)
-    if (activeJob?.state === 'deleting') {
+    if (
+      activeJob?.state === 'deleting' ||
+      this.deletionReservations.has(worktreeId)
+    ) {
       throw new HttpError(
         409,
         `Worktree deletion is already running: ${worktreeId}`,
       )
     }
+    this.deletionReservations.add(worktreeId)
 
-    const worktree = await this.getWorktreeById(worktreeId)
-    if (worktree.path === worktree.mainWorktreePath) {
-      throw new HttpError(400, 'Cannot delete a tracked main worktree')
+    try {
+      const worktree = await this.getWorktreeById(worktreeId)
+      if (worktree.path === worktree.mainWorktreePath) {
+        throw new HttpError(400, 'Cannot delete a tracked main worktree')
+      }
+
+      const job: DeletionJob = {
+        worktreeId,
+        worktree: withoutDeletionState(worktree),
+        deleteBranch,
+        force,
+        state: 'deleting',
+      }
+      this.deletionJobs.set(worktreeId, job)
+
+      const snapshot = await this.getSnapshot()
+      const queuedWorktree = snapshot.worktrees.find(
+        (candidate) => candidate.worktreeId === worktreeId,
+      )!
+      this.log.info(
+        { worktreeId, deleteBranch, force },
+        'worktree deletion queued',
+      )
+      this.emit({
+        type: 'worktree-deletion-updated',
+        worktreeId,
+        snapshot,
+      })
+
+      void this.runDeleteJob(job, beforeDelete)
+      return { worktreeId, worktree: queuedWorktree }
+    } finally {
+      this.deletionReservations.delete(worktreeId)
     }
-
-    const job: DeletionJob = {
-      worktreeId,
-      worktree: withoutDeletionState(worktree),
-      deleteBranch,
-      force,
-      state: 'deleting',
-    }
-    this.deletionJobs.set(worktreeId, job)
-
-    const snapshot = await this.getSnapshot()
-    const queuedWorktree = snapshot.worktrees.find(
-      (candidate) => candidate.worktreeId === worktreeId,
-    )!
-    this.log.info(
-      { worktreeId, deleteBranch, force },
-      'worktree deletion queued',
-    )
-    this.emit({
-      type: 'worktree-deletion-updated',
-      worktreeId,
-      snapshot,
-    })
-
-    void this.runDeleteJob(job, beforeDelete)
-    return { worktreeId, worktree: queuedWorktree }
   }
 
   async dismissDeletionError(
@@ -585,7 +595,8 @@ export class WorktreeRegistry {
   ): Promise<void> {
     try {
       await beforeDelete?.()
-      const { branchDeleted } = await this.performDeleteWorktree(job)
+      const { branchDeleted, branchDeletionError } =
+        await this.performDeleteWorktree(job)
       if (this.deletionJobs.get(job.worktreeId) !== job) {
         return
       }
@@ -593,13 +604,14 @@ export class WorktreeRegistry {
       this.deletionJobs.delete(job.worktreeId)
       const snapshot = await this.getSnapshot()
       this.log.info(
-        { worktreeId: job.worktreeId, branchDeleted },
+        { worktreeId: job.worktreeId, branchDeleted, branchDeletionError },
         'worktree deleted',
       )
       this.emit({
         type: 'worktree-deleted',
         worktreeId: job.worktreeId,
         branchDeleted,
+        branchDeletionError,
         snapshot,
       })
     } catch (error) {
@@ -624,7 +636,7 @@ export class WorktreeRegistry {
 
   private async performDeleteWorktree(
     deletionJob: DeletionJob,
-  ): Promise<{ branchDeleted: boolean }> {
+  ): Promise<{ branchDeleted: boolean; branchDeletionError?: string }> {
     const { worktreeId, worktree, deleteBranch, force } = deletionJob
     const creationJob = this.creationJobs.get(worktreeId)
 
@@ -640,7 +652,7 @@ export class WorktreeRegistry {
     }
 
     try {
-      await runGit(
+      await this.runGitCommand(
         worktree.mainWorktreePath,
         ['worktree', 'remove', ...(force ? ['--force'] : []), worktree.path],
         this.log,
@@ -663,7 +675,11 @@ export class WorktreeRegistry {
       // back to it; otherwise the row is permanently undeletable (and the path
       // stays blocked, so it can't be recreated either).
       if (worktree.isPrunable || isPrunableWorktreeError(error)) {
-        await runGit(worktree.mainWorktreePath, ['worktree', 'prune'], this.log)
+        await this.runGitCommand(
+          worktree.mainWorktreePath,
+          ['worktree', 'prune'],
+          this.log,
+        )
         this.log.info(
           { worktreeId, path: worktree.path },
           'pruned worktree after remove failed',
@@ -674,13 +690,26 @@ export class WorktreeRegistry {
     }
 
     let branchDeleted = false
+    let branchDeletionError: string | undefined
     if (deleteBranch && worktree.branchName) {
-      await runGit(
-        worktree.mainWorktreePath,
-        ['branch', '-D', worktree.branchName],
-        this.log,
-      )
-      branchDeleted = true
+      try {
+        await this.runGitCommand(
+          worktree.mainWorktreePath,
+          ['branch', '-D', worktree.branchName],
+          this.log,
+        )
+        branchDeleted = true
+      } catch (error) {
+        branchDeletionError = oneLineError(error, 'Branch deletion failed')
+        this.log.warn(
+          {
+            err: error,
+            worktreeId,
+            branchName: worktree.branchName,
+          },
+          'worktree removed but branch deletion failed',
+        )
+      }
     }
 
     if (creationJob) {
@@ -688,7 +717,7 @@ export class WorktreeRegistry {
       await this.removeCreationLog(creationJob)
     }
 
-    return { branchDeleted }
+    return { branchDeleted, branchDeletionError }
   }
 
   async getSnapshot(): Promise<WorktreeSnapshot> {

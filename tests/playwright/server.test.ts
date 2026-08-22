@@ -31,6 +31,7 @@ import {
   TerminalPasteMessage,
   type TerminalPastePart,
 } from '../../src/api/server/terminals'
+import { type WorktreeEvent } from '../../src/api/server/worktrees'
 import { shouldCloseWorktreesWindowOnBlur } from '../../src/main/controller/worktreesWindowPolicy'
 import {
   ensureHookForwarderWrapper,
@@ -41,6 +42,7 @@ import { CodexChatProvider } from '../../src/server/chats/providers/codex'
 import { ChatRegistry } from '../../src/server/chats/registry'
 import { ChatService } from '../../src/server/chats/service'
 import { getAppConfigPath } from '../../src/server/config/store'
+import { HttpError } from '../../src/server/errors'
 import { createServer } from '../../src/server/server'
 import {
   resolveChatTerminalSpawn,
@@ -48,6 +50,8 @@ import {
   type TerminalManagerChange,
 } from '../../src/server/terminals/manager'
 import { TerminalOutputBuffer } from '../../src/server/terminals/outputBuffer'
+import { runGit } from '../../src/server/worktrees/git'
+import { WorktreeRegistry } from '../../src/server/worktrees/registry'
 
 const execFileAsync = promisify(execFile)
 
@@ -279,6 +283,105 @@ test('runs worktree deletion as a server-owned job and persists failures', async
   } finally {
     stream.close()
   }
+})
+
+test('atomically reserves a worktree before deletion lookup completes', async () => {
+  const repoPath = await createGitRepository()
+  const worktreePath = join(tempDir, 'delete-once')
+  await execFileAsync(
+    'git',
+    ['worktree', 'add', '-b', 'delete-once', worktreePath, 'main'],
+    { cwd: repoPath },
+  )
+
+  const registry = new WorktreeRegistry(noopLogger())
+  await registry.addRepository(repoPath)
+  const worktree = (await registry.getSnapshot()).worktrees.find(
+    (candidate) => candidate.branchName === 'delete-once',
+  )!
+  const originalLookup = registry.getWorktreeById.bind(registry)
+  let lookupStartedResolve: () => void = () => undefined
+  let releaseLookupResolve: () => void = () => undefined
+  const lookupStarted = new Promise<void>((resolve) => {
+    lookupStartedResolve = resolve
+  })
+  const releaseLookup = new Promise<void>((resolve) => {
+    releaseLookupResolve = resolve
+  })
+  registry.getWorktreeById = async (worktreeId) => {
+    lookupStartedResolve()
+    await releaseLookup
+    return originalLookup(worktreeId)
+  }
+
+  const deletedEvent = nextWorktreeEvent(registry, 'worktree-deleted')
+  const first = registry.enqueueDeleteWorktree(
+    worktree.worktreeId,
+    false,
+    false,
+  )
+  await lookupStarted
+
+  await assert.rejects(
+    registry.enqueueDeleteWorktree(worktree.worktreeId, false, false),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+  )
+
+  releaseLookupResolve()
+  assert.equal((await first).worktree.deletionState, 'deleting')
+  assert.equal((await deletedEvent).worktreeId, worktree.worktreeId)
+})
+
+test('does not resurrect a worktree when only branch deletion fails', async () => {
+  const repoPath = await createGitRepository()
+  const worktreePath = join(tempDir, 'partial-delete')
+  await execFileAsync(
+    'git',
+    ['worktree', 'add', '-b', 'partial-delete', worktreePath, 'main'],
+    { cwd: repoPath },
+  )
+
+  const runner: typeof runGit = async (cwd, args, log, options) => {
+    if (args[0] === 'branch') {
+      throw new HttpError(400, 'simulated branch deletion failure')
+    }
+    return runGit(cwd, args, log, options)
+  }
+  const registry = new WorktreeRegistry(
+    noopLogger(),
+    undefined,
+    undefined,
+    runner,
+  )
+  await registry.addRepository(repoPath)
+  const worktree = (await registry.getSnapshot()).worktrees.find(
+    (candidate) => candidate.branchName === 'partial-delete',
+  )!
+
+  const deletedEvent = nextWorktreeEvent(registry, 'worktree-deleted')
+  await registry.enqueueDeleteWorktree(worktree.worktreeId, true, true)
+  const event = await deletedEvent
+
+  assert.equal(event.worktreeId, worktree.worktreeId)
+  assert.equal(event.branchDeleted, false)
+  assert.equal(event.branchDeletionError, 'simulated branch deletion failure')
+  assert.equal(
+    (await registry.getSnapshot()).worktrees.some(
+      (candidate) => candidate.worktreeId === worktree.worktreeId,
+    ),
+    false,
+  )
+  await assert.rejects(stat(worktreePath), { code: 'ENOENT' })
+  assert.equal(
+    (
+      await execFileAsync(
+        'git',
+        ['branch', '--list', 'partial-delete', '--format=%(refname:short)'],
+        { cwd: repoPath },
+      )
+    ).stdout.trim(),
+    'partial-delete',
+  )
 })
 
 test('reloads tracked repositories when config.json changes', async () => {
@@ -1673,6 +1776,34 @@ function promiseWithTimeout<T>(
       },
     )
   })
+}
+
+function noopLogger() {
+  return {
+    debug() {},
+    error() {},
+    info() {},
+    warn() {},
+  } as never
+}
+
+function nextWorktreeEvent<TType extends WorktreeEvent['type']>(
+  registry: WorktreeRegistry,
+  type: TType,
+): Promise<Extract<WorktreeEvent, { type: TType }>> {
+  const event = new Promise<Extract<WorktreeEvent, { type: TType }>>(
+    (resolve) => {
+      const onEvent = (candidate: WorktreeEvent): void => {
+        if (candidate.type !== type) {
+          return
+        }
+        registry.events.off('worktree-event', onEvent)
+        resolve(candidate as Extract<WorktreeEvent, { type: TType }>)
+      }
+      registry.events.on('worktree-event', onEvent)
+    },
+  )
+  return promiseWithTimeout(event, 5_000, `Timed out waiting for ${type}`)
 }
 
 function terminalSocket(): EventEmitter & {

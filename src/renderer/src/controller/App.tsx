@@ -33,12 +33,17 @@ import { useWorktreeStream } from './worktrees'
 type CreateValues = CreateWorktreeData['body']
 
 export function App(): React.JSX.Element {
-  const { snapshot, connected } = useWorktreeStream()
+  const { snapshot, connected, deletionNotice } = useWorktreeStream()
   const sessionStatuses = useEditorSessionStream()
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set())
   const [addingRepository, setAddingRepository] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const visibleError =
+    error ??
+    (deletionNotice
+      ? `Worktree deleted, but its branch could not be deleted: ${deletionNotice.message}`
+      : null)
 
   const markBusy = useCallback((worktreeId: string, busy: boolean): void => {
     setBusyIds((current) => {
@@ -254,12 +259,12 @@ export function App(): React.JSX.Element {
         </Button>
       </HBox>
 
-      {error && (
+      {visibleError && (
         <Callout.Root role="alert" color="red" variant="surface">
           <Callout.Icon>
             <TriangleAlert size={16} />
           </Callout.Icon>
-          <Callout.Text>{error}</Callout.Text>
+          <Callout.Text>{visibleError}</Callout.Text>
         </Callout.Root>
       )}
 

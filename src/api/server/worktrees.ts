@@ -141,6 +141,7 @@ const WorktreeDeletedEvent = z.object({
   type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
   worktreeId: WorktreeId,
   branchDeleted: z.boolean(),
+  branchDeletionError: z.string().optional(),
   snapshot: WorktreeSnapshot,
 })
 
