@@ -51,6 +51,21 @@ type CreationJob = {
   terminated: boolean
 }
 
+/**
+ * Transient state for an async worktree deletion. Like creation jobs, deletion
+ * jobs live in the server registry so closing and reopening a renderer does not
+ * interrupt them. Failed jobs stay visible until retried or dismissed.
+ */
+type DeletionJob = {
+  worktreeId: string
+  worktree: Worktree
+  deleteBranch: boolean
+  force: boolean
+  state: 'deleting' | 'failed'
+  error?: string
+  errorCode?: string
+}
+
 function creationLogPathFor(worktreeId: string): string {
   return join(getCreationLogsDir(), `${worktreeId}.log`)
 }
@@ -74,6 +89,7 @@ export class WorktreeRegistry {
 
   private readonly repositories = new Map<string, TrackedRepository>()
   private readonly creationJobs = new Map<string, CreationJob>()
+  private readonly deletionJobs = new Map<string, DeletionJob>()
   private selectedWorktreeId: string | undefined
   private persistRepositoriesTail = Promise.resolve()
   private applyConfigTail = Promise.resolve()
@@ -194,6 +210,11 @@ export class WorktreeRegistry {
         if (job.mainWorktreePath === repositoryKey) {
           this.creationJobs.delete(worktreeId)
           await this.removeCreationLog(job)
+        }
+      }
+      for (const [worktreeId, job] of this.deletionJobs) {
+        if (job.worktree.mainWorktreePath === repositoryKey) {
+          this.deletionJobs.delete(worktreeId)
         }
       }
     }
@@ -494,36 +515,128 @@ export class WorktreeRegistry {
     return { branches }
   }
 
-  async deleteWorktree(
+  /**
+   * Register a deletion job and return as soon as its `deleting` snapshot has
+   * been emitted. The editor shutdown and Git commands run independently of
+   * the HTTP request that enqueued the job.
+   */
+  async enqueueDeleteWorktree(
     worktreeId: string,
     deleteBranch: boolean,
     force = false,
-  ): Promise<{ deleted: boolean; branchDeleted: boolean }> {
-    const job = this.creationJobs.get(worktreeId)
+    beforeDelete?: () => Promise<void> | undefined,
+  ): Promise<{ worktreeId: string; worktree: Worktree }> {
+    const activeJob = this.deletionJobs.get(worktreeId)
+    if (activeJob?.state === 'deleting') {
+      throw new HttpError(
+        409,
+        `Worktree deletion is already running: ${worktreeId}`,
+      )
+    }
+
+    const worktree = await this.getWorktreeById(worktreeId)
+    if (worktree.path === worktree.mainWorktreePath) {
+      throw new HttpError(400, 'Cannot delete a tracked main worktree')
+    }
+
+    const job: DeletionJob = {
+      worktreeId,
+      worktree: withoutDeletionState(worktree),
+      deleteBranch,
+      force,
+      state: 'deleting',
+    }
+    this.deletionJobs.set(worktreeId, job)
+
+    const snapshot = await this.getSnapshot()
+    const queuedWorktree = snapshot.worktrees.find(
+      (candidate) => candidate.worktreeId === worktreeId,
+    )!
+    this.log.info(
+      { worktreeId, deleteBranch, force },
+      'worktree deletion queued',
+    )
+    this.emit({
+      type: 'worktree-deletion-updated',
+      worktreeId,
+      snapshot,
+    })
+
+    void this.runDeleteJob(job, beforeDelete)
+    return { worktreeId, worktree: queuedWorktree }
+  }
+
+  async dismissDeletionError(
+    worktreeId: string,
+  ): Promise<{ snapshot: WorktreeSnapshot }> {
+    const job = this.deletionJobs.get(worktreeId)
+    if (job?.state === 'failed') {
+      this.deletionJobs.delete(worktreeId)
+    }
+
+    const snapshot = await this.getSnapshot()
+    this.emit({ type: 'worktree-deletion-updated', worktreeId, snapshot })
+    return { snapshot }
+  }
+
+  private async runDeleteJob(
+    job: DeletionJob,
+    beforeDelete?: () => Promise<void> | undefined,
+  ): Promise<void> {
+    try {
+      await beforeDelete?.()
+      const { branchDeleted } = await this.performDeleteWorktree(job)
+      if (this.deletionJobs.get(job.worktreeId) !== job) {
+        return
+      }
+
+      this.deletionJobs.delete(job.worktreeId)
+      const snapshot = await this.getSnapshot()
+      this.log.info(
+        { worktreeId: job.worktreeId, branchDeleted },
+        'worktree deleted',
+      )
+      this.emit({
+        type: 'worktree-deleted',
+        worktreeId: job.worktreeId,
+        branchDeleted,
+        snapshot,
+      })
+    } catch (error) {
+      if (this.deletionJobs.get(job.worktreeId) !== job) {
+        return
+      }
+
+      job.state = 'failed'
+      job.error = oneLineError(error, 'Worktree deletion failed')
+      job.errorCode = error instanceof HttpError ? error.code : undefined
+      this.log.warn(
+        { worktreeId: job.worktreeId, err: error },
+        'worktree deletion failed',
+      )
+      this.emit({
+        type: 'worktree-deletion-updated',
+        worktreeId: job.worktreeId,
+        snapshot: await this.getSnapshot(),
+      })
+    }
+  }
+
+  private async performDeleteWorktree(
+    deletionJob: DeletionJob,
+  ): Promise<{ branchDeleted: boolean }> {
+    const { worktreeId, worktree, deleteBranch, force } = deletionJob
+    const creationJob = this.creationJobs.get(worktreeId)
 
     // A pending/failed job with no real worktree on disk: drop the transient
     // row instead of asking git to remove a path it doesn't track.
     if (
-      job &&
-      !(await this.gitWorktreeExists(job.mainWorktreePath, worktreeId))
+      creationJob &&
+      !(await this.gitWorktreeExists(creationJob.mainWorktreePath, worktreeId))
     ) {
       this.creationJobs.delete(worktreeId)
-      await this.removeCreationLog(job)
-      const snapshot = await this.getSnapshot()
-      this.log.info({ worktreeId }, 'pending worktree removed')
-      this.emit({
-        type: 'worktree-deleted',
-        worktreeId,
-        branchDeleted: false,
-        snapshot,
-      })
-      return { deleted: true, branchDeleted: false }
-    }
-
-    const worktree = await this.getWorktreeById(worktreeId)
-
-    if (worktree.path === worktree.mainWorktreePath) {
-      throw new HttpError(400, 'Cannot delete a tracked main worktree')
+      await this.removeCreationLog(creationJob)
+      return { branchDeleted: false }
     }
 
     try {
@@ -570,21 +683,12 @@ export class WorktreeRegistry {
       branchDeleted = true
     }
 
-    if (job) {
+    if (creationJob) {
       this.creationJobs.delete(worktreeId)
-      await this.removeCreationLog(job)
+      await this.removeCreationLog(creationJob)
     }
 
-    const snapshot = await this.getSnapshot()
-    this.log.info({ worktreeId, branchDeleted }, 'worktree deleted')
-    this.emit({
-      type: 'worktree-deleted',
-      worktreeId,
-      branchDeleted,
-      snapshot,
-    })
-
-    return { deleted: true, branchDeleted }
+    return { branchDeleted }
   }
 
   async getSnapshot(): Promise<WorktreeSnapshot> {
@@ -665,6 +769,19 @@ export class WorktreeRegistry {
             }
           : toJobWorktree(job, 'failed'),
       )
+    }
+
+    for (const job of this.deletionJobs.values()) {
+      const gitRow = byId.get(job.worktreeId)
+      const worktree = gitRow ?? job.worktree
+      byId.set(job.worktreeId, {
+        ...worktree,
+        deletionState: job.state,
+        deletionError: job.error,
+        deletionErrorCode: job.errorCode,
+        deletionDeleteBranch: job.deleteBranch,
+        isOpenable: job.state === 'failed',
+      })
     }
 
     const worktrees = [...byId.values()].sort((left, right) =>
@@ -810,6 +927,11 @@ export class WorktreeRegistry {
         await this.removeCreationLog(job)
       }
     }
+    for (const [worktreeId, job] of this.deletionJobs) {
+      if (!this.repositories.has(job.worktree.mainWorktreePath)) {
+        this.deletionJobs.delete(worktreeId)
+      }
+    }
 
     this.log.info(
       {
@@ -922,6 +1044,17 @@ function toPublicWorktree(
     hasCreationLogs: false,
     isOpenable: true,
   }
+}
+
+function withoutDeletionState(worktree: Worktree): Worktree {
+  const {
+    deletionState: _deletionState,
+    deletionError: _deletionError,
+    deletionErrorCode: _deletionErrorCode,
+    deletionDeleteBranch: _deletionDeleteBranch,
+    ...readyWorktree
+  } = worktree
+  return readyWorktree
 }
 
 /** Project a transient creation job into a synthetic worktree row. */
@@ -1095,15 +1228,15 @@ function isPrunableWorktreeError(error: unknown): boolean {
  * Reduce a git error to a single useful line for the row. Prefers a `fatal:` /
  * `error:` line, then the last non-empty line; the full output lives in the log.
  */
-function oneLineError(error: unknown): string {
+function oneLineError(
+  error: unknown,
+  fallback = 'Worktree creation failed',
+): string {
   const message = error instanceof Error ? error.message : String(error)
   const lines = message
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
   const highlighted = lines.find((line) => /^(fatal|error):/i.test(line))
-  return (highlighted ?? lines.at(-1) ?? 'Worktree creation failed').slice(
-    0,
-    300,
-  )
+  return (highlighted ?? lines.at(-1) ?? fallback).slice(0, 300)
 }

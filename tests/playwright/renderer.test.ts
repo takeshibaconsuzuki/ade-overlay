@@ -146,6 +146,7 @@ const terminalSnapshot = {
 let vite: ViteDevServer
 let browser: Browser
 let rendererUrl: string
+const pageWorktreeSnapshots = new WeakMap<Page, unknown>()
 
 before(async () => {
   vite = await createServer({
@@ -216,7 +217,7 @@ test('launcher stays active through the editor response', async () => {
   await page.close()
 })
 
-test('worktree list filters, opens rows, and confirms dirty deletes', async () => {
+test('worktree list filters, opens rows, and queues deletes', async () => {
   const page = await newMockedPage()
 
   await page.goto(`${rendererUrl}/#worktrees`)
@@ -250,24 +251,19 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
   await page
     .getByRole('menuitem', { name: 'Delete worktree', exact: true })
     .click()
-  await page.getByRole('button', { name: 'Force delete' }).click()
-
   await page.waitForFunction(() => {
     const deletes = window.__apiCalls.filter(
       (call) =>
         call.method === 'DELETE' && call.path === '/worktrees/bbbbbbbbbbbb',
     )
-    return deletes.some(
-      (call) => (call.body as { force?: boolean }).force === true,
-    )
+    return deletes.length === 1
   })
 
   const deletes = (await page.evaluate(() => window.__apiCalls)).filter(
     (call) => call.method === 'DELETE',
   )
-  assert.equal(deletes.length, 2)
+  assert.equal(deletes.length, 1)
   assert.equal((deletes[0].body as { force?: boolean }).force, false)
-  assert.equal((deletes[1].body as { force?: boolean }).force, true)
   assert.ok(
     (await page.evaluate(() => window.__apiCalls)).some(
       (call) =>
@@ -276,6 +272,41 @@ test('worktree list filters, opens rows, and confirms dirty deletes', async () =
     ),
   )
 
+  await page.close()
+})
+
+test('reopens persisted dirty deletion failures and queues a force retry', async () => {
+  const failedSnapshot = {
+    ...worktreeSnapshot,
+    worktrees: worktreeSnapshot.worktrees.map((worktree) =>
+      worktree.worktreeId === 'bbbbbbbbbbbb'
+        ? {
+            ...worktree,
+            deletionState: 'failed',
+            deletionError: '/repos/project-feature has uncommitted changes.',
+            deletionErrorCode: 'WORKTREE_DIRTY',
+            deletionDeleteBranch: true,
+          }
+        : worktree,
+    ),
+  }
+  const page = await newMockedPage({
+    worktreeSnapshotData: failedSnapshot,
+  })
+
+  await page.goto(`${rendererUrl}/#worktrees`)
+  await page.getByRole('button', { name: 'Force delete' }).click()
+
+  await page.waitForFunction(() =>
+    window.__apiCalls.some(
+      (call) =>
+        call.method === 'DELETE' &&
+        call.path === '/worktrees/bbbbbbbbbbbb' &&
+        (call.body as { force?: boolean; deleteBranch?: boolean }).force ===
+          true &&
+        (call.body as { deleteBranch?: boolean }).deleteBranch === true,
+    ),
+  )
   await page.close()
 })
 
@@ -777,11 +808,16 @@ test('formats dropped file paths for terminal input', () => {
 async function newMockedPage({
   disableWebgl = false,
   platform,
+  worktreeSnapshotData,
 }: {
   disableWebgl?: boolean
   platform?: string
+  worktreeSnapshotData?: unknown
 } = {}): Promise<Page> {
   const page = await browser.newPage()
+  if (worktreeSnapshotData) {
+    pageWorktreeSnapshots.set(page, worktreeSnapshotData)
+  }
   if (platform) {
     await page.addInitScript((value) => {
       Object.defineProperty(navigator, 'platform', {
@@ -857,7 +893,11 @@ async function handleApiRoute(route: Route): Promise<void> {
   if (path === '/logs') {
     await json(route, { received: 1 })
   } else if (path === '/worktrees' && request.method() === 'GET') {
-    await sse(route, 'snapshot', worktreeSnapshot)
+    await sse(
+      route,
+      'snapshot',
+      pageWorktreeSnapshots.get(request.frame()?.page()) ?? worktreeSnapshot,
+    )
   } else if (path === '/worktrees' && request.method() === 'POST') {
     await json(route, {
       worktreeId: 'dddddddddddd',
@@ -879,17 +919,17 @@ async function handleApiRoute(route: Route): Promise<void> {
   } else if (path === '/repositories/branches') {
     await json(route, { branches: ['main', 'feature/one', 'release'] })
   } else if (path === '/worktrees/bbbbbbbbbbbb') {
-    const force = (body as { force?: boolean } | undefined)?.force === true
-    await json(
-      route,
-      force
-        ? { deleted: true, branchDeleted: false }
-        : {
-            error: 'WORKTREE_DIRTY',
-            message: '/repos/project-feature has uncommitted changes.',
-          },
-      force ? 200 : 409,
-    )
+    await json(route, {
+      worktreeId: 'bbbbbbbbbbbb',
+      worktree: {
+        ...worktreeSnapshot.worktrees[1],
+        deletionState: 'deleting',
+        deletionDeleteBranch:
+          (body as { deleteBranch?: boolean } | undefined)?.deleteBranch ===
+          true,
+        isOpenable: false,
+      },
+    })
   } else if (path === '/editorSessions') {
     await sse(route, 'snapshot', [
       {

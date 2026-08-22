@@ -9,6 +9,7 @@ export const WORKTREE_PATH = `${WORKTREES_PATH}/:worktreeId`
 export const WORKTREE_OPEN_PATH = `${WORKTREE_PATH}/open`
 export const WORKTREE_CREATION_LOGS_OPEN_PATH = `${WORKTREE_PATH}/creation-logs/open`
 export const WORKTREE_DISMISS_CREATION_PATH = `${WORKTREE_PATH}/dismiss-creation`
+export const WORKTREE_DISMISS_DELETION_PATH = `${WORKTREE_PATH}/dismiss-deletion`
 export const WORKTREE_PATH_PREVIEW_PATH = `${WORKTREES_PATH}/path-preview`
 
 export const PathSchema = z.string().min(1)
@@ -75,6 +76,8 @@ export const WorktreeCreationState = z.enum([
   'failed',
 ])
 
+export const WorktreeDeletionState = z.enum(['deleting', 'failed'])
+
 export const Worktree = z.object({
   worktreeId: WorktreeId,
   name: z.string(),
@@ -91,6 +94,10 @@ export const Worktree = z.object({
   creationState: WorktreeCreationState.default('ready'),
   creationError: z.string().optional(),
   hasCreationLogs: z.boolean().default(false),
+  deletionState: WorktreeDeletionState.optional(),
+  deletionError: z.string().optional(),
+  deletionErrorCode: z.string().optional(),
+  deletionDeleteBranch: z.boolean().optional(),
   isOpenable: z.boolean().default(true),
 })
 
@@ -124,6 +131,12 @@ const WorktreeCreationUpdatedEvent = z.object({
   snapshot: WorktreeSnapshot,
 })
 
+const WorktreeDeletionUpdatedEvent = z.object({
+  type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeletionUpdated),
+  worktreeId: WorktreeId,
+  snapshot: WorktreeSnapshot,
+})
+
 const WorktreeDeletedEvent = z.object({
   type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
   worktreeId: WorktreeId,
@@ -142,6 +155,7 @@ export const WorktreeEvent = z.discriminatedUnion('type', [
   RepositoryRemovedEvent,
   WorktreeCreatedEvent,
   WorktreeCreationUpdatedEvent,
+  WorktreeDeletionUpdatedEvent,
   WorktreeDeletedEvent,
   WorktreeSelectedEvent,
 ])
@@ -152,6 +166,7 @@ export const WorktreeSseEvents = defineSseEvents({
   [WORKTREE_EVENT_TYPE.repositoryRemoved]: RepositoryRemovedEvent,
   [WORKTREE_EVENT_TYPE.worktreeCreated]: WorktreeCreatedEvent,
   [WORKTREE_EVENT_TYPE.worktreeCreationUpdated]: WorktreeCreationUpdatedEvent,
+  [WORKTREE_EVENT_TYPE.worktreeDeletionUpdated]: WorktreeDeletionUpdatedEvent,
   [WORKTREE_EVENT_TYPE.worktreeDeleted]: WorktreeDeletedEvent,
   [WORKTREE_EVENT_TYPE.worktreeSelected]: WorktreeSelectedEvent,
 })
@@ -184,11 +199,15 @@ export const ListBranchesResponse = z.object({
 })
 
 export const DeleteWorktreeResponse = z.object({
-  deleted: z.boolean(),
-  branchDeleted: z.boolean(),
+  worktreeId: WorktreeId,
+  worktree: Worktree,
 })
 
 export const DismissCreationErrorResponse = z.object({
+  snapshot: WorktreeSnapshot,
+})
+
+export const DismissDeletionErrorResponse = z.object({
   snapshot: WorktreeSnapshot,
 })
 
@@ -218,6 +237,7 @@ export type OpenWorktreeRequest = z.infer<typeof OpenWorktreeRequest>
 export type Repository = z.infer<typeof Repository>
 export type Worktree = z.infer<typeof Worktree>
 export type WorktreeCreationState = z.infer<typeof WorktreeCreationState>
+export type WorktreeDeletionState = z.infer<typeof WorktreeDeletionState>
 export type WorktreeSnapshot = z.infer<typeof WorktreeSnapshot>
 export type WorktreeEvent = z.infer<typeof WorktreeEvent>
 export type WorktreeSseEvents = typeof WorktreeSseEvents

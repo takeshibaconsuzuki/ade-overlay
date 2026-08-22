@@ -191,6 +191,96 @@ test('creates missing parent directories for a new worktree', async () => {
   }
 })
 
+test('runs worktree deletion as a server-owned job and persists failures', async () => {
+  const repoPath = await createGitRepository()
+  const added = await api.post('/repositories', {
+    data: { repositoryPath: repoPath },
+  })
+  assert.equal(added.status(), 200)
+
+  const stream = await openSseStream('/worktrees')
+  await stream.next()
+
+  try {
+    const worktreePath = join(tempDir, 'delete-me')
+    const created = await api.post('/worktrees', {
+      data: {
+        mainWorktreePath: repoPath,
+        newBranch: 'delete-me',
+        baseBranch: 'main',
+        worktreePath,
+        bootstrap: false,
+      },
+    })
+    assert.equal(created.status(), 200)
+    const { worktreeId } = (await created.json()) as { worktreeId: string }
+    await stream.next()
+    await stream.next()
+
+    await writeFile(join(worktreePath, 'untracked.txt'), 'keep me\n', 'utf8')
+
+    const queued = await api.delete(`/worktrees/${worktreeId}`, {
+      data: { deleteBranch: true, force: false },
+    })
+    assert.equal(queued.status(), 200)
+    const queuedBody = (await queued.json()) as {
+      worktreeId: string
+      worktree: { deletionState?: string }
+    }
+    assert.equal(queuedBody.worktreeId, worktreeId)
+    assert.equal(queuedBody.worktree.deletionState, 'deleting')
+
+    const deleting = await stream.next<{
+      worktreeId: string
+      snapshot: {
+        worktrees: Array<{ worktreeId: string; deletionState?: string }>
+      }
+    }>()
+    assert.equal(deleting.event, 'worktree-deletion-updated')
+    assert.equal(
+      deleting.data.snapshot.worktrees.find(
+        (worktree) => worktree.worktreeId === worktreeId,
+      )?.deletionState,
+      'deleting',
+    )
+
+    const failed = await stream.next<{
+      worktreeId: string
+      snapshot: {
+        worktrees: Array<{
+          worktreeId: string
+          deletionState?: string
+          deletionErrorCode?: string
+        }>
+      }
+    }>()
+    assert.equal(failed.event, 'worktree-deletion-updated')
+    const failedWorktree = failed.data.snapshot.worktrees.find(
+      (worktree) => worktree.worktreeId === worktreeId,
+    )
+    assert.equal(failedWorktree?.deletionState, 'failed')
+    assert.equal(failedWorktree?.deletionErrorCode, 'WORKTREE_DIRTY')
+
+    const retried = await api.delete(`/worktrees/${worktreeId}`, {
+      data: { deleteBranch: true, force: true },
+    })
+    assert.equal(retried.status(), 200)
+    assert.equal(
+      ((await retried.json()) as { worktree: { deletionState?: string } })
+        .worktree.deletionState,
+      'deleting',
+    )
+    assert.equal((await stream.next()).event, 'worktree-deletion-updated')
+
+    const deleted = await stream.next<{ worktreeId: string }>()
+    assert.equal(deleted.event, 'worktree-deleted')
+    assert.equal(deleted.data.worktreeId, worktreeId)
+    await assert.rejects(stat(worktreePath), { code: 'ENOENT' })
+  } finally {
+    stream.close()
+  }
+})
+
 test('reloads tracked repositories when config.json changes', async () => {
   const repoPath = await createGitRepository()
   const stream = await openSseStream('/worktrees')
