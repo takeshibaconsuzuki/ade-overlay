@@ -392,6 +392,201 @@ test('retains an unopenable tombstone when only branch deletion fails', async ()
   )
 })
 
+test('keeps a worktree id deletion-owned through branch cleanup and acknowledgement', async () => {
+  const repoPath = await createGitRepository()
+  const worktreePath = join(tempDir, 'deletion-owned')
+  await execFileAsync(
+    'git',
+    ['worktree', 'add', '-b', 'deletion-owned', worktreePath, 'main'],
+    { cwd: repoPath },
+  )
+
+  let branchStartedResolve: () => void = () => undefined
+  let releaseBranchResolve: () => void = () => undefined
+  const branchStarted = new Promise<void>((resolve) => {
+    branchStartedResolve = resolve
+  })
+  const releaseBranch = new Promise<void>((resolve) => {
+    releaseBranchResolve = resolve
+  })
+  const runner: typeof runGit = async (cwd, args, log, options) => {
+    if (args[0] === 'branch') {
+      branchStartedResolve()
+      await releaseBranch
+      throw new HttpError(400, 'simulated branch deletion failure')
+    }
+    return runGit(cwd, args, log, options)
+  }
+  const registry = new WorktreeRegistry(
+    noopLogger(),
+    undefined,
+    undefined,
+    runner,
+  )
+  await registry.addRepository(repoPath)
+  const worktree = (await registry.getSnapshot()).worktrees.find(
+    (candidate) => candidate.branchName === 'deletion-owned',
+  )!
+
+  const deletedEvent = nextWorktreeEvent(registry, 'worktree-deleted')
+  await registry.enqueueDeleteWorktree(worktree.worktreeId, true, true)
+  await branchStarted
+
+  const recreate = () =>
+    registry.enqueueCreateWorktree({
+      mainWorktreePath: repoPath,
+      baseBranch: 'deletion-owned',
+      worktreePath,
+      bootstrap: false,
+    })
+  await assert.rejects(
+    recreate(),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+  )
+
+  releaseBranchResolve()
+  await deletedEvent
+  await assert.rejects(
+    recreate(),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+  )
+
+  await registry.dismissDeletionError(worktree.worktreeId)
+  const createdEvent = nextWorktreeEvent(registry, 'worktree-created')
+  const recreated = await recreate()
+  assert.equal(recreated.worktreeId, worktree.worktreeId)
+  assert.equal((await createdEvent).worktree.worktreeId, worktree.worktreeId)
+})
+
+test('deletion supersedes and drains an in-flight creation before releasing its id', async () => {
+  const repoPath = await createGitRepository()
+  const worktreePath = join(tempDir, 'delete-pending-creation')
+  let addStartedResolve: () => void = () => undefined
+  let releaseAddResolve: () => void = () => undefined
+  const addStarted = new Promise<void>((resolve) => {
+    addStartedResolve = resolve
+  })
+  const releaseAdd = new Promise<void>((resolve) => {
+    releaseAddResolve = resolve
+  })
+  const runner: typeof runGit = async (cwd, args, log, options) => {
+    if (args[0] === 'worktree' && args[1] === 'add') {
+      addStartedResolve()
+      await releaseAdd
+    }
+    return runGit(cwd, args, log, options)
+  }
+  const registry = new WorktreeRegistry(
+    noopLogger(),
+    undefined,
+    undefined,
+    runner,
+  )
+  await registry.addRepository(repoPath)
+
+  const queuedCreation = await registry.enqueueCreateWorktree({
+    mainWorktreePath: repoPath,
+    newBranch: 'delete-pending-creation',
+    baseBranch: 'main',
+    worktreePath,
+    bootstrap: false,
+  })
+  await addStarted
+
+  const deletedEvent = nextWorktreeEvent(registry, 'worktree-deleted')
+  await registry.enqueueDeleteWorktree(queuedCreation.worktreeId, false, true)
+  await assert.rejects(
+    registry.enqueueCreateWorktree({
+      mainWorktreePath: repoPath,
+      baseBranch: 'delete-pending-creation',
+      worktreePath,
+      bootstrap: false,
+    }),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+  )
+
+  releaseAddResolve()
+  assert.equal((await deletedEvent).worktreeId, queuedCreation.worktreeId)
+  await assert.rejects(stat(worktreePath), { code: 'ENOENT' })
+
+  const createdEvent = nextWorktreeEvent(registry, 'worktree-created')
+  const recreated = await registry.enqueueCreateWorktree({
+    mainWorktreePath: repoPath,
+    baseBranch: 'delete-pending-creation',
+    worktreePath,
+    bootstrap: false,
+  })
+  assert.equal(recreated.worktreeId, queuedCreation.worktreeId)
+  assert.equal(
+    (await createdEvent).worktree.worktreeId,
+    queuedCreation.worktreeId,
+  )
+})
+
+test('preserves a failed creation row capability when pre-delete cleanup fails', async () => {
+  const repoPath = await createGitRepository()
+  const worktreePath = join(tempDir, 'failed-creation-delete')
+  const runner: typeof runGit = async (cwd, args, log, options) => {
+    if (args[0] === 'worktree' && args[1] === 'add') {
+      throw new HttpError(400, 'simulated creation failure')
+    }
+    return runGit(cwd, args, log, options)
+  }
+  const registry = new WorktreeRegistry(
+    noopLogger(),
+    undefined,
+    undefined,
+    runner,
+  )
+  await registry.addRepository(repoPath)
+
+  const creationFailed = nextWorktreeEvent(
+    registry,
+    'worktree-creation-updated',
+    (event) =>
+      event.snapshot.worktrees.some(
+        (worktree) => worktree.creationState === 'failed',
+      ),
+  )
+  const queued = await registry.enqueueCreateWorktree({
+    mainWorktreePath: repoPath,
+    newBranch: 'failed-creation-delete',
+    baseBranch: 'main',
+    worktreePath,
+    bootstrap: false,
+  })
+  await creationFailed
+
+  const deletionFailed = nextWorktreeEvent(
+    registry,
+    'worktree-deletion-updated',
+    (event) =>
+      event.snapshot.worktrees.some(
+        (worktree) => worktree.deletionState === 'failed',
+      ),
+  )
+  await registry.enqueueDeleteWorktree(
+    queued.worktreeId,
+    false,
+    false,
+    async () => {
+      throw new HttpError(500, 'simulated editor cleanup failure')
+    },
+  )
+  const failedRow = (await deletionFailed).snapshot.worktrees.find(
+    (worktree) => worktree.worktreeId === queued.worktreeId,
+  )
+  assert.equal(failedRow?.deletionState, 'failed')
+  assert.equal(failedRow?.isOpenable, false)
+
+  const restored = await registry.dismissDeletionError(queued.worktreeId)
+  const restoredRow = restored.snapshot.worktrees.find(
+    (worktree) => worktree.worktreeId === queued.worktreeId,
+  )
+  assert.equal(restoredRow?.creationState, 'failed')
+  assert.equal(restoredRow?.isOpenable, false)
+})
+
 test('reloads tracked repositories when config.json changes', async () => {
   const repoPath = await createGitRepository()
   const stream = await openSseStream('/worktrees')
@@ -1798,6 +1993,8 @@ function noopLogger() {
 function nextWorktreeEvent<TType extends WorktreeEvent['type']>(
   registry: WorktreeRegistry,
   type: TType,
+  matches: (event: Extract<WorktreeEvent, { type: TType }>) => boolean = () =>
+    true,
 ): Promise<Extract<WorktreeEvent, { type: TType }>> {
   const event = new Promise<Extract<WorktreeEvent, { type: TType }>>(
     (resolve) => {
@@ -1805,8 +2002,12 @@ function nextWorktreeEvent<TType extends WorktreeEvent['type']>(
         if (candidate.type !== type) {
           return
         }
+        const event = candidate as Extract<WorktreeEvent, { type: TType }>
+        if (!matches(event)) {
+          return
+        }
         registry.events.off('worktree-event', onEvent)
-        resolve(candidate as Extract<WorktreeEvent, { type: TType }>)
+        resolve(event)
       }
       registry.events.on('worktree-event', onEvent)
     },
