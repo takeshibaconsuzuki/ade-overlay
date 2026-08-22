@@ -332,7 +332,7 @@ test('atomically reserves a worktree before deletion lookup completes', async ()
   assert.equal((await deletedEvent).worktreeId, worktree.worktreeId)
 })
 
-test('does not resurrect a worktree when only branch deletion fails', async () => {
+test('retains an unopenable tombstone when only branch deletion fails', async () => {
   const repoPath = await createGitRepository()
   const worktreePath = join(tempDir, 'partial-delete')
   await execFileAsync(
@@ -364,13 +364,13 @@ test('does not resurrect a worktree when only branch deletion fails', async () =
 
   assert.equal(event.worktreeId, worktree.worktreeId)
   assert.equal(event.branchDeleted, false)
-  assert.equal(event.branchDeletionError, 'simulated branch deletion failure')
-  assert.equal(
-    (await registry.getSnapshot()).worktrees.some(
-      (candidate) => candidate.worktreeId === worktree.worktreeId,
-    ),
-    false,
+  const reopenedSnapshot = await registry.getSnapshot()
+  const tombstone = reopenedSnapshot.worktrees.find(
+    (candidate) => candidate.worktreeId === worktree.worktreeId,
   )
+  assert.equal(tombstone?.deletionState, 'branch-failed')
+  assert.equal(tombstone?.deletionError, 'simulated branch deletion failure')
+  assert.equal(tombstone?.isOpenable, false)
   await assert.rejects(stat(worktreePath), { code: 'ENOENT' })
   assert.equal(
     (
@@ -381,6 +381,14 @@ test('does not resurrect a worktree when only branch deletion fails', async () =
       )
     ).stdout.trim(),
     'partial-delete',
+  )
+
+  await registry.dismissDeletionError(worktree.worktreeId)
+  assert.equal(
+    (await registry.getSnapshot()).worktrees.some(
+      (candidate) => candidate.worktreeId === worktree.worktreeId,
+    ),
+    false,
   )
 })
 

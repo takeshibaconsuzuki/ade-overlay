@@ -24,6 +24,7 @@ The worktree registry is the source of truth for tracked repositories and worktr
 - Clean up editor state before removing the worktree it depends on.
 - Stream worktree state from the server as a snapshot plus incremental changes.
 - Worktree creation is asynchronous; expose progress and errors through server state instead of renderer-owned job tracking.
+- Worktree deletion is asynchronous and server-owned. Retain partial failures, including a deleted worktree whose branch could not be removed, in server state until acknowledged.
 
 ## Editor
 

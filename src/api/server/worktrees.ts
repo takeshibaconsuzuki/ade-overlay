@@ -76,7 +76,11 @@ export const WorktreeCreationState = z.enum([
   'failed',
 ])
 
-export const WorktreeDeletionState = z.enum(['deleting', 'failed'])
+export const WorktreeDeletionState = z.enum([
+  'deleting',
+  'failed',
+  'branch-failed',
+])
 
 export const Worktree = z.object({
   worktreeId: WorktreeId,
@@ -141,7 +145,6 @@ const WorktreeDeletedEvent = z.object({
   type: z.literal(WORKTREE_EVENT_TYPE.worktreeDeleted),
   worktreeId: WorktreeId,
   branchDeleted: z.boolean(),
-  branchDeletionError: z.string().optional(),
   snapshot: WorktreeSnapshot,
 })
 

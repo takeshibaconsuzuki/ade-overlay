@@ -61,7 +61,7 @@ type DeletionJob = {
   worktree: Worktree
   deleteBranch: boolean
   force: boolean
-  state: 'deleting' | 'failed'
+  state: 'deleting' | 'failed' | 'branch-failed'
   error?: string
   errorCode?: string
 }
@@ -529,6 +529,12 @@ export class WorktreeRegistry {
     beforeDelete?: () => Promise<void> | undefined,
   ): Promise<{ worktreeId: string; worktree: Worktree }> {
     const activeJob = this.deletionJobs.get(worktreeId)
+    if (activeJob?.state === 'branch-failed') {
+      throw new HttpError(
+        409,
+        `Worktree is already deleted but branch deletion failed: ${worktreeId}`,
+      )
+    }
     if (
       activeJob?.state === 'deleting' ||
       this.deletionReservations.has(worktreeId)
@@ -580,7 +586,7 @@ export class WorktreeRegistry {
     worktreeId: string,
   ): Promise<{ snapshot: WorktreeSnapshot }> {
     const job = this.deletionJobs.get(worktreeId)
-    if (job?.state === 'failed') {
+    if (job?.state === 'failed' || job?.state === 'branch-failed') {
       this.deletionJobs.delete(worktreeId)
     }
 
@@ -601,7 +607,13 @@ export class WorktreeRegistry {
         return
       }
 
-      this.deletionJobs.delete(job.worktreeId)
+      if (branchDeletionError) {
+        job.state = 'branch-failed'
+        job.error = branchDeletionError
+        job.errorCode = undefined
+      } else {
+        this.deletionJobs.delete(job.worktreeId)
+      }
       const snapshot = await this.getSnapshot()
       this.log.info(
         { worktreeId: job.worktreeId, branchDeleted, branchDeletionError },
@@ -611,7 +623,6 @@ export class WorktreeRegistry {
         type: 'worktree-deleted',
         worktreeId: job.worktreeId,
         branchDeleted,
-        branchDeletionError,
         snapshot,
       })
     } catch (error) {
@@ -819,8 +830,12 @@ export class WorktreeRegistry {
 
     const repositories = trackedRepositories.map(toPublicRepository)
     const selectedWorktreeId = this.selectedWorktreeId
+    const selectedWorktree = selectedWorktreeId
+      ? byId.get(selectedWorktreeId)
+      : undefined
     const selectedExists =
-      selectedWorktreeId !== undefined && byId.has(selectedWorktreeId)
+      selectedWorktree !== undefined &&
+      selectedWorktree.deletionState !== 'branch-failed'
 
     return {
       repositories,

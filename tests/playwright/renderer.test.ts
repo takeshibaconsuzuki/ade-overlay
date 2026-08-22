@@ -310,6 +310,52 @@ test('reopens persisted dirty deletion failures and queues a force retry', async
   await page.close()
 })
 
+test('reopens and acknowledges a branch deletion failure tombstone', async () => {
+  const failedSnapshot = {
+    ...worktreeSnapshot,
+    selectedWorktreeId: undefined,
+    worktrees: worktreeSnapshot.worktrees.map((worktree) =>
+      worktree.worktreeId === 'bbbbbbbbbbbb'
+        ? {
+            ...worktree,
+            deletionState: 'branch-failed',
+            deletionError: 'simulated branch deletion failure',
+            deletionDeleteBranch: true,
+            isOpenable: false,
+          }
+        : worktree,
+    ),
+  }
+  const page = await newMockedPage({
+    worktreeSnapshotData: failedSnapshot,
+  })
+
+  await page.goto(`${rendererUrl}/#worktrees`)
+  const tombstone = page.getByRole('option', { name: /project-feature/ })
+  await tombstone.getByText('branch delete failed').waitFor()
+  await tombstone
+    .getByText('Worktree deleted; simulated branch deletion failure')
+    .waitFor()
+  assert.equal(
+    await tombstone.getByRole('button', { name: 'Worktree actions' }).count(),
+    0,
+  )
+
+  await tombstone
+    .getByRole('button', {
+      name: 'Branch deletion failed — click to dismiss',
+    })
+    .click()
+  await page.waitForFunction(() =>
+    window.__apiCalls.some(
+      (call) =>
+        call.method === 'POST' &&
+        call.path === '/worktrees/bbbbbbbbbbbb/dismiss-deletion',
+    ),
+  )
+  await page.close()
+})
+
 test('create worktree form previews path and submits generated values', async () => {
   const page = await newMockedPage()
 

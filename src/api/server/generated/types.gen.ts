@@ -40,7 +40,7 @@ export type RemoveRepositoryResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
-                deletionState?: 'deleting' | 'failed';
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
                 deletionError?: string;
                 deletionErrorCode?: string;
                 deletionDeleteBranch?: boolean;
@@ -104,7 +104,7 @@ export type AddRepositoryResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
-                deletionState?: 'deleting' | 'failed';
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
                 deletionError?: string;
                 deletionErrorCode?: string;
                 deletionDeleteBranch?: boolean;
@@ -194,7 +194,7 @@ export type CreateWorktreeResponses = {
             creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
             creationError?: string;
             hasCreationLogs: boolean;
-            deletionState?: 'deleting' | 'failed';
+            deletionState?: 'deleting' | 'failed' | 'branch-failed';
             deletionError?: string;
             deletionErrorCode?: string;
             deletionDeleteBranch?: boolean;
@@ -293,7 +293,7 @@ export type DismissCreationErrorResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
-                deletionState?: 'deleting' | 'failed';
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
                 deletionError?: string;
                 deletionErrorCode?: string;
                 deletionDeleteBranch?: boolean;
@@ -353,7 +353,7 @@ export type DismissDeletionErrorResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
-                deletionState?: 'deleting' | 'failed';
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
                 deletionError?: string;
                 deletionErrorCode?: string;
                 deletionDeleteBranch?: boolean;
@@ -506,7 +506,7 @@ export type DeleteWorktreeResponses = {
             creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
             creationError?: string;
             hasCreationLogs: boolean;
-            deletionState?: 'deleting' | 'failed';
+            deletionState?: 'deleting' | 'failed' | 'branch-failed';
             deletionError?: string;
             deletionErrorCode?: string;
             deletionDeleteBranch?: boolean;

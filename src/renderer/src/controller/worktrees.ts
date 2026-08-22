@@ -7,10 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { SERVER_ORIGIN } from '../../../api/server/config'
-import {
-  WORKTREE_EVENT_TYPE,
-  WORKTREE_EVENT_TYPES,
-} from '../../../api/server/events'
+import { WORKTREE_EVENT_TYPES } from '../../../api/server/events'
 import {
   WORKTREES_PATH,
   WorktreeSseEvents,
@@ -29,7 +26,6 @@ const EMPTY_SNAPSHOT: WorktreeSnapshot = { repositories: [], worktrees: [] }
 type WorktreeStreamState = {
   snapshot: WorktreeSnapshot
   connected: boolean
-  deletionNotice: { worktreeId: string; message: string } | null
 }
 
 const WorktreeStreamContext = createContext<WorktreeStreamState | null>(null)
@@ -61,10 +57,6 @@ export function useWorktreeStream(): WorktreeStreamState {
 function useWorktreeStreamState(): WorktreeStreamState {
   const [snapshot, setSnapshot] = useState<WorktreeSnapshot>(EMPTY_SNAPSHOT)
   const [connected, setConnected] = useState(false)
-  const [deletionNotice, setDeletionNotice] = useState<{
-    worktreeId: string
-    message: string
-  } | null>(null)
 
   useEffect(() => {
     const url = `${SERVER_ORIGIN}${WORKTREES_PATH}`
@@ -97,16 +89,6 @@ function useWorktreeStreamState(): WorktreeStreamState {
             'stream event',
           )
           setSnapshot(data.snapshot)
-          if (
-            type === WORKTREE_EVENT_TYPE.worktreeDeleted &&
-            'branchDeletionError' in data &&
-            typeof data.branchDeletionError === 'string'
-          ) {
-            setDeletionNotice({
-              worktreeId: data.worktreeId,
-              message: data.branchDeletionError,
-            })
-          }
         }
       })
     }
@@ -126,5 +108,5 @@ function useWorktreeStreamState(): WorktreeStreamState {
     }
   }, [])
 
-  return { snapshot, connected, deletionNotice }
+  return { snapshot, connected }
 }

@@ -42,19 +42,23 @@ export function WorktreeRow({
   const isBootstrapping = worktree.creationState === 'bootstrapping'
   const isCreationPending = isCreating || isBootstrapping
   const isDeleting = worktree.deletionState === 'deleting'
-  const isDeletionFailed = worktree.deletionState === 'failed'
+  const isWorktreeDeletionFailed = worktree.deletionState === 'failed'
+  const isBranchDeletionFailed = worktree.deletionState === 'branch-failed'
+  const isDeletionFailed = isWorktreeDeletionFailed || isBranchDeletionFailed
   const showDestructiveActions = !isCreationPending && !isDeleting
   const canStopVscodeServer = sessionStatus !== 'off'
   const secondary =
-    isDeletionFailed && worktree.deletionError
-      ? worktree.deletionError
-      : isFailed && worktree.creationError
-        ? worktree.creationError
-        : worktreeBranch(worktree)
+    isBranchDeletionFailed && worktree.deletionError
+      ? `Worktree deleted; ${worktree.deletionError}`
+      : isWorktreeDeletionFailed && worktree.deletionError
+        ? worktree.deletionError
+        : isFailed && worktree.creationError
+          ? worktree.creationError
+          : worktreeBranch(worktree)
 
   return (
     <HBox
-      aria-disabled={busy || !worktree.isOpenable}
+      aria-disabled={busy || (!worktree.isOpenable && !isBranchDeletionFailed)}
       className={styles.row}
       {...itemProps}
       p="2"
@@ -83,7 +87,10 @@ export function WorktreeRow({
           {isCreating && <Badge color="blue">creating</Badge>}
           {isBootstrapping && <Badge color="blue">bootstrapping</Badge>}
           {isDeleting && <Badge color="red">deleting</Badge>}
-          {isDeletionFailed && <Badge color="red">delete failed</Badge>}
+          {isWorktreeDeletionFailed && <Badge color="red">delete failed</Badge>}
+          {isBranchDeletionFailed && (
+            <Badge color="red">branch delete failed</Badge>
+          )}
           {worktree.isDetached && <Badge color="amber">detached</Badge>}
           {worktree.isPrunable && <Badge color="orange">prunable</Badge>}
         </HBox>
@@ -97,7 +104,7 @@ export function WorktreeRow({
         </Text>
       </VBox>
 
-      {!busy && (
+      {!busy && !isBranchDeletionFailed && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton
@@ -176,11 +183,15 @@ function LeadingIndicator({
     return <StatusIndicator state="busy" label="Working" />
   }
 
-  if (worktree.deletionState === 'failed') {
+  if (
+    worktree.deletionState === 'failed' ||
+    worktree.deletionState === 'branch-failed'
+  ) {
+    const branchOnly = worktree.deletionState === 'branch-failed'
     return (
       <StatusIndicator
         state="error"
-        label="Deletion failed — click to dismiss"
+        label={`${branchOnly ? 'Branch deletion' : 'Deletion'} failed — click to dismiss`}
         onClick={(event) => {
           event.stopPropagation()
           onDismissDeletionError()

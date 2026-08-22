@@ -26,6 +26,7 @@ type Repository = {
 
 type Worktree = {
   worktreeId: string
+  name: string
   path: string
   mainWorktreePath: string
   isMain: boolean
@@ -39,6 +40,10 @@ type Worktree = {
   creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed'
   creationError?: string
   hasCreationLogs: boolean
+  deletionState?: 'deleting' | 'failed' | 'branch-failed'
+  deletionError?: string
+  deletionErrorCode?: string
+  deletionDeleteBranch?: boolean
   isOpenable: boolean
 }
 
@@ -53,6 +58,7 @@ type WorktreeEvent =
   | { type: 'repository-removed'; mainWorktreePath: string; snapshot: WorktreeSnapshot }
   | { type: 'worktree-created'; worktree: Worktree; snapshot: WorktreeSnapshot }
   | { type: 'worktree-creation-updated'; worktreeId: string; snapshot: WorktreeSnapshot }
+  | { type: 'worktree-deletion-updated'; worktreeId: string; snapshot: WorktreeSnapshot }
   | { type: 'worktree-deleted'; worktreeId: string; branchDeleted: boolean; snapshot: WorktreeSnapshot }
   | { type: 'worktree-selected'; worktreeId: string; snapshot: WorktreeSnapshot }
 
@@ -61,7 +67,14 @@ type EditorCommand =
   | { type: 'show' }
   | { type: 'focus' }
   | { type: 'close'; commandId: string; worktreeId: string }
-  | { type: 'open-file'; worktreeId: string; url: string; filePath: string }
+  | {
+      type: 'open-file'
+      worktreeId: string
+      url: string
+      filePath: string
+      line?: number
+      column?: number
+    }
 
 type EditorSessionStatus = {
   worktreeId: string
@@ -89,11 +102,19 @@ type ChatEvent = {
 type Terminal = {
   terminalId: string
   worktreeId: string
-  providerId: string
-  chatId?: string
   title?: string
   status: 'running' | 'exited'
 }
+
+type TerminalPastePart =
+  | { type: 'text'; text: string }
+  | {
+      type: 'image'
+      mimeType: string
+      dataBase64: string
+      filename?: string
+      alt?: string
+    }
 
 Worktrees
 ---------
@@ -130,7 +151,7 @@ createWorktree({
 openWorktree({
   worktreeId: string
 }):
-  | { worktreeId: string; url: string; alreadyStarted: boolean }
+  | { worktreeId: string; url: string; editorAlreadyStarted: boolean }
   | ErrorResponse
 
 // POST /worktrees/{worktreeId}/dismiss-creation
@@ -162,7 +183,14 @@ deleteWorktree({
   deleteBranch?: boolean
   force?: boolean
 }):
-  | { deleted: boolean; branchDeleted: boolean }
+  | { worktreeId: string; worktree: Worktree }
+  | ErrorResponse
+
+// POST /worktrees/{worktreeId}/dismiss-deletion
+dismissDeletionError({
+  worktreeId: string
+}):
+  | { snapshot: WorktreeSnapshot }
   | ErrorResponse
 
 Editor
@@ -174,7 +202,7 @@ editorCommands():
 
 // GET /editorSessions
 editorSessions():
-  Sse<EditorSessionStatus>
+  Sse<EditorSessionStatus[] | EditorSessionStatus>
 
 // POST /showEditor
 showEditor({
@@ -183,8 +211,25 @@ showEditor({
   | { worktreeId: string; url: string; alreadyStarted: boolean }
   | ErrorResponse
 
+// POST /editor/open-file
+openFileInEditor({
+  worktreeId: string
+  filePath: string
+  line?: number
+  column?: number
+}):
+  | { ok: true }
+  | ErrorResponse
+
 // POST /worktrees/{worktreeId}/creation-logs/open
 openCreationLogs({
+  worktreeId: string
+}):
+  | { ok: true }
+  | ErrorResponse
+
+// POST /worktrees/{worktreeId}/vscode-server/stop
+stopVscodeServer({
   worktreeId: string
 }):
   | { ok: true }
@@ -197,7 +242,11 @@ Editor Hidden/Internal
 editorExtensionCommands({
   worktreeId: string
 }):
-  Sse<EditorCommand>
+  Sse<{
+    filePath: string
+    line?: number
+    column?: number
+  }>
 
 // POST /editorCommandAcks
 editorCommandAcks({
@@ -251,10 +300,9 @@ chatCommands():
 Chats Hidden/Internal
 ---------------------
 
-// POST /chats/hooks/{providerId}?worktreeId=...
+// POST /chats/hooks/{providerId}
 chatHook({
   providerId: string
-  worktreeId?: string
   body: Record<string, unknown>
 }):
   { ok: boolean }
@@ -288,6 +336,11 @@ terminalSocket({
 }):
   WebSocket<
     | { type: 'input'; data: string }
+    | {
+        type: 'paste'
+        parts: TerminalPastePart[]
+        bracketedPasteMode: boolean
+      }
     | { type: 'resize'; cols: number; rows: number }
     | { type: 'ping' },
     | { type: 'output'; data: string }
