@@ -16,6 +16,7 @@ import {
   TerminalStreamResponse,
   type TerminalSnapshot,
 } from '../../api/server/terminals'
+import { ErrorResponse } from '../../api/server/worktrees'
 import { type ChatService } from '../chats/service'
 import { createSseStream } from '../sse'
 import { type TerminalService } from './service'
@@ -49,6 +50,10 @@ export function registerTerminalRoutes(
       body: TerminalCreateRequest,
       response: {
         200: Terminal,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        409: ErrorResponse,
+        500: ErrorResponse,
       },
     },
     handler: async (request) =>

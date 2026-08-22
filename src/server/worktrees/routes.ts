@@ -130,6 +130,7 @@ export function registerWorktreeRoutes(
       response: {
         200: OpenWorktreeResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
         500: ErrorResponse,
       },
     },

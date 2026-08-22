@@ -218,18 +218,6 @@ export class WorktreeRegistry {
 
         throw error
       }
-
-      // Drop any transient lifecycle job for the untracked repo so its row and
-      // creation logs don't linger after the repository is gone.
-      for (const [worktreeId, job] of this.lifecycleJobs) {
-        if (lifecycleMainWorktreePath(job) === repositoryKey) {
-          this.lifecycleJobs.delete(worktreeId)
-          const creationJob = lifecycleCreationJob(job)
-          if (creationJob) {
-            await this.removeCreationLog(creationJob)
-          }
-        }
-      }
     }
 
     const snapshot = await this.getSnapshot()
@@ -865,7 +853,14 @@ export class WorktreeRegistry {
         .map((worktree) => [worktree.worktreeId, worktree]),
     )
 
+    // Repository tracking controls snapshot visibility, not lifecycle
+    // ownership. A job can still be draining after its repository is
+    // untracked, and must retain its id until it reaches its normal terminal
+    // transition. Re-adding the repository makes retained state visible again.
     for (const job of this.lifecycleJobs.values()) {
+      if (!this.repositories.has(lifecycleMainWorktreePath(job))) {
+        continue
+      }
       if (job.kind === 'creation') {
         projectCreationJob(byId, job)
       } else {
@@ -882,19 +877,17 @@ export class WorktreeRegistry {
     const selectedWorktree = selectedWorktreeId
       ? byId.get(selectedWorktreeId)
       : undefined
-    const selectedExists =
-      selectedWorktree !== undefined &&
-      selectedWorktree.deletionState !== 'branch-failed'
+    const selectedIsOpenable = selectedWorktree?.isOpenable === true
 
     return {
       repositories,
       worktrees,
-      selectedWorktreeId: selectedExists ? selectedWorktreeId : undefined,
+      selectedWorktreeId: selectedIsOpenable ? selectedWorktreeId : undefined,
     }
   }
 
   async selectWorktree(worktreeId: string): Promise<void> {
-    await this.getWorktreeById(worktreeId)
+    await this.getOpenableWorktreeById(worktreeId)
     this.selectedWorktreeId = worktreeId
     await this.appConfig?.writeSelectedWorktreeId(worktreeId)
     const snapshot = await this.getSnapshot()
@@ -943,6 +936,14 @@ export class WorktreeRegistry {
     return worktree
   }
 
+  async getOpenableWorktreeById(worktreeId: string): Promise<Worktree> {
+    const worktree = await this.getWorktreeById(worktreeId)
+    if (!worktree.isOpenable) {
+      throw new HttpError(409, `Worktree is not openable: ${worktreeId}`)
+    }
+    return worktree
+  }
+
   async findWorktreeByPath(path: string): Promise<Worktree | undefined> {
     const normalizedPath = normalizePath(path)
     const snapshot = await this.getSnapshot()
@@ -955,7 +956,7 @@ export class WorktreeRegistry {
   async getPreChatCommandForWorktree(
     worktreeId: string,
   ): Promise<string | undefined> {
-    const worktree = await this.getWorktreeById(worktreeId)
+    const worktree = await this.getOpenableWorktreeById(worktreeId)
     const repository = await this.getRepository(worktree.mainWorktreePath)
     return repository.preChatCommand
   }
@@ -1013,16 +1014,6 @@ export class WorktreeRegistry {
       this.repositories.set(mainWorktreePath, repository)
     }
     this.selectedWorktreeId = config.selectedWorktreeId
-
-    for (const [worktreeId, job] of this.lifecycleJobs) {
-      if (!this.repositories.has(lifecycleMainWorktreePath(job))) {
-        this.lifecycleJobs.delete(worktreeId)
-        const creationJob = lifecycleCreationJob(job)
-        if (creationJob) {
-          await this.removeCreationLog(creationJob)
-        }
-      }
-    }
 
     this.log.info(
       {

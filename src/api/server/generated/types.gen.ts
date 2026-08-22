@@ -225,6 +225,13 @@ export type OpenWorktreeErrors = {
     /**
      * Default Response
      */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
     500: {
         error: string;
         message: string;
@@ -569,6 +576,13 @@ export type ShowEditorErrors = {
     /**
      * Default Response
      */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
     500: {
         error: string;
         message: string;
@@ -607,6 +621,13 @@ export type OpenFileInEditorErrors = {
      * Default Response
      */
     404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
         error: string;
         message: string;
     };
@@ -739,6 +760,32 @@ export type ShowChatData = {
     url: '/showChat';
 };
 
+export type ShowChatErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type ShowChatError = ShowChatErrors[keyof ShowChatErrors];
+
 export type ShowChatResponses = {
     /**
      * Default Response
@@ -822,6 +869,39 @@ export type CreateTerminalData = {
     query?: never;
     url: '/terminals';
 };
+
+export type CreateTerminalErrors = {
+    /**
+     * Default Response
+     */
+    400: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type CreateTerminalError = CreateTerminalErrors[keyof CreateTerminalErrors];
 
 export type CreateTerminalResponses = {
     /**

@@ -26,6 +26,8 @@ The worktree registry is the source of truth for tracked repositories and worktr
 - Worktree creation is asynchronous; expose progress and errors through server state instead of renderer-owned job tracking.
 - Worktree deletion is asynchronous and server-owned. Retain partial failures, including a deleted worktree whose branch could not be removed, in server state until acknowledged.
 - A worktree ID has exactly one transient lifecycle owner. Creation and deletion must transition that ownership atomically and drain superseded work before releasing the ID for reuse.
+- Repository tracking controls visibility, not lifecycle ownership. Untracking a repository must not release an active worktree operation or make its ID reusable before that operation drains.
+- Server-side launch operations must enforce a worktree's projected capabilities; row existence alone does not imply that a worktree is openable.
 
 ## Editor
 

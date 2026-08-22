@@ -111,10 +111,14 @@ export class EditorService {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
+    await this.registry.getOpenableWorktreeById(worktreeId)
     const alreadyStarted = this.hasLiveSession(worktreeId)
     this.recordSwitch(worktreeId)
     const session = await this.ensureSession(worktreeId)
     await this.ensureEditorAppReady()
+    // Session/app startup performs I/O. Recheck before publishing the switch so
+    // deletion cleanup cannot be followed by a stale reopen command.
+    await this.registry.getOpenableWorktreeById(worktreeId)
 
     const command: EditorCommand = {
       type: 'switch',
@@ -156,9 +160,11 @@ export class EditorService {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
+    await this.registry.getOpenableWorktreeById(worktreeId)
     this.lastOpenFile.set(worktreeId, { filePath, ...position })
     const session = await this.ensureSession(worktreeId)
     await this.ensureEditorAppReady()
+    await this.registry.getOpenableWorktreeById(worktreeId)
     this.emitCommand({
       type: 'open-file',
       worktreeId,
@@ -234,6 +240,7 @@ export class EditorService {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
+    await this.registry.getOpenableWorktreeById(worktreeId)
     return (await this.ensureSession(worktreeId)).port
   }
 
@@ -241,7 +248,7 @@ export class EditorService {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Editor service is shutting down')
     }
-    await this.registry.getWorktreeById(worktreeId)
+    await this.registry.getOpenableWorktreeById(worktreeId)
     return renderBootstrapHtml(await readUserDataPayload())
   }
 
@@ -283,7 +290,7 @@ export class EditorService {
     let worktree
     let vscode
     try {
-      worktree = await this.registry.getWorktreeById(worktreeId)
+      worktree = await this.registry.getOpenableWorktreeById(worktreeId)
       await this.configureWorktreeChat(worktree)
       vscode = await startVscodeServer(worktree, this.log)
     } catch (error) {

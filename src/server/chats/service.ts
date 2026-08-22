@@ -184,7 +184,9 @@ export class ChatService {
     if (this.shuttingDown) {
       throw new HttpError(503, 'Chat service is shutting down')
     }
-    const worktree = await this.worktrees.getWorktreeById(options.worktreeId)
+    const worktree = await this.worktrees.getOpenableWorktreeById(
+      options.worktreeId,
+    )
     const providerId = options.providerId ?? DEFAULT_CHAT_PROVIDER
     const launch = this.registry.getLaunch(providerId, options.resumeChatId)
     const terminalPaste = this.registry.getTerminalPaste(providerId)
@@ -207,6 +209,10 @@ export class ChatService {
     const preChatCommand = await this.worktrees.getPreChatCommandForWorktree(
       options.worktreeId,
     )
+    // The pre-chat lookup performs I/O. Recheck immediately before the
+    // synchronous terminal claim so a deletion queued during that await cannot
+    // leave a new terminal behind after the deletion event has already fired.
+    await this.worktrees.getOpenableWorktreeById(options.worktreeId)
     const terminal = this.terminals.create({
       worktreeId: options.worktreeId,
       resumed: !!options.resumeChatId,
