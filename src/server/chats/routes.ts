@@ -29,6 +29,7 @@ import {
   type ChatEvent,
   type ChatSnapshot,
 } from '../../api/server/chats'
+import { ErrorResponse } from '../../api/server/worktrees'
 import { createSseStream } from '../sse'
 import { type WorktreeOpener } from '../worktrees/opener'
 import { type ChatRegistry } from './registry'
@@ -96,6 +97,9 @@ export function registerChatRoutes(
       body: ChatShowRequest,
       response: {
         200: ChatShowResponse,
+        404: ErrorResponse,
+        409: ErrorResponse,
+        500: ErrorResponse,
       },
     },
     handler: async (request) => {

@@ -13,6 +13,7 @@ export const WORKTREE_EVENT_TYPE = {
   repositoryRemoved: 'repository-removed',
   worktreeCreated: 'worktree-created',
   worktreeCreationUpdated: 'worktree-creation-updated',
+  worktreeDeletionUpdated: 'worktree-deletion-updated',
   worktreeDeleted: 'worktree-deleted',
   worktreeSelected: 'worktree-selected',
 } as const

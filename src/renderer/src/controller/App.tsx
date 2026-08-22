@@ -15,6 +15,7 @@ import {
   createWorktree,
   deleteWorktree,
   dismissCreationError,
+  dismissDeletionError,
   openCreationLogs,
   openWorktree,
   removeRepository,
@@ -38,11 +39,6 @@ export function App(): React.JSX.Element {
   const [addingRepository, setAddingRepository] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [forcePrompt, setForcePrompt] = useState<{
-    worktreeId: string
-    deleteBranch: boolean
-    message: string
-  } | null>(null)
 
   const markBusy = useCallback((worktreeId: string, busy: boolean): void => {
     setBusyIds((current) => {
@@ -115,25 +111,10 @@ export function App(): React.JSX.Element {
         body: { deleteBranch, force },
       })
       if (error) {
-        // A non-forced delete of a worktree with uncommitted/untracked changes
-        // is recoverable: prompt the user to force or cancel instead of just
-        // surfacing the failure.
-        if (!force && codeOf(error) === WORKTREE_DIRTY_ERROR_CODE) {
-          logger.info(
-            { worktreeId },
-            'worktree has changes, prompting to force',
-          )
-          setForcePrompt({
-            worktreeId,
-            deleteBranch,
-            message: messageOf(error, 'Worktree has uncommitted changes.'),
-          })
-        } else {
-          logger.error({ worktreeId, err: error }, 'delete worktree failed')
-          setError(messageOf(error, 'Failed to delete worktree'))
-        }
+        logger.error({ worktreeId, err: error }, 'queue delete worktree failed')
+        setError(messageOf(error, 'Failed to queue worktree deletion'))
       } else {
-        logger.info({ worktreeId }, 'deleted worktree')
+        logger.info({ worktreeId }, 'queued worktree deletion')
       }
       markBusy(worktreeId, false)
     },
@@ -147,14 +128,22 @@ export function App(): React.JSX.Element {
     [runDelete],
   )
 
-  const handleConfirmForceDelete = useCallback((): void => {
-    if (!forcePrompt) {
-      return
-    }
-    const { worktreeId, deleteBranch } = forcePrompt
-    setForcePrompt(null)
-    void runDelete(worktreeId, deleteBranch, true)
-  }, [forcePrompt, runDelete])
+  const handleDismissDeletionError = useCallback(
+    async (worktreeId: string): Promise<void> => {
+      setError(null)
+      markBusy(worktreeId, true)
+      const { error } = await dismissDeletionError({ path: { worktreeId } })
+      if (error) {
+        logger.error(
+          { worktreeId, err: error },
+          'dismiss deletion error failed',
+        )
+        setError(messageOf(error, 'Failed to dismiss deletion error'))
+      }
+      markBusy(worktreeId, false)
+    },
+    [markBusy],
+  )
 
   const handleCreate = useCallback(
     async (values: CreateValues): Promise<boolean> => {
@@ -240,6 +229,11 @@ export function App(): React.JSX.Element {
   )
 
   const { worktrees, repositories } = snapshot
+  const dirtyDeletion = worktrees.find(
+    (worktree) =>
+      worktree.deletionState === 'failed' &&
+      worktree.deletionErrorCode === WORKTREE_DIRTY_ERROR_CODE,
+  )
 
   return (
     <VBox className={styles.windowContent} height="100%" justify="start" p="2">
@@ -278,6 +272,9 @@ export function App(): React.JSX.Element {
         onRemoveRepository={handleRemoveRepository}
         onOpenCreationLogs={handleOpenCreationLogs}
         onDismissCreationError={handleDismissCreationError}
+        onDismissDeletionError={(worktreeId) => {
+          void handleDismissDeletionError(worktreeId)
+        }}
         onStopVscodeServer={handleStopVscodeServer}
       />
 
@@ -288,30 +285,48 @@ export function App(): React.JSX.Element {
       />
 
       <AlertDialog.Root
-        open={forcePrompt !== null}
+        open={dirtyDeletion !== undefined}
         onOpenChange={(open) => {
-          if (!open) {
-            setForcePrompt(null)
+          if (!open && dirtyDeletion) {
+            void handleDismissDeletionError(dirtyDeletion.worktreeId)
           }
         }}
       >
         <AlertDialog.Content maxWidth="450px">
           <AlertDialog.Title>Force delete worktree?</AlertDialog.Title>
           <AlertDialog.Description size="2">
-            {forcePrompt?.message} Forcing will discard those changes
+            {dirtyDeletion?.deletionError} Forcing will discard those changes
             permanently.
           </AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray">
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button color="red" onClick={handleConfirmForceDelete}>
-                Force delete
-              </Button>
-            </AlertDialog.Action>
+            <Button
+              variant="soft"
+              color="gray"
+              onClick={() => {
+                if (dirtyDeletion) {
+                  void handleDismissDeletionError(dirtyDeletion.worktreeId)
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              disabled={
+                !!dirtyDeletion && busyIds.has(dirtyDeletion.worktreeId)
+              }
+              onClick={() => {
+                if (dirtyDeletion) {
+                  void runDelete(
+                    dirtyDeletion.worktreeId,
+                    dirtyDeletion.deletionDeleteBranch ?? false,
+                    true,
+                  )
+                }
+              }}
+            >
+              Force delete
+            </Button>
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
@@ -329,16 +344,4 @@ function messageOf(error: unknown, fallback: string): string {
     return (error as { message: string }).message
   }
   return fallback
-}
-
-function codeOf(error: unknown): string | undefined {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'error' in error &&
-    typeof (error as { error: unknown }).error === 'string'
-  ) {
-    return (error as { error: string }).error
-  }
-  return undefined
 }

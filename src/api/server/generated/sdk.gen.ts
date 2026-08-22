@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateTerminalData, CreateTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, HistoricalChatsData, HistoricalChatsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, LiveChatsData, LiveChatsResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenFileInEditorData, OpenFileInEditorErrors, OpenFileInEditorResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowChatData, ShowChatResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses, StopVscodeServerData, StopVscodeServerErrors, StopVscodeServerResponses, TerminalEventsData, TerminalEventsResponses } from './types.gen';
+import type { AddRepositoryData, AddRepositoryErrors, AddRepositoryResponses, ChatCommandsData, ChatCommandsResponses, CreateTerminalData, CreateTerminalErrors, CreateTerminalResponses, CreateWorktreeData, CreateWorktreeErrors, CreateWorktreeResponses, DeleteWorktreeData, DeleteWorktreeErrors, DeleteWorktreeResponses, DismissCreationErrorData, DismissCreationErrorErrors, DismissCreationErrorResponses, DismissDeletionErrorData, DismissDeletionErrorErrors, DismissDeletionErrorResponses, EditorCommandsData, EditorCommandsResponses, EditorSessionsData, EditorSessionsResponses, HistoricalChatsData, HistoricalChatsResponses, IngestLogsData, IngestLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListWorktreesData, ListWorktreesResponses, LiveChatsData, LiveChatsResponses, OpenCreationLogsData, OpenCreationLogsErrors, OpenCreationLogsResponses, OpenFileInEditorData, OpenFileInEditorErrors, OpenFileInEditorResponses, OpenWorktreeData, OpenWorktreeErrors, OpenWorktreeResponses, PreviewWorktreePathData, PreviewWorktreePathErrors, PreviewWorktreePathResponses, RemoveRepositoryData, RemoveRepositoryResponses, ShowChatData, ShowChatErrors, ShowChatResponses, ShowEditorData, ShowEditorErrors, ShowEditorResponses, StopVscodeServerData, StopVscodeServerErrors, StopVscodeServerResponses, TerminalEventsData, TerminalEventsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -50,6 +50,8 @@ export const createWorktree = <ThrowOnError extends boolean = false>(options: Op
 export const openWorktree = <ThrowOnError extends boolean = false>(options: Options<OpenWorktreeData, ThrowOnError>): RequestResult<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError> => (options.client ?? client).post<OpenWorktreeResponses, OpenWorktreeErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/open', ...options });
 
 export const dismissCreationError = <ThrowOnError extends boolean = false>(options: Options<DismissCreationErrorData, ThrowOnError>): RequestResult<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError> => (options.client ?? client).post<DismissCreationErrorResponses, DismissCreationErrorErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/dismiss-creation', ...options });
+
+export const dismissDeletionError = <ThrowOnError extends boolean = false>(options: Options<DismissDeletionErrorData, ThrowOnError>): RequestResult<DismissDeletionErrorResponses, DismissDeletionErrorErrors, ThrowOnError> => (options.client ?? client).post<DismissDeletionErrorResponses, DismissDeletionErrorErrors, ThrowOnError>({ url: '/worktrees/{worktreeId}/dismiss-deletion', ...options });
 
 export const listBranches = <ThrowOnError extends boolean = false>(options: Options<ListBranchesData, ThrowOnError>): RequestResult<ListBranchesResponses, ListBranchesErrors, ThrowOnError> => (options.client ?? client).post<ListBranchesResponses, ListBranchesErrors, ThrowOnError>({
     url: '/repositories/branches',
@@ -106,7 +108,7 @@ export const stopVscodeServer = <ThrowOnError extends boolean = false>(options: 
 
 export const liveChats = <ThrowOnError extends boolean = false>(options?: Options<LiveChatsData, ThrowOnError>): RequestResult<LiveChatsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<LiveChatsResponses, unknown, ThrowOnError>({ url: '/chats/live', ...options });
 
-export const showChat = <ThrowOnError extends boolean = false>(options: Options<ShowChatData, ThrowOnError>): RequestResult<ShowChatResponses, unknown, ThrowOnError> => (options.client ?? client).post<ShowChatResponses, unknown, ThrowOnError>({
+export const showChat = <ThrowOnError extends boolean = false>(options: Options<ShowChatData, ThrowOnError>): RequestResult<ShowChatResponses, ShowChatErrors, ThrowOnError> => (options.client ?? client).post<ShowChatResponses, ShowChatErrors, ThrowOnError>({
     url: '/showChat',
     ...options,
     headers: {
@@ -121,7 +123,7 @@ export const chatCommands = <ThrowOnError extends boolean = false>(options?: Opt
 
 export const terminalEvents = <ThrowOnError extends boolean = false>(options?: Options<TerminalEventsData, ThrowOnError>): RequestResult<TerminalEventsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<TerminalEventsResponses, unknown, ThrowOnError>({ url: '/terminals', ...options });
 
-export const createTerminal = <ThrowOnError extends boolean = false>(options: Options<CreateTerminalData, ThrowOnError>): RequestResult<CreateTerminalResponses, unknown, ThrowOnError> => (options.client ?? client).post<CreateTerminalResponses, unknown, ThrowOnError>({
+export const createTerminal = <ThrowOnError extends boolean = false>(options: Options<CreateTerminalData, ThrowOnError>): RequestResult<CreateTerminalResponses, CreateTerminalErrors, ThrowOnError> => (options.client ?? client).post<CreateTerminalResponses, CreateTerminalErrors, ThrowOnError>({
     url: '/terminals',
     ...options,
     headers: {

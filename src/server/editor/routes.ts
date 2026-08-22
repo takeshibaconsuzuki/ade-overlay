@@ -122,6 +122,7 @@ export function registerEditorRoutes(
       response: {
         200: EditorWorktreeResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
         500: ErrorResponse,
       },
     },
@@ -148,12 +149,13 @@ export function registerEditorRoutes(
       response: {
         200: EditorOpenFileResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
         500: ErrorResponse,
       },
     },
     handler: async (request) => {
       const { worktreeId, filePath, line, column } = request.body
-      const worktree = await registry.getWorktreeById(worktreeId)
+      const worktree = await registry.getOpenableWorktreeById(worktreeId)
       const resolvedPath =
         filePath.startsWith('~/') || filePath.startsWith('~\\')
           ? resolve(homedir(), filePath.slice(2))

@@ -28,6 +28,7 @@ type WorktreeListProps = {
   onRemoveRepository: (worktreeId: string, mainWorktreePath: string) => void
   onOpenCreationLogs: (worktreeId: string) => void
   onDismissCreationError: (worktreeId: string) => void
+  onDismissDeletionError: (worktreeId: string) => void
   onStopVscodeServer: (worktreeId: string) => void
 }
 
@@ -42,6 +43,7 @@ export function WorktreeList({
   onRemoveRepository,
   onOpenCreationLogs,
   onDismissCreationError,
+  onDismissDeletionError,
   onStopVscodeServer,
 }: WorktreeListProps): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -140,6 +142,9 @@ export function WorktreeList({
                     }
                     onDismissCreationError={() =>
                       onDismissCreationError(worktree.worktreeId)
+                    }
+                    onDismissDeletionError={() =>
+                      onDismissDeletionError(worktree.worktreeId)
                     }
                     onStopVscodeServer={() =>
                       onStopVscodeServer(worktree.worktreeId)

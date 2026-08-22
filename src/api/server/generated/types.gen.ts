@@ -40,6 +40,10 @@ export type RemoveRepositoryResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
+                deletionError?: string;
+                deletionErrorCode?: string;
+                deletionDeleteBranch?: boolean;
                 isOpenable: boolean;
             }>;
             selectedWorktreeId?: string;
@@ -100,6 +104,10 @@ export type AddRepositoryResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
+                deletionError?: string;
+                deletionErrorCode?: string;
+                deletionDeleteBranch?: boolean;
                 isOpenable: boolean;
             }>;
             selectedWorktreeId?: string;
@@ -186,6 +194,10 @@ export type CreateWorktreeResponses = {
             creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
             creationError?: string;
             hasCreationLogs: boolean;
+            deletionState?: 'deleting' | 'failed' | 'branch-failed';
+            deletionError?: string;
+            deletionErrorCode?: string;
+            deletionDeleteBranch?: boolean;
             isOpenable: boolean;
         };
     };
@@ -207,6 +219,13 @@ export type OpenWorktreeErrors = {
      * Default Response
      */
     404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
         error: string;
         message: string;
     };
@@ -281,6 +300,10 @@ export type DismissCreationErrorResponses = {
                 creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
                 creationError?: string;
                 hasCreationLogs: boolean;
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
+                deletionError?: string;
+                deletionErrorCode?: string;
+                deletionDeleteBranch?: boolean;
                 isOpenable: boolean;
             }>;
             selectedWorktreeId?: string;
@@ -289,6 +312,66 @@ export type DismissCreationErrorResponses = {
 };
 
 export type DismissCreationErrorResponse = DismissCreationErrorResponses[keyof DismissCreationErrorResponses];
+
+export type DismissDeletionErrorData = {
+    body?: never;
+    path: {
+        worktreeId: string;
+    };
+    query?: never;
+    url: '/worktrees/{worktreeId}/dismiss-deletion';
+};
+
+export type DismissDeletionErrorErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+};
+
+export type DismissDeletionErrorError = DismissDeletionErrorErrors[keyof DismissDeletionErrorErrors];
+
+export type DismissDeletionErrorResponses = {
+    /**
+     * Default Response
+     */
+    200: {
+        snapshot: {
+            repositories: Array<{
+                mainWorktreePath: string;
+                bootstrapCommand?: string;
+            }>;
+            worktrees: Array<{
+                worktreeId: string;
+                name: string;
+                path: string;
+                mainWorktreePath: string;
+                isMain: boolean;
+                head?: string;
+                branch?: string;
+                branchName?: string;
+                isBare: boolean;
+                isDetached: boolean;
+                isPrunable: boolean;
+                prunableReason?: string;
+                creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
+                creationError?: string;
+                hasCreationLogs: boolean;
+                deletionState?: 'deleting' | 'failed' | 'branch-failed';
+                deletionError?: string;
+                deletionErrorCode?: string;
+                deletionDeleteBranch?: boolean;
+                isOpenable: boolean;
+            }>;
+            selectedWorktreeId?: string;
+        };
+    };
+};
+
+export type DismissDeletionErrorResponse = DismissDeletionErrorResponses[keyof DismissDeletionErrorResponses];
 
 export type ListBranchesData = {
     body: {
@@ -413,8 +496,29 @@ export type DeleteWorktreeResponses = {
      * Default Response
      */
     200: {
-        deleted: boolean;
-        branchDeleted: boolean;
+        worktreeId: string;
+        worktree: {
+            worktreeId: string;
+            name: string;
+            path: string;
+            mainWorktreePath: string;
+            isMain: boolean;
+            head?: string;
+            branch?: string;
+            branchName?: string;
+            isBare: boolean;
+            isDetached: boolean;
+            isPrunable: boolean;
+            prunableReason?: string;
+            creationState: 'creating' | 'bootstrapping' | 'ready' | 'failed';
+            creationError?: string;
+            hasCreationLogs: boolean;
+            deletionState?: 'deleting' | 'failed' | 'branch-failed';
+            deletionError?: string;
+            deletionErrorCode?: string;
+            deletionDeleteBranch?: boolean;
+            isOpenable: boolean;
+        };
     };
 };
 
@@ -472,6 +576,13 @@ export type ShowEditorErrors = {
     /**
      * Default Response
      */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
     500: {
         error: string;
         message: string;
@@ -510,6 +621,13 @@ export type OpenFileInEditorErrors = {
      * Default Response
      */
     404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
         error: string;
         message: string;
     };
@@ -642,6 +760,32 @@ export type ShowChatData = {
     url: '/showChat';
 };
 
+export type ShowChatErrors = {
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type ShowChatError = ShowChatErrors[keyof ShowChatErrors];
+
 export type ShowChatResponses = {
     /**
      * Default Response
@@ -725,6 +869,39 @@ export type CreateTerminalData = {
     query?: never;
     url: '/terminals';
 };
+
+export type CreateTerminalErrors = {
+    /**
+     * Default Response
+     */
+    400: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    404: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    409: {
+        error: string;
+        message: string;
+    };
+    /**
+     * Default Response
+     */
+    500: {
+        error: string;
+        message: string;
+    };
+};
+
+export type CreateTerminalError = CreateTerminalErrors[keyof CreateTerminalErrors];
 
 export type CreateTerminalResponses = {
     /**

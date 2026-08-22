@@ -20,6 +20,7 @@ type WorktreeRowProps = {
   onRemoveRepository: () => void
   onOpenCreationLogs: () => void
   onDismissCreationError: () => void
+  onDismissDeletionError: () => void
   onStopVscodeServer: () => void
 }
 
@@ -32,6 +33,7 @@ export function WorktreeRow({
   onRemoveRepository,
   onOpenCreationLogs,
   onDismissCreationError,
+  onDismissDeletionError,
   onStopVscodeServer,
 }: WorktreeRowProps): React.JSX.Element {
   const isMain = worktree.isMain
@@ -39,16 +41,24 @@ export function WorktreeRow({
   const isCreating = worktree.creationState === 'creating'
   const isBootstrapping = worktree.creationState === 'bootstrapping'
   const isCreationPending = isCreating || isBootstrapping
-  const showDestructiveActions = !isCreationPending
+  const isDeleting = worktree.deletionState === 'deleting'
+  const isWorktreeDeletionFailed = worktree.deletionState === 'failed'
+  const isBranchDeletionFailed = worktree.deletionState === 'branch-failed'
+  const isDeletionFailed = isWorktreeDeletionFailed || isBranchDeletionFailed
+  const showDestructiveActions = !isCreationPending && !isDeleting
   const canStopVscodeServer = sessionStatus !== 'off'
   const secondary =
-    isFailed && worktree.creationError
-      ? worktree.creationError
-      : worktreeBranch(worktree)
+    isBranchDeletionFailed && worktree.deletionError
+      ? `Worktree deleted; ${worktree.deletionError}`
+      : isWorktreeDeletionFailed && worktree.deletionError
+        ? worktree.deletionError
+        : isFailed && worktree.creationError
+          ? worktree.creationError
+          : worktreeBranch(worktree)
 
   return (
     <HBox
-      aria-disabled={busy || !worktree.isOpenable}
+      aria-disabled={busy || (!worktree.isOpenable && !isBranchDeletionFailed)}
       className={styles.row}
       {...itemProps}
       p="2"
@@ -59,6 +69,7 @@ export function WorktreeRow({
           busy={busy}
           sessionStatus={sessionStatus}
           onDismissCreationError={onDismissCreationError}
+          onDismissDeletionError={onDismissDeletionError}
         />
       </HBox>
 
@@ -75,12 +86,17 @@ export function WorktreeRow({
           {isMain && <Badge color="gray">main</Badge>}
           {isCreating && <Badge color="blue">creating</Badge>}
           {isBootstrapping && <Badge color="blue">bootstrapping</Badge>}
+          {isDeleting && <Badge color="red">deleting</Badge>}
+          {isWorktreeDeletionFailed && <Badge color="red">delete failed</Badge>}
+          {isBranchDeletionFailed && (
+            <Badge color="red">branch delete failed</Badge>
+          )}
           {worktree.isDetached && <Badge color="amber">detached</Badge>}
           {worktree.isPrunable && <Badge color="orange">prunable</Badge>}
         </HBox>
         <Text
           size="1"
-          color={isFailed ? 'red' : 'gray'}
+          color={isFailed || isDeletionFailed ? 'red' : 'gray'}
           truncate
           title={secondary}
         >
@@ -88,7 +104,7 @@ export function WorktreeRow({
         </Text>
       </VBox>
 
-      {!busy && (
+      {!busy && !isBranchDeletionFailed && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
             <IconButton
@@ -150,18 +166,38 @@ function LeadingIndicator({
   busy,
   sessionStatus,
   onDismissCreationError,
+  onDismissDeletionError,
 }: {
   worktree: Worktree
   busy: boolean
   sessionStatus: EditorSessionStatusValue
   onDismissCreationError: () => void
+  onDismissDeletionError: () => void
 }): React.JSX.Element {
   if (
     busy ||
+    worktree.deletionState === 'deleting' ||
     worktree.creationState === 'creating' ||
     worktree.creationState === 'bootstrapping'
   ) {
     return <StatusIndicator state="busy" label="Working" />
+  }
+
+  if (
+    worktree.deletionState === 'failed' ||
+    worktree.deletionState === 'branch-failed'
+  ) {
+    const branchOnly = worktree.deletionState === 'branch-failed'
+    return (
+      <StatusIndicator
+        state="error"
+        label={`${branchOnly ? 'Branch deletion' : 'Deletion'} failed — click to dismiss`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDismissDeletionError()
+        }}
+      />
+    )
   }
 
   if (worktree.creationState === 'failed') {

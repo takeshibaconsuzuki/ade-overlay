@@ -13,6 +13,7 @@ import {
   DeleteWorktreeRequest,
   DeleteWorktreeResponse,
   DismissCreationErrorResponse,
+  DismissDeletionErrorResponse,
   ErrorResponse,
   ListBranchesRequest,
   ListBranchesResponse,
@@ -25,6 +26,7 @@ import {
   REPOSITORIES_PATH,
   REPOSITORY_BRANCHES_PATH,
   WORKTREE_DISMISS_CREATION_PATH,
+  WORKTREE_DISMISS_DELETION_PATH,
   WORKTREE_OPEN_PATH,
   WORKTREE_PATH,
   WORKTREE_PATH_PREVIEW_PATH,
@@ -128,6 +130,7 @@ export function registerWorktreeRoutes(
       response: {
         200: OpenWorktreeResponse,
         404: ErrorResponse,
+        409: ErrorResponse,
         500: ErrorResponse,
       },
     },
@@ -148,6 +151,21 @@ export function registerWorktreeRoutes(
     },
     handler: async (request) =>
       registry.dismissCreationError(request.params.worktreeId),
+  })
+
+  routes.route({
+    method: 'POST',
+    url: WORKTREE_DISMISS_DELETION_PATH,
+    schema: {
+      operationId: 'dismissDeletionError',
+      params: WorktreeIdParams,
+      response: {
+        200: DismissDeletionErrorResponse,
+        404: ErrorResponse,
+      },
+    },
+    handler: async (request) =>
+      registry.dismissDeletionError(request.params.worktreeId),
   })
 
   routes.route({
@@ -195,17 +213,13 @@ export function registerWorktreeRoutes(
         409: ErrorResponse,
       },
     },
-    handler: async (request) => {
-      const worktree = await registry.getWorktreeById(request.params.worktreeId)
-      if (!worktree.isMain) {
-        await options.beforeDeleteWorktree?.(request.params.worktreeId)
-      }
-      return registry.deleteWorktree(
+    handler: async (request) =>
+      registry.enqueueDeleteWorktree(
         request.params.worktreeId,
         request.body.deleteBranch,
         request.body.force,
-      )
-    },
+        () => options.beforeDeleteWorktree?.(request.params.worktreeId),
+      ),
   })
 }
 
