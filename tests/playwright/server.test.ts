@@ -222,6 +222,14 @@ test('runs worktree deletion as a server-owned job and persists failures', async
     await stream.next()
     await stream.next()
 
+    const editorDataDir = join(tempDir, 'data', 'editor', worktreeId)
+    await mkdir(join(editorDataDir, 'server-data'), { recursive: true })
+    await writeFile(
+      join(editorDataDir, 'server-data', 'state.json'),
+      '{}\n',
+      'utf8',
+    )
+
     await writeFile(join(worktreePath, 'untracked.txt'), 'keep me\n', 'utf8')
 
     const queued = await api.delete(`/worktrees/${worktreeId}`, {
@@ -265,6 +273,7 @@ test('runs worktree deletion as a server-owned job and persists failures', async
     )
     assert.equal(failedWorktree?.deletionState, 'failed')
     assert.equal(failedWorktree?.deletionErrorCode, 'WORKTREE_DIRTY')
+    assert.equal((await stat(editorDataDir)).isDirectory(), true)
 
     const retried = await api.delete(`/worktrees/${worktreeId}`, {
       data: { deleteBranch: true, force: true },
@@ -281,6 +290,7 @@ test('runs worktree deletion as a server-owned job and persists failures', async
     assert.equal(deleted.event, 'worktree-deleted')
     assert.equal(deleted.data.worktreeId, worktreeId)
     await assert.rejects(stat(worktreePath), { code: 'ENOENT' })
+    await assert.rejects(stat(editorDataDir), { code: 'ENOENT' })
   } finally {
     stream.close()
   }

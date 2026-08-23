@@ -44,6 +44,7 @@ import { WorktreeRegistry } from './registry'
 type WorktreeRouteOptions = {
   opener: WorktreeOpener
   beforeDeleteWorktree?: (worktreeId: string) => Promise<void>
+  afterDeleteWorktree?: (worktreeId: string) => Promise<void>
 }
 
 export function registerWorktreeRoutes(
@@ -219,6 +220,7 @@ export function registerWorktreeRoutes(
         request.body.deleteBranch,
         request.body.force,
         () => options.beforeDeleteWorktree?.(request.params.worktreeId),
+        () => options.afterDeleteWorktree?.(request.params.worktreeId),
       ),
   })
 }

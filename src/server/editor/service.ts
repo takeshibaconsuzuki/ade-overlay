@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { SERVER_PORT } from '../../api/server/config'
 import {
   EDITOR_BOOTSTRAP_PATH,
@@ -13,6 +15,7 @@ import {
   type WorktreeEvent,
   type WorktreeSnapshot,
 } from '../../api/server/worktrees'
+import { getEditorDataDir } from '../dataDir'
 import { HttpError } from '../errors'
 import { isChildAlive, killChildProcessTree } from '../processes'
 import { roleExecutablePath, roleLaunchArgs } from '../roleLauncher'
@@ -494,6 +497,15 @@ export class EditorService {
     await this.closeWorktreeView(worktreeId)
     await this.stopWorktreeSession(worktreeId)
     this.log.info({ worktreeId }, 'editor worktree closed')
+  }
+
+  async deleteWorktreeData(worktreeId: string): Promise<void> {
+    const editorDataDir = join(getEditorDataDir(), worktreeId)
+    await rm(editorDataDir, { recursive: true, force: true })
+    this.log.info(
+      { worktreeId, editorDataDir },
+      'vscode server data deleted',
+    )
   }
 
   async stopVscodeServer(worktreeId: string): Promise<void> {

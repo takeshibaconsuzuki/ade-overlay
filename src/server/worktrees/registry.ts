@@ -559,6 +559,7 @@ export class WorktreeRegistry {
     deleteBranch: boolean,
     force = false,
     beforeDelete?: () => Promise<void> | undefined,
+    afterDelete?: () => Promise<void> | undefined,
   ): Promise<{ worktreeId: string; worktree: Worktree }> {
     const lifecycleJob = this.lifecycleJobs.get(worktreeId)
     const activeJob =
@@ -622,7 +623,7 @@ export class WorktreeRegistry {
         snapshot,
       })
 
-      void this.runDeleteJob(job, beforeDelete)
+      void this.runDeleteJob(job, beforeDelete, afterDelete)
       return { worktreeId, worktree: queuedWorktree }
     } finally {
       this.lifecycleReservations.delete(worktreeId)
@@ -653,6 +654,7 @@ export class WorktreeRegistry {
   private async runDeleteJob(
     job: DeletionJob,
     beforeDelete?: () => Promise<void> | undefined,
+    afterDelete?: () => Promise<void> | undefined,
   ): Promise<void> {
     let result: { branchDeleted: boolean; branchDeletionError?: string }
     try {
@@ -666,6 +668,18 @@ export class WorktreeRegistry {
 
     if (this.lifecycleJobs.get(job.worktreeId) !== job) {
       return
+    }
+
+    try {
+      await afterDelete?.()
+    } catch (error) {
+      // The Git worktree is already gone at this point, so cleanup cannot be
+      // retried as a normal deletion job. Publish the successful deletion and
+      // leave a clear diagnostic for the stale editor data instead.
+      this.log.warn(
+        { worktreeId: job.worktreeId, err: error },
+        'failed to delete vscode server data for deleted worktree',
+      )
     }
 
     const { branchDeleted, branchDeletionError } = result

@@ -146,6 +146,8 @@ export function createServer() {
     registerWorktreeRoutes(instance, worktreeRegistry, {
       opener: worktreeOpener,
       beforeDeleteWorktree: (worktreeId) => editor.closeWorktree(worktreeId),
+      afterDeleteWorktree: (worktreeId) =>
+        editor.deleteWorktreeData(worktreeId),
     })
     registerEditorRoutes(instance, {
       registry: worktreeRegistry,
