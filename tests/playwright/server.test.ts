@@ -1195,11 +1195,11 @@ test('cursor chat launches through the agent CLI', () => {
   } as never)
 
   assert.deepEqual(provider.newLaunch(), {
-    command: 'agent',
+    command: 'cursor-agent',
     args: [],
   })
   assert.deepEqual(provider.resumeLaunch('cursor-session-1'), {
-    command: 'agent',
+    command: 'cursor-agent',
     args: ['--resume', 'cursor-session-1'],
     chatId: 'cursor-session-1',
   })

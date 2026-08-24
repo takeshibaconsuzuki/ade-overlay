@@ -227,11 +227,11 @@ export class CursorChatProvider implements ChatProvider {
   }
 
   resumeLaunch(chatId: string): ChatLaunch {
-    return { command: 'agent', args: ['--resume', chatId], chatId }
+    return { command: 'cursor-agent', args: ['--resume', chatId], chatId }
   }
 
   newLaunch(): ChatLaunch {
-    return { command: 'agent', args: [] }
+    return { command: 'cursor-agent', args: [] }
   }
 
   private hook(wrapperPath: string): {
