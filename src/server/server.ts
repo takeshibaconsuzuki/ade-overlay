@@ -14,6 +14,7 @@ import { registerAppFocusRoutes } from './appFocus/routes'
 import { AppFocusService } from './appFocus/service'
 import { ClaudeChatProvider } from './chats/providers/claude'
 import { CodexChatProvider } from './chats/providers/codex'
+import { CursorChatProvider } from './chats/providers/cursor'
 import { ChatRegistry } from './chats/registry'
 import { registerChatRoutes } from './chats/routes'
 import { ChatService } from './chats/service'
@@ -54,6 +55,9 @@ export function createServer() {
       ),
       new CodexChatProvider(
         server.log.child({ service: 'chats', provider: 'codex' }),
+      ),
+      new CursorChatProvider(
+        server.log.child({ service: 'chats', provider: 'cursor' }),
       ),
     ],
   )

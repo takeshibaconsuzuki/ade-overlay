@@ -39,6 +39,7 @@ import {
 } from '../../src/server/chats/hookForwarder'
 import { ClaudeChatProvider } from '../../src/server/chats/providers/claude'
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
+import { CursorChatProvider } from '../../src/server/chats/providers/cursor'
 import { ChatRegistry } from '../../src/server/chats/registry'
 import { ChatService } from '../../src/server/chats/service'
 import { AppConfigService } from '../../src/server/config/service'
@@ -931,6 +932,39 @@ test('maps no-query hooks using the resolved hook cwd worktree', async () => {
   assert.equal(registry.getSnapshot().chats[0].worktreeId, 'worktree-from-cwd')
 })
 
+test('maps Cursor hooks using the single workspace root', async () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CursorChatProvider(logger)])
+  let forwardedCwd: string | undefined
+  registry.setTerminalSessionBinder(
+    (_providerId, _worktreeId, _chatId, _hookAncestorPids, hookCwd) => {
+      forwardedCwd = hookCwd
+      return 'cursor-worktree'
+    },
+  )
+
+  await registry.applyHook('cursor', {
+    hook_event_name: 'beforeSubmitPrompt',
+    conversation_id: 'cursor-session-1',
+    prompt: 'hello from cursor',
+    workspace_roots: ['/repo/worktrees/cursor-feature'],
+    _ade_overlay: { hook_cwd: '/home/user/.cursor' },
+  })
+
+  assert.equal(forwardedCwd, '/repo/worktrees/cursor-feature')
+  assert.deepEqual(registry.getSnapshot().chats[0], {
+    chatId: 'cursor-session-1',
+    providerId: 'cursor',
+    status: CHAT_STATUS.busy,
+    title: undefined,
+    description: 'hello from cursor',
+    worktreeId: 'cursor-worktree',
+    terminalId: undefined,
+    updatedAt: registry.getSnapshot().chats[0].updatedAt,
+  })
+  registry.shutdown()
+})
+
 test('does not surface a live chat from session start alone', async () => {
   const hook = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
     data: {
@@ -1152,6 +1186,46 @@ test('codex chat launches with sandbox and approval flags', () => {
   })
 })
 
+test('cursor chat launches through the agent CLI', () => {
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+
+  assert.deepEqual(provider.newLaunch(), {
+    command: 'agent',
+    args: [],
+  })
+  assert.deepEqual(provider.resumeLaunch('cursor-session-1'), {
+    command: 'agent',
+    args: ['--resume', 'cursor-session-1'],
+    chatId: 'cursor-session-1',
+  })
+  assert.equal(
+    provider.mapHook(
+      {
+        hook_event_name: 'afterAgentResponse',
+        conversation_id: 'cursor-session-1',
+        text: 'Cursor finished this step\nwith more detail',
+      },
+      {},
+    )?.description,
+    'Cursor finished this step',
+  )
+  assert.equal(
+    provider.mapHook(
+      {
+        hook_event_name: 'sessionStart',
+        conversation_id: 'cursor-session-1',
+      },
+      {},
+    ),
+    null,
+  )
+})
+
 test('providers format image paths and reject unsupported attachments', () => {
   const log = {
     info() {},
@@ -1161,6 +1235,7 @@ test('providers format image paths and reject unsupported attachments', () => {
   } as never
   const claude = new ClaudeChatProvider(log)
   const codex = new CodexChatProvider(log)
+  const cursor = new CursorChatProvider(log)
   const windowsPath = String.raw`C:\Users\me\image.png`
   const parts = [
     {
@@ -1184,6 +1259,10 @@ test('providers format image paths and reject unsupported attachments', () => {
     { type: 'paste', text: 'diagram' },
   ])
   assert.deepEqual(codex.terminalPaste(parts), [
+    { type: 'paste', text: windowsPath },
+    { type: 'paste', text: 'diagram' },
+  ])
+  assert.deepEqual(cursor.terminalPaste(parts), [
     { type: 'paste', text: windowsPath },
     { type: 'paste', text: 'diagram' },
   ])
@@ -1760,6 +1839,87 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
   assert.equal(projectConfig.hooks.Stop, undefined)
 })
 
+test('configures Cursor user hooks and clears managed project hooks', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const userHooksPath = join(home, '.cursor', 'hooks.json')
+  const projectHooksPath = join(worktreePath, '.cursor', 'hooks.json')
+  await mkdir(dirname(userHooksPath), { recursive: true })
+  await mkdir(dirname(projectHooksPath), { recursive: true })
+  await writeFile(
+    userHooksPath,
+    `${JSON.stringify({
+      version: 1,
+      hooks: {
+        beforeSubmitPrompt: [{ command: 'echo user' }],
+      },
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    projectHooksPath,
+    `${JSON.stringify({
+      version: 1,
+      hooks: {
+        beforeSubmitPrompt: [
+          { command: '/tmp/ade-overlay-chat-hook-cursor.sh' },
+          { command: 'echo project' },
+        ],
+        stop: [
+          {
+            command:
+              'curl http://127.0.0.1:0/chats/hooks/cursor?worktreeId=old',
+          },
+        ],
+      },
+    })}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    await new CursorChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never).configureWorktree({
+      worktreeId: 'worktree-1',
+      path: worktreePath,
+    })
+  } finally {
+    restoreHome(originalHome, originalUserProfile)
+  }
+
+  const userConfig = JSON.parse(
+    await readFile(userHooksPath, 'utf8'),
+  ) as Record<
+    string,
+    { beforeSubmitPrompt: Array<{ command?: string }>; stop: unknown[] }
+  >
+  assert.equal(userConfig.version, 1)
+  assert.deepEqual(userConfig.hooks.beforeSubmitPrompt[0], {
+    command: 'echo user',
+  })
+  assert.ok(
+    userConfig.hooks.beforeSubmitPrompt[1].command?.includes(
+      'ade-overlay-chat-hook-cursor',
+    ),
+  )
+  assert.equal(userConfig.hooks.stop.length, 1)
+
+  const projectConfig = JSON.parse(
+    await readFile(projectHooksPath, 'utf8'),
+  ) as Record<string, { beforeSubmitPrompt?: unknown[]; stop?: unknown[] }>
+  assert.deepEqual(projectConfig.hooks.beforeSubmitPrompt, [
+    { command: 'echo project' },
+  ])
+  assert.equal(projectConfig.hooks.stop, undefined)
+})
+
 test('configures Claude user hooks and clears managed project hooks', async () => {
   const home = join(tempDir, 'home')
   const worktreePath = join(tempDir, 'repo')
@@ -1988,6 +2148,94 @@ test('lists Codex sessions with large session metadata records', async () => {
     } else {
       process.env.USERPROFILE = originalUserProfile
     }
+  }
+})
+
+test('lists Cursor CLI history and reads hook transcripts', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const sessionId = 'cursor-history-session'
+  const chatDir = join(home, '.cursor', 'chats', 'store-id', sessionId)
+  const transcriptPath = join(
+    home,
+    '.cursor',
+    'projects',
+    worktreePath.replaceAll(/[^a-zA-Z0-9]/g, '-'),
+    'agent-transcripts',
+    sessionId,
+    `${sessionId}.jsonl`,
+  )
+  await mkdir(chatDir, { recursive: true })
+  await mkdir(dirname(transcriptPath), { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      title: 'Cursor history title',
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(chatDir, 'prompt_history.json'),
+    `${JSON.stringify(['fallback prompt'])}\n`,
+    'utf8',
+  )
+  const entries = [
+    {
+      role: 'user',
+      message: {
+        content: [{ type: 'text', text: 'first Cursor prompt' }],
+      },
+    },
+    {
+      role: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', name: 'Shell', input: { command: 'true' } },
+          { type: 'text', text: 'latest Cursor reply' },
+        ],
+      },
+    },
+    { type: 'turn_ended', status: 'success' },
+  ]
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    const provider = new CursorChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never)
+    assert.deepEqual(
+      await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+      [
+        {
+          chatId: sessionId,
+          title: 'Cursor history title',
+          description: 'latest Cursor reply',
+          updatedAt: 200,
+        },
+      ],
+    )
+    assert.equal(
+      await provider.resolveDescription({ transcript_path: transcriptPath }),
+      'latest Cursor reply',
+    )
+  } finally {
+    restoreHome(originalHome, originalUserProfile)
   }
 })
 
