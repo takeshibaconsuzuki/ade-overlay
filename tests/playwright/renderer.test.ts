@@ -474,6 +474,26 @@ test('chat app shows live terminals and resumes historical sessions', async () =
   await page.close()
 })
 
+test('chat app can launch a new Cursor chat', async () => {
+  const page = await newMockedPage()
+
+  await page.goto(`${rendererUrl}/#chat`)
+  await page.getByRole('button', { name: 'Choose chat provider' }).click()
+  await page.getByRole('menuitem', { name: 'New Cursor chat' }).click()
+
+  await page.waitForFunction(() =>
+    window.__apiCalls.some(
+      (call) => call.method === 'POST' && call.path === '/terminals',
+    ),
+  )
+  const create = (await page.evaluate(() => window.__apiCalls)).find(
+    (call) => call.method === 'POST' && call.path === '/terminals',
+  )
+  assert.equal((create?.body as { providerId?: string }).providerId, 'cursor')
+
+  await page.close()
+})
+
 test('chat terminal shows link hover decorations only while its platform modifier is pressed', async () => {
   // This test inspects the DOM renderer's ANSI decoration spans directly.
   // Production prefers WebGL, but must preserve this behavior in its fallback.

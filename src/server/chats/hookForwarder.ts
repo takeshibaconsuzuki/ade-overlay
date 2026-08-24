@@ -86,6 +86,17 @@ export function hookAncestorPids(
 }
 
 export function hookCwd(payload: Record<string, unknown>): string | undefined {
+  if (typeof payload.cwd === 'string' && payload.cwd.length > 0) {
+    return payload.cwd
+  }
+  if (
+    Array.isArray(payload.workspace_roots) &&
+    payload.workspace_roots.length === 1 &&
+    typeof payload.workspace_roots[0] === 'string' &&
+    payload.workspace_roots[0].length > 0
+  ) {
+    return payload.workspace_roots[0]
+  }
   const metadata = payload._ade_overlay
   if (!isRecord(metadata) || typeof metadata.hook_cwd !== 'string') {
     return undefined
