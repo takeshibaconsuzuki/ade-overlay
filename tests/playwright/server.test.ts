@@ -39,6 +39,7 @@ import {
 } from '../../src/server/chats/hookForwarder'
 import { ClaudeChatProvider } from '../../src/server/chats/providers/claude'
 import { CodexChatProvider } from '../../src/server/chats/providers/codex'
+import { CursorChatProvider } from '../../src/server/chats/providers/cursor'
 import { ChatRegistry } from '../../src/server/chats/registry'
 import { ChatService } from '../../src/server/chats/service'
 import { AppConfigService } from '../../src/server/config/service'
@@ -62,13 +63,22 @@ let api: APIRequestContext
 let baseUrl: string
 let originalHome: string | undefined
 let originalUserProfile: string | undefined
+let originalCursorConfigDir: string | undefined
+let originalCursorDataDir: string | undefined
+let originalXdgConfigHome: string | undefined
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'ade-overlay-test-'))
   originalHome = process.env.HOME
   originalUserProfile = process.env.USERPROFILE
+  originalCursorConfigDir = process.env.CURSOR_CONFIG_DIR
+  originalCursorDataDir = process.env.CURSOR_DATA_DIR
+  originalXdgConfigHome = process.env.XDG_CONFIG_HOME
   process.env.HOME = join(tempDir, 'home')
   process.env.USERPROFILE = process.env.HOME
+  delete process.env.CURSOR_CONFIG_DIR
+  delete process.env.CURSOR_DATA_DIR
+  delete process.env.XDG_CONFIG_HOME
   process.env.ADE_OVERLAY_DATA_DIR = join(tempDir, 'data')
   server = createServer()
   await server.listen({ host: '127.0.0.1', port: 0 })
@@ -84,6 +94,9 @@ afterEach(async () => {
   await server?.close()
   delete process.env.ADE_OVERLAY_DATA_DIR
   restoreHome(originalHome, originalUserProfile)
+  restoreEnvironmentVariable('CURSOR_CONFIG_DIR', originalCursorConfigDir)
+  restoreEnvironmentVariable('CURSOR_DATA_DIR', originalCursorDataDir)
+  restoreEnvironmentVariable('XDG_CONFIG_HOME', originalXdgConfigHome)
   await rm(tempDir, { recursive: true, force: true })
 })
 
@@ -931,6 +944,39 @@ test('maps no-query hooks using the resolved hook cwd worktree', async () => {
   assert.equal(registry.getSnapshot().chats[0].worktreeId, 'worktree-from-cwd')
 })
 
+test('maps Cursor hooks using the single workspace root', async () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never
+  const registry = new ChatRegistry(logger, [new CursorChatProvider(logger)])
+  let forwardedCwd: string | undefined
+  registry.setTerminalSessionBinder(
+    (_providerId, _worktreeId, _chatId, _hookAncestorPids, hookCwd) => {
+      forwardedCwd = hookCwd
+      return 'cursor-worktree'
+    },
+  )
+
+  await registry.applyHook('cursor', {
+    hook_event_name: 'beforeSubmitPrompt',
+    conversation_id: 'cursor-session-1',
+    prompt: 'hello from cursor',
+    workspace_roots: ['/repo/worktrees/cursor-feature'],
+    _ade_overlay: { hook_cwd: '/home/user/.cursor' },
+  })
+
+  assert.equal(forwardedCwd, '/repo/worktrees/cursor-feature')
+  assert.deepEqual(registry.getSnapshot().chats[0], {
+    chatId: 'cursor-session-1',
+    providerId: 'cursor',
+    status: CHAT_STATUS.busy,
+    title: undefined,
+    description: 'hello from cursor',
+    worktreeId: 'cursor-worktree',
+    terminalId: undefined,
+    updatedAt: registry.getSnapshot().chats[0].updatedAt,
+  })
+  registry.shutdown()
+})
+
 test('does not surface a live chat from session start alone', async () => {
   const hook = await api.post(`${CHAT_HOOKS_PATH}/claude`, {
     data: {
@@ -1152,6 +1198,46 @@ test('codex chat launches with sandbox and approval flags', () => {
   })
 })
 
+test('cursor chat launches through the agent CLI', () => {
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+
+  assert.deepEqual(provider.newLaunch(), {
+    command: 'cursor-agent',
+    args: [],
+  })
+  assert.deepEqual(provider.resumeLaunch('cursor-session-1'), {
+    command: 'cursor-agent',
+    args: ['--resume', 'cursor-session-1'],
+    chatId: 'cursor-session-1',
+  })
+  assert.equal(
+    provider.mapHook(
+      {
+        hook_event_name: 'afterAgentResponse',
+        conversation_id: 'cursor-session-1',
+        text: 'Cursor finished this step\nwith more detail',
+      },
+      {},
+    )?.description,
+    'Cursor finished this step',
+  )
+  assert.equal(
+    provider.mapHook(
+      {
+        hook_event_name: 'sessionStart',
+        conversation_id: 'cursor-session-1',
+      },
+      {},
+    ),
+    null,
+  )
+})
+
 test('providers format image paths and reject unsupported attachments', () => {
   const log = {
     info() {},
@@ -1161,6 +1247,7 @@ test('providers format image paths and reject unsupported attachments', () => {
   } as never
   const claude = new ClaudeChatProvider(log)
   const codex = new CodexChatProvider(log)
+  const cursor = new CursorChatProvider(log)
   const windowsPath = String.raw`C:\Users\me\image.png`
   const parts = [
     {
@@ -1184,6 +1271,10 @@ test('providers format image paths and reject unsupported attachments', () => {
     { type: 'paste', text: 'diagram' },
   ])
   assert.deepEqual(codex.terminalPaste(parts), [
+    { type: 'paste', text: windowsPath },
+    { type: 'paste', text: 'diagram' },
+  ])
+  assert.deepEqual(cursor.terminalPaste(parts), [
     { type: 'paste', text: windowsPath },
     { type: 'paste', text: 'diagram' },
   ])
@@ -1760,6 +1851,118 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
   assert.equal(projectConfig.hooks.Stop, undefined)
 })
 
+test('configures Cursor user hooks and clears managed project hooks', async () => {
+  const home = join(tempDir, 'home')
+  const xdgConfigHome = join(tempDir, 'xdg-config')
+  const cursorConfigDir = join(tempDir, 'cursor-config')
+  const cursorDataDir = join(tempDir, 'cursor-data')
+  const worktreePath = join(tempDir, 'repo')
+  const userHooksPath = join(home, '.cursor', 'hooks.json')
+  const projectHooksPath = join(worktreePath, '.cursor', 'hooks.json')
+  await mkdir(dirname(userHooksPath), { recursive: true })
+  await mkdir(dirname(projectHooksPath), { recursive: true })
+  await writeFile(
+    userHooksPath,
+    `{
+      // Cursor user hook configuration
+      "version": 1,
+      "callbackUrl": "https://example.com/user-hook",
+      "hooks": {
+        /* Keep the user's existing hook. */
+        "beforeSubmitPrompt": [{ "command": "echo user" }]
+      }
+    }\n`,
+    'utf8',
+  )
+  await writeFile(
+    projectHooksPath,
+    `${JSON.stringify({
+      version: 1,
+      hooks: {
+        beforeSubmitPrompt: [
+          { command: '/tmp/ade-overlay-chat-hook-cursor.sh' },
+          { command: 'echo project' },
+        ],
+        stop: [
+          {
+            command:
+              'curl http://127.0.0.1:0/chats/hooks/cursor?worktreeId=old',
+          },
+        ],
+      },
+    })}\n`,
+    'utf8',
+  )
+
+  process.env.XDG_CONFIG_HOME = xdgConfigHome
+  process.env.CURSOR_CONFIG_DIR = cursorConfigDir
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  await new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never).configureWorktree({
+    worktreeId: 'worktree-1',
+    path: worktreePath,
+  })
+
+  const userConfig = JSON.parse(await readFile(userHooksPath, 'utf8')) as {
+    version: number
+    callbackUrl: string
+    hooks: {
+      beforeSubmitPrompt: Array<{ command?: string }>
+      stop: unknown[]
+    }
+  }
+  assert.equal(userConfig.version, 1)
+  assert.equal(userConfig.callbackUrl, 'https://example.com/user-hook')
+  assert.deepEqual(userConfig.hooks.beforeSubmitPrompt[0], {
+    command: 'echo user',
+  })
+  assert.ok(
+    userConfig.hooks.beforeSubmitPrompt[1].command?.includes(
+      'ade-overlay-chat-hook-cursor',
+    ),
+  )
+  assert.equal(userConfig.hooks.stop.length, 1)
+
+  const projectConfig = JSON.parse(
+    await readFile(projectHooksPath, 'utf8'),
+  ) as Record<string, { beforeSubmitPrompt?: unknown[]; stop?: unknown[] }>
+  assert.deepEqual(projectConfig.hooks.beforeSubmitPrompt, [
+    { command: 'echo project' },
+  ])
+  assert.equal(projectConfig.hooks.stop, undefined)
+})
+
+test('does not overwrite an invalid Cursor user hook config', async () => {
+  const hooksPath = join(tempDir, 'home', '.cursor', 'hooks.json')
+  const worktreePath = join(tempDir, 'repo')
+  const contents = `{
+    "version": 1,
+    "hooks": {}
+  }
+  /* This comment is temporarily incomplete.`
+  await mkdir(dirname(hooksPath), { recursive: true })
+  await writeFile(hooksPath, contents, 'utf8')
+
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  await assert.rejects(
+    provider.configureWorktree({
+      worktreeId: 'worktree-1',
+      path: worktreePath,
+    }),
+    /failed to parse Cursor hooks config/,
+  )
+  assert.equal(await readFile(hooksPath, 'utf8'), contents)
+})
+
 test('configures Claude user hooks and clears managed project hooks', async () => {
   const home = join(tempDir, 'home')
   const worktreePath = join(tempDir, 'repo')
@@ -1991,6 +2194,218 @@ test('lists Codex sessions with large session metadata records', async () => {
   }
 })
 
+test('lists Cursor CLI history and reads hook transcripts', async () => {
+  const cursorConfigDir = join(tempDir, 'cursor-config')
+  const cursorDataDir = join(tempDir, 'cursor-data')
+  const worktreePath = '/Users/me/repo'
+  const sessionId = 'cursor-history-session'
+  const subagentId = 'cursor-subagent-session'
+  const chatDir = join(cursorDataDir, 'chats', 'store-id', sessionId)
+  const subagentDir = join(cursorDataDir, 'chats', 'store-id', subagentId)
+  const transcriptPath = join(
+    cursorDataDir,
+    'projects',
+    'Users-me-repo',
+    'agent-transcripts',
+    sessionId,
+    `${sessionId}.jsonl`,
+  )
+  await mkdir(chatDir, { recursive: true })
+  await mkdir(subagentDir, { recursive: true })
+  await mkdir(dirname(transcriptPath), { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(chatDir, 'prompt_history.json'),
+    `${JSON.stringify(['fallback prompt'])}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(subagentDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      isSubagent: true,
+      createdAtMs: 300,
+      updatedAtMs: 400,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(subagentDir, 'prompt_history.json'),
+    `${JSON.stringify(['internal subagent prompt'])}\n`,
+    'utf8',
+  )
+  const entries = [
+    {
+      role: 'user',
+      message: {
+        content: [
+          {
+            type: 'text',
+            text: '<timestamp>2026-08-23T12:00:00Z</timestamp>\n<user_query>first Cursor prompt\nwith more detail</user_query>',
+          },
+        ],
+      },
+    },
+    {
+      role: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', name: 'Shell', input: { command: 'true' } },
+          { type: 'text', text: 'latest Cursor reply' },
+        ],
+      },
+    },
+    { type: 'turn_ended', status: 'success' },
+  ]
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  )
+
+  process.env.CURSOR_CONFIG_DIR = cursorConfigDir
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  assert.deepEqual(
+    await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+    [
+      {
+        chatId: sessionId,
+        title: 'first Cursor prompt',
+        description: 'latest Cursor reply',
+        updatedAt: 200,
+      },
+    ],
+  )
+  assert.equal(
+    await provider.resolveDescription({ transcript_path: transcriptPath }),
+    'latest Cursor reply',
+  )
+})
+
+test('reads Cursor transcripts using Windows workspace encoding', async () => {
+  const cursorDataDir = join(tempDir, 'cursor-data')
+  const worktreePath = String.raw`C:\repo`
+  const sessionId = 'cursor-windows-history-session'
+  const chatDir = join(cursorDataDir, 'chats', 'store-id', sessionId)
+  const transcriptPath = join(
+    cursorDataDir,
+    'projects',
+    'C-repo',
+    'agent-transcripts',
+    sessionId,
+    `${sessionId}.jsonl`,
+  )
+  await mkdir(chatDir, { recursive: true })
+  await mkdir(dirname(transcriptPath), { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      title: 'Windows Cursor history',
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    transcriptPath,
+    `${JSON.stringify({
+      role: 'assistant',
+      message: { content: 'Windows Cursor reply' },
+    })}\n`,
+    'utf8',
+  )
+
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  assert.deepEqual(
+    await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+    [
+      {
+        chatId: sessionId,
+        title: 'Windows Cursor history',
+        description: 'Windows Cursor reply',
+        updatedAt: 200,
+      },
+    ],
+  )
+})
+
+test('uses the newest Cursor prompt when a transcript is unavailable', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const sessionId = 'cursor-prompt-history-session'
+  const chatDir = join(home, '.cursor', 'chats', 'store-id', sessionId)
+  await mkdir(chatDir, { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(chatDir, 'prompt_history.json'),
+    `${JSON.stringify(['newest Cursor prompt', 'oldest Cursor prompt'])}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    const provider = new CursorChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never)
+    assert.deepEqual(
+      await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+      [
+        {
+          chatId: sessionId,
+          title: 'newest Cursor prompt',
+          description: 'newest Cursor prompt',
+          updatedAt: 200,
+        },
+      ],
+    )
+  } finally {
+    restoreHome(originalHome, originalUserProfile)
+  }
+})
+
 test('refreshes Codex description from latest transcript text', async () => {
   const transcriptPath = join(tempDir, 'codex-transcript.jsonl')
   const entries = [
@@ -2117,6 +2532,17 @@ function restoreHome(
     delete process.env.USERPROFILE
   } else {
     process.env.USERPROFILE = originalUserProfile
+  }
+}
+
+function restoreEnvironmentVariable(
+  name: string,
+  originalValue: string | undefined,
+): void {
+  if (originalValue === undefined) {
+    delete process.env[name]
+  } else {
+    process.env[name] = originalValue
   }
 }
 

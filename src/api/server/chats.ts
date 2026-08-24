@@ -40,6 +40,7 @@ export const CHAT_EVENT_TYPES: readonly ChatEventType[] =
 export const CHAT_PROVIDER_ID = {
   claude: 'claude',
   codex: 'codex',
+  cursor: 'cursor',
 } as const
 
 export type ChatProviderId =
@@ -48,6 +49,7 @@ export type ChatProviderId =
 export const CHAT_PROVIDERS = [
   { id: CHAT_PROVIDER_ID.claude, label: 'Claude' },
   { id: CHAT_PROVIDER_ID.codex, label: 'Codex' },
+  { id: CHAT_PROVIDER_ID.cursor, label: 'Cursor' },
 ] as const satisfies ReadonlyArray<{ id: ChatProviderId; label: string }>
 
 export const DEFAULT_CHAT_PROVIDER = CHAT_PROVIDER_ID.claude
@@ -60,8 +62,8 @@ export function chatProviderLabel(providerId: ChatProviderId): string {
 }
 
 export function parseChatProviderId(value: string): ChatProviderId {
-  return value === CHAT_PROVIDER_ID.codex
-    ? CHAT_PROVIDER_ID.codex
+  return CHAT_PROVIDERS.some((provider) => provider.id === value)
+    ? (value as ChatProviderId)
     : DEFAULT_CHAT_PROVIDER
 }
 
