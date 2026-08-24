@@ -211,7 +211,7 @@ export class CursorChatProvider implements ChatProvider {
                 firstLine(asString(meta.title)) ??
                 details.title ??
                 promptHistory.at(0),
-              description: details.description ?? promptHistory.at(-1),
+              description: details.description ?? promptHistory.at(0),
               updatedAt,
             }
           } catch {
@@ -330,8 +330,14 @@ function cursorMessageText(
   }
   const message = isRecord(entry.message) ? entry.message : undefined
   const text = contentText(message?.content)
-  const line = firstLine(text)
+  const line = firstLine(
+    entry.role === 'user' ? userQueryText(text) ?? text : text,
+  )
   return line ? { role: entry.role, text: line } : undefined
+}
+
+function userQueryText(value: string | undefined): string | undefined {
+  return value?.match(/<user_query>([\s\S]*?)<\/user_query>/i)?.[1]
 }
 
 function contentText(value: unknown): string | undefined {
@@ -459,7 +465,7 @@ function cursorDataDir(): string {
 }
 
 function encodeCwd(path: string): string {
-  return path.replaceAll(/[^a-zA-Z0-9]/g, '-')
+  return path.replace(/^[\\/]+/, '').replaceAll(/[^a-zA-Z0-9]/g, '-')
 }
 
 function firstLine(value: string | undefined): string | undefined {

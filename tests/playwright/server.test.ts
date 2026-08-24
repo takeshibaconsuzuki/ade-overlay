@@ -2160,7 +2160,9 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
     home,
     '.cursor',
     'projects',
-    worktreePath.replaceAll(/[^a-zA-Z0-9]/g, '-'),
+    worktreePath
+      .replace(/^[\\/]+/, '')
+      .replaceAll(/[^a-zA-Z0-9]/g, '-'),
     'agent-transcripts',
     sessionId,
     `${sessionId}.jsonl`,
@@ -2173,7 +2175,6 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
       schemaVersion: 1,
       cwd: worktreePath,
       hasConversation: true,
-      title: 'Cursor history title',
       createdAtMs: 100,
       updatedAtMs: 200,
     })}\n`,
@@ -2188,7 +2189,12 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
     {
       role: 'user',
       message: {
-        content: [{ type: 'text', text: 'first Cursor prompt' }],
+        content: [
+          {
+            type: 'text',
+            text: '<timestamp>2026-08-23T12:00:00Z</timestamp>\n<user_query>first Cursor prompt\nwith more detail</user_query>',
+          },
+        ],
       },
     },
     {
@@ -2224,7 +2230,7 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
       [
         {
           chatId: sessionId,
-          title: 'Cursor history title',
+          title: 'first Cursor prompt',
           description: 'latest Cursor reply',
           updatedAt: 200,
         },
@@ -2233,6 +2239,56 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
     assert.equal(
       await provider.resolveDescription({ transcript_path: transcriptPath }),
       'latest Cursor reply',
+    )
+  } finally {
+    restoreHome(originalHome, originalUserProfile)
+  }
+})
+
+test('uses the newest Cursor prompt when a transcript is unavailable', async () => {
+  const home = join(tempDir, 'home')
+  const worktreePath = join(tempDir, 'repo')
+  const sessionId = 'cursor-prompt-history-session'
+  const chatDir = join(home, '.cursor', 'chats', 'store-id', sessionId)
+  await mkdir(chatDir, { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(chatDir, 'prompt_history.json'),
+    `${JSON.stringify(['newest Cursor prompt', 'oldest Cursor prompt'])}\n`,
+    'utf8',
+  )
+
+  const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    const provider = new CursorChatProvider({
+      info() {},
+      warn() {},
+      debug() {},
+      error() {},
+    } as never)
+    assert.deepEqual(
+      await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+      [
+        {
+          chatId: sessionId,
+          title: 'newest Cursor prompt',
+          description: 'newest Cursor prompt',
+          updatedAt: 200,
+        },
+      ],
     )
   } finally {
     restoreHome(originalHome, originalUserProfile)
