@@ -19,6 +19,7 @@ import {
   encodeTerminalPasteParts,
   type ClipboardPastePart,
 } from './clipboardPaste'
+import { CodexReflowRefreshDetector } from './codexReflowRefresh'
 import { droppedFilePathInput, isFileDropItem } from './imageDrop'
 import {
   hasTerminalLinkModifier,
@@ -298,6 +299,7 @@ export function Terminal({
     let pongTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let fitFrame: number | null = null
+    let refreshFrame: number | null = null
     let lastSentSize: TerminalSize | null = null
     let disposed = false
     let exited = false
@@ -345,6 +347,18 @@ export function Terminal({
       fitFrame = requestAnimationFrame(() => {
         fitFrame = null
         fitAndResizePty()
+      })
+    }
+
+    const scheduleFullRefresh = (): void => {
+      if (disposed || refreshFrame !== null) {
+        return
+      }
+      // Run after xterm's synchronized-output render has had its frame. Calling
+      // refresh here schedules a second full render from the final buffer state.
+      refreshFrame = requestAnimationFrame(() => {
+        refreshFrame = null
+        term.refresh(0, term.rows - 1)
       })
     }
 
@@ -456,6 +470,7 @@ export function Terminal({
 
       lastBracketedPasteMode = term.modes.bracketedPasteMode
       term.reset()
+      const codexReflowRefresh = new CodexReflowRefreshDetector()
       const next = new WebSocket(
         `${WS_ORIGIN}${terminalSocketPath(terminalId, viewerId)}`,
       )
@@ -488,8 +503,12 @@ export function Terminal({
         }
         const message = result.data
         if (message.type === 'output') {
+          const refreshAfterWrite = codexReflowRefresh.push(message.data)
           term.write(message.data, () => {
             lastBracketedPasteMode = term.modes.bracketedPasteMode
+            if (refreshAfterWrite) {
+              scheduleFullRefresh()
+            }
           })
         } else if (message.type === 'pong') {
           if (pongTimer !== null) {
@@ -551,6 +570,9 @@ export function Terminal({
       }
       if (fitFrame !== null) {
         cancelAnimationFrame(fitFrame)
+      }
+      if (refreshFrame !== null) {
+        cancelAnimationFrame(refreshFrame)
       }
       observer.disconnect()
       onData.dispose()

@@ -11,6 +11,7 @@ import {
 } from 'playwright'
 import { createServer, type ViteDevServer } from 'vite'
 import { clipboardReadPasteParts } from '../../src/renderer/src/chat/clipboardPaste'
+import { CodexReflowRefreshDetector } from '../../src/renderer/src/chat/codexReflowRefresh'
 import { droppedFilePathInput } from '../../src/renderer/src/chat/imageDrop'
 
 type RecordedRequest = {
@@ -147,6 +148,47 @@ let vite: ViteDevServer
 let browser: Browser
 let rendererUrl: string
 const pageWorktreeSnapshots = new WeakMap<Page, unknown>()
+
+const CODEX_REFLOW_CLEAR = '\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H'
+const SYNCHRONIZED_UPDATE_END = '\x1b[?2026l'
+
+test('detects a completed Codex transcript reflow across every chunk boundary', () => {
+  const output = `before${CODEX_REFLOW_CLEAR}\x1b[?2026hreplayed transcript${SYNCHRONIZED_UPDATE_END}after`
+  const refreshAt =
+    output.indexOf(SYNCHRONIZED_UPDATE_END) + SYNCHRONIZED_UPDATE_END.length
+
+  for (let split = 0; split <= output.length; split += 1) {
+    const detector = new CodexReflowRefreshDetector()
+    assert.equal(detector.push(output.slice(0, split)), split >= refreshAt)
+    assert.equal(detector.push(output.slice(split)), split < refreshAt)
+  }
+})
+
+test('detects a Codex transcript reflow split into single-byte chunks', () => {
+  const detector = new CodexReflowRefreshDetector()
+  const output = `${CODEX_REFLOW_CLEAR}\x1b[?2026hreplayed${SYNCHRONIZED_UPDATE_END}`
+  let refreshes = 0
+  for (const byte of output) {
+    if (detector.push(byte)) {
+      refreshes += 1
+    }
+  }
+
+  assert.equal(refreshes, 1)
+})
+
+test('does not refresh for ordinary clears or synchronized terminal frames', () => {
+  const detector = new CodexReflowRefreshDetector()
+
+  assert.equal(
+    detector.push(`\x1b[2J\x1b[?2026hframe${SYNCHRONIZED_UPDATE_END}`),
+    false,
+  )
+  assert.equal(detector.push(CODEX_REFLOW_CLEAR), false)
+  assert.equal(detector.push('\x1b[?2026hpartial replay'), false)
+  assert.equal(detector.push(SYNCHRONIZED_UPDATE_END), true)
+  assert.equal(detector.push(SYNCHRONIZED_UPDATE_END), false)
+})
 
 before(async () => {
   vite = await createServer({
