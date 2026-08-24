@@ -76,8 +76,8 @@ export class CursorChatProvider implements ChatProvider {
   }
 
   private async configureUserHooks(wrapperPath: string): Promise<void> {
-    const hooksPath = join(cursorConfigDir(), 'hooks.json')
-    const config = (await readJsonRecordFile(hooksPath)) ?? {}
+    const hooksPath = join(homedir(), '.cursor', 'hooks.json')
+    const config = await readCursorHookConfig(hooksPath)
     const hooks = upsertCursorHooks(
       config.hooks,
       HOOK_EVENTS,
@@ -459,15 +459,97 @@ function removeCursorHooks(
   return { hooks, changed }
 }
 
-function cursorConfigDir(): string {
-  const configured = process.env.CURSOR_CONFIG_DIR
-  if (configured?.trim()) {
-    return configured
+async function readCursorHookConfig(
+  path: string,
+): Promise<Record<string, unknown>> {
+  let contents: string
+  try {
+    contents = await readFile(path, 'utf8')
+  } catch (error) {
+    if (isErrnoException(error) && error.code === 'ENOENT') {
+      return {}
+    }
+    throw error
   }
-  const xdgConfigHome = process.env.XDG_CONFIG_HOME
-  return xdgConfigHome?.trim()
-    ? join(xdgConfigHome, 'cursor')
-    : join(homedir(), '.cursor')
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripJsonComments(contents))
+  } catch (error) {
+    throw new Error(`failed to parse Cursor hooks config at ${path}`, {
+      cause: error,
+    })
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`Cursor hooks config at ${path} must be an object`)
+  }
+  return parsed
+}
+
+function stripJsonComments(value: string): string {
+  let result = ''
+  let inString = false
+  let escaped = false
+  let lineComment = false
+  let blockComment = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    const next = value[index + 1]
+
+    if (lineComment) {
+      if (character === '\n' || character === '\r') {
+        lineComment = false
+        result += character
+      } else {
+        result += ' '
+      }
+      continue
+    }
+
+    if (blockComment) {
+      if (character === '*' && next === '/') {
+        blockComment = false
+        result += '  '
+        index += 1
+      } else {
+        result += character === '\n' || character === '\r' ? character : ' '
+      }
+      continue
+    }
+
+    if (inString) {
+      result += character
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (character === '"') {
+      inString = true
+      result += character
+    } else if (character === '/' && next === '/') {
+      lineComment = true
+      result += '  '
+      index += 1
+    } else if (character === '/' && next === '*') {
+      blockComment = true
+      result += '  '
+      index += 1
+    } else {
+      result += character
+    }
+  }
+
+  if (blockComment) {
+    throw new Error('unterminated block comment')
+  }
+  return result
 }
 
 function cursorDataDir(): string {
@@ -500,6 +582,10 @@ function asStringOrNull(value: unknown): string | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

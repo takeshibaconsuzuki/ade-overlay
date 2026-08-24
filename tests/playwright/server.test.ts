@@ -1852,21 +1852,26 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
 })
 
 test('configures Cursor user hooks and clears managed project hooks', async () => {
+  const home = join(tempDir, 'home')
   const xdgConfigHome = join(tempDir, 'xdg-config')
+  const cursorConfigDir = join(tempDir, 'cursor-config')
   const cursorDataDir = join(tempDir, 'cursor-data')
   const worktreePath = join(tempDir, 'repo')
-  const userHooksPath = join(xdgConfigHome, 'cursor', 'hooks.json')
+  const userHooksPath = join(home, '.cursor', 'hooks.json')
   const projectHooksPath = join(worktreePath, '.cursor', 'hooks.json')
   await mkdir(dirname(userHooksPath), { recursive: true })
   await mkdir(dirname(projectHooksPath), { recursive: true })
   await writeFile(
     userHooksPath,
-    `${JSON.stringify({
-      version: 1,
-      hooks: {
-        beforeSubmitPrompt: [{ command: 'echo user' }],
-      },
-    })}\n`,
+    `{
+      // Cursor user hook configuration
+      "version": 1,
+      "callbackUrl": "https://example.com/user-hook",
+      "hooks": {
+        /* Keep the user's existing hook. */
+        "beforeSubmitPrompt": [{ "command": "echo user" }]
+      }
+    }\n`,
     'utf8',
   )
   await writeFile(
@@ -1890,6 +1895,7 @@ test('configures Cursor user hooks and clears managed project hooks', async () =
   )
 
   process.env.XDG_CONFIG_HOME = xdgConfigHome
+  process.env.CURSOR_CONFIG_DIR = cursorConfigDir
   process.env.CURSOR_DATA_DIR = cursorDataDir
   await new CursorChatProvider({
     info() {},
@@ -1901,13 +1907,16 @@ test('configures Cursor user hooks and clears managed project hooks', async () =
     path: worktreePath,
   })
 
-  const userConfig = JSON.parse(
-    await readFile(userHooksPath, 'utf8'),
-  ) as Record<
-    string,
-    { beforeSubmitPrompt: Array<{ command?: string }>; stop: unknown[] }
-  >
+  const userConfig = JSON.parse(await readFile(userHooksPath, 'utf8')) as {
+    version: number
+    callbackUrl: string
+    hooks: {
+      beforeSubmitPrompt: Array<{ command?: string }>
+      stop: unknown[]
+    }
+  }
   assert.equal(userConfig.version, 1)
+  assert.equal(userConfig.callbackUrl, 'https://example.com/user-hook')
   assert.deepEqual(userConfig.hooks.beforeSubmitPrompt[0], {
     command: 'echo user',
   })
@@ -1925,6 +1934,33 @@ test('configures Cursor user hooks and clears managed project hooks', async () =
     { command: 'echo project' },
   ])
   assert.equal(projectConfig.hooks.stop, undefined)
+})
+
+test('does not overwrite an invalid Cursor user hook config', async () => {
+  const hooksPath = join(tempDir, 'home', '.cursor', 'hooks.json')
+  const worktreePath = join(tempDir, 'repo')
+  const contents = `{
+    "version": 1,
+    "hooks": {}
+  }
+  /* This comment is temporarily incomplete.`
+  await mkdir(dirname(hooksPath), { recursive: true })
+  await writeFile(hooksPath, contents, 'utf8')
+
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  await assert.rejects(
+    provider.configureWorktree({
+      worktreeId: 'worktree-1',
+      path: worktreePath,
+    }),
+    /failed to parse Cursor hooks config/,
+  )
+  assert.equal(await readFile(hooksPath, 'utf8'), contents)
 })
 
 test('configures Claude user hooks and clears managed project hooks', async () => {
