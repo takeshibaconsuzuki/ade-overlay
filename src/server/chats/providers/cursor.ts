@@ -76,7 +76,7 @@ export class CursorChatProvider implements ChatProvider {
   }
 
   private async configureUserHooks(wrapperPath: string): Promise<void> {
-    const hooksPath = join(cursorDataDir(), 'hooks.json')
+    const hooksPath = join(cursorConfigDir(), 'hooks.json')
     const config = (await readJsonRecordFile(hooksPath)) ?? {}
     const hooks = upsertCursorHooks(
       config.hooks,
@@ -170,9 +170,10 @@ export class CursorChatProvider implements ChatProvider {
   }
 
   /**
-   * Cursor CLI stores chat metadata under `~/.cursor/chats/<store>/<chat-id>`.
-   * Hook transcripts live in the cwd-keyed project directory. Metadata is the
-   * authoritative cwd filter; the transcript supplies the latest visible text.
+   * Cursor CLI stores chat metadata under its data directory's
+   * `chats/<store>/<chat-id>` tree. Hook transcripts live in the cwd-keyed
+   * project directory. Metadata is the authoritative cwd filter; the
+   * transcript supplies the latest visible text.
    */
   async listHistory(worktree: WorktreeRef): Promise<HistoricalChat[]> {
     const root = cursorDataDir()
@@ -185,7 +186,8 @@ export class CursorChatProvider implements ChatProvider {
             if (
               !meta ||
               asString(meta.cwd) !== worktree.path ||
-              meta.hasConversation === false
+              meta.hasConversation === false ||
+              meta.isSubagent === true
             ) {
               return null
             }
@@ -331,7 +333,7 @@ function cursorMessageText(
   const message = isRecord(entry.message) ? entry.message : undefined
   const text = contentText(message?.content)
   const line = firstLine(
-    entry.role === 'user' ? userQueryText(text) ?? text : text,
+    entry.role === 'user' ? (userQueryText(text) ?? text) : text,
   )
   return line ? { role: entry.role, text: line } : undefined
 }
@@ -457,15 +459,27 @@ function removeCursorHooks(
   return { hooks, changed }
 }
 
-function cursorDataDir(): string {
+function cursorConfigDir(): string {
   const configured = process.env.CURSOR_CONFIG_DIR
-  return configured && configured.length > 0
-    ? configured
+  if (configured?.trim()) {
+    return configured
+  }
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME
+  return xdgConfigHome?.trim()
+    ? join(xdgConfigHome, 'cursor')
     : join(homedir(), '.cursor')
 }
 
+function cursorDataDir(): string {
+  const configured = process.env.CURSOR_DATA_DIR
+  return configured?.trim() ? configured : join(homedir(), '.cursor')
+}
+
 function encodeCwd(path: string): string {
-  return path.replace(/^[\\/]+/, '').replaceAll(/[^a-zA-Z0-9]/g, '-')
+  return path
+    .replace(/[^a-zA-Z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 function firstLine(value: string | undefined): string | undefined {

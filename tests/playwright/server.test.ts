@@ -63,13 +63,22 @@ let api: APIRequestContext
 let baseUrl: string
 let originalHome: string | undefined
 let originalUserProfile: string | undefined
+let originalCursorConfigDir: string | undefined
+let originalCursorDataDir: string | undefined
+let originalXdgConfigHome: string | undefined
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'ade-overlay-test-'))
   originalHome = process.env.HOME
   originalUserProfile = process.env.USERPROFILE
+  originalCursorConfigDir = process.env.CURSOR_CONFIG_DIR
+  originalCursorDataDir = process.env.CURSOR_DATA_DIR
+  originalXdgConfigHome = process.env.XDG_CONFIG_HOME
   process.env.HOME = join(tempDir, 'home')
   process.env.USERPROFILE = process.env.HOME
+  delete process.env.CURSOR_CONFIG_DIR
+  delete process.env.CURSOR_DATA_DIR
+  delete process.env.XDG_CONFIG_HOME
   process.env.ADE_OVERLAY_DATA_DIR = join(tempDir, 'data')
   server = createServer()
   await server.listen({ host: '127.0.0.1', port: 0 })
@@ -85,6 +94,9 @@ afterEach(async () => {
   await server?.close()
   delete process.env.ADE_OVERLAY_DATA_DIR
   restoreHome(originalHome, originalUserProfile)
+  restoreEnvironmentVariable('CURSOR_CONFIG_DIR', originalCursorConfigDir)
+  restoreEnvironmentVariable('CURSOR_DATA_DIR', originalCursorDataDir)
+  restoreEnvironmentVariable('XDG_CONFIG_HOME', originalXdgConfigHome)
   await rm(tempDir, { recursive: true, force: true })
 })
 
@@ -1840,9 +1852,10 @@ test('configures Codex user hooks and clears managed project hooks', async () =>
 })
 
 test('configures Cursor user hooks and clears managed project hooks', async () => {
-  const home = join(tempDir, 'home')
+  const xdgConfigHome = join(tempDir, 'xdg-config')
+  const cursorDataDir = join(tempDir, 'cursor-data')
   const worktreePath = join(tempDir, 'repo')
-  const userHooksPath = join(home, '.cursor', 'hooks.json')
+  const userHooksPath = join(xdgConfigHome, 'cursor', 'hooks.json')
   const projectHooksPath = join(worktreePath, '.cursor', 'hooks.json')
   await mkdir(dirname(userHooksPath), { recursive: true })
   await mkdir(dirname(projectHooksPath), { recursive: true })
@@ -1876,23 +1889,17 @@ test('configures Cursor user hooks and clears managed project hooks', async () =
     'utf8',
   )
 
-  const originalHome = process.env.HOME
-  const originalUserProfile = process.env.USERPROFILE
-  process.env.HOME = home
-  process.env.USERPROFILE = home
-  try {
-    await new CursorChatProvider({
-      info() {},
-      warn() {},
-      debug() {},
-      error() {},
-    } as never).configureWorktree({
-      worktreeId: 'worktree-1',
-      path: worktreePath,
-    })
-  } finally {
-    restoreHome(originalHome, originalUserProfile)
-  }
+  process.env.XDG_CONFIG_HOME = xdgConfigHome
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  await new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never).configureWorktree({
+    worktreeId: 'worktree-1',
+    path: worktreePath,
+  })
 
   const userConfig = JSON.parse(
     await readFile(userHooksPath, 'utf8'),
@@ -2152,22 +2159,23 @@ test('lists Codex sessions with large session metadata records', async () => {
 })
 
 test('lists Cursor CLI history and reads hook transcripts', async () => {
-  const home = join(tempDir, 'home')
-  const worktreePath = join(tempDir, 'repo')
+  const cursorConfigDir = join(tempDir, 'cursor-config')
+  const cursorDataDir = join(tempDir, 'cursor-data')
+  const worktreePath = '/Users/me/repo'
   const sessionId = 'cursor-history-session'
-  const chatDir = join(home, '.cursor', 'chats', 'store-id', sessionId)
+  const subagentId = 'cursor-subagent-session'
+  const chatDir = join(cursorDataDir, 'chats', 'store-id', sessionId)
+  const subagentDir = join(cursorDataDir, 'chats', 'store-id', subagentId)
   const transcriptPath = join(
-    home,
-    '.cursor',
+    cursorDataDir,
     'projects',
-    worktreePath
-      .replace(/^[\\/]+/, '')
-      .replaceAll(/[^a-zA-Z0-9]/g, '-'),
+    'Users-me-repo',
     'agent-transcripts',
     sessionId,
     `${sessionId}.jsonl`,
   )
   await mkdir(chatDir, { recursive: true })
+  await mkdir(subagentDir, { recursive: true })
   await mkdir(dirname(transcriptPath), { recursive: true })
   await writeFile(
     join(chatDir, 'meta.json'),
@@ -2183,6 +2191,23 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
   await writeFile(
     join(chatDir, 'prompt_history.json'),
     `${JSON.stringify(['fallback prompt'])}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(subagentDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      isSubagent: true,
+      createdAtMs: 300,
+      updatedAtMs: 400,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    join(subagentDir, 'prompt_history.json'),
+    `${JSON.stringify(['internal subagent prompt'])}\n`,
     'utf8',
   )
   const entries = [
@@ -2214,35 +2239,85 @@ test('lists Cursor CLI history and reads hook transcripts', async () => {
     'utf8',
   )
 
-  const originalHome = process.env.HOME
-  const originalUserProfile = process.env.USERPROFILE
-  process.env.HOME = home
-  process.env.USERPROFILE = home
-  try {
-    const provider = new CursorChatProvider({
-      info() {},
-      warn() {},
-      debug() {},
-      error() {},
-    } as never)
-    assert.deepEqual(
-      await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
-      [
-        {
-          chatId: sessionId,
-          title: 'first Cursor prompt',
-          description: 'latest Cursor reply',
-          updatedAt: 200,
-        },
-      ],
-    )
-    assert.equal(
-      await provider.resolveDescription({ transcript_path: transcriptPath }),
-      'latest Cursor reply',
-    )
-  } finally {
-    restoreHome(originalHome, originalUserProfile)
-  }
+  process.env.CURSOR_CONFIG_DIR = cursorConfigDir
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  assert.deepEqual(
+    await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+    [
+      {
+        chatId: sessionId,
+        title: 'first Cursor prompt',
+        description: 'latest Cursor reply',
+        updatedAt: 200,
+      },
+    ],
+  )
+  assert.equal(
+    await provider.resolveDescription({ transcript_path: transcriptPath }),
+    'latest Cursor reply',
+  )
+})
+
+test('reads Cursor transcripts using Windows workspace encoding', async () => {
+  const cursorDataDir = join(tempDir, 'cursor-data')
+  const worktreePath = String.raw`C:\repo`
+  const sessionId = 'cursor-windows-history-session'
+  const chatDir = join(cursorDataDir, 'chats', 'store-id', sessionId)
+  const transcriptPath = join(
+    cursorDataDir,
+    'projects',
+    'C-repo',
+    'agent-transcripts',
+    sessionId,
+    `${sessionId}.jsonl`,
+  )
+  await mkdir(chatDir, { recursive: true })
+  await mkdir(dirname(transcriptPath), { recursive: true })
+  await writeFile(
+    join(chatDir, 'meta.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      cwd: worktreePath,
+      hasConversation: true,
+      title: 'Windows Cursor history',
+      createdAtMs: 100,
+      updatedAtMs: 200,
+    })}\n`,
+    'utf8',
+  )
+  await writeFile(
+    transcriptPath,
+    `${JSON.stringify({
+      role: 'assistant',
+      message: { content: 'Windows Cursor reply' },
+    })}\n`,
+    'utf8',
+  )
+
+  process.env.CURSOR_DATA_DIR = cursorDataDir
+  const provider = new CursorChatProvider({
+    info() {},
+    warn() {},
+    debug() {},
+    error() {},
+  } as never)
+  assert.deepEqual(
+    await provider.listHistory({ worktreeId: 'x', path: worktreePath }),
+    [
+      {
+        chatId: sessionId,
+        title: 'Windows Cursor history',
+        description: 'Windows Cursor reply',
+        updatedAt: 200,
+      },
+    ],
+  )
 })
 
 test('uses the newest Cursor prompt when a transcript is unavailable', async () => {
@@ -2421,6 +2496,17 @@ function restoreHome(
     delete process.env.USERPROFILE
   } else {
     process.env.USERPROFILE = originalUserProfile
+  }
+}
+
+function restoreEnvironmentVariable(
+  name: string,
+  originalValue: string | undefined,
+): void {
+  if (originalValue === undefined) {
+    delete process.env[name]
+  } else {
+    process.env[name] = originalValue
   }
 }
 
