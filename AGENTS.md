@@ -2,9 +2,9 @@
 
 ## Build, Test, and Development Commands
 
-- `python3 bootstrap.py`: installs the expected Node.js version for the current platform if it is missing or stale.
-- `python3 bootstrap.py --force`: replaces the existing vendored Node.js directory.
-- `eval "$(python3 bootstrap.py --print-env)"`: configures the current POSIX shell to use the vendored Node.
+- `python scripts/bootstrap.py | iex` (PowerShell): installs the expected Node.js version if it is missing or stale and activates it in the current shell.
+- `eval "$(python scripts/bootstrap.py)"` (Linux/macOS): initializes and activates the same development environment in the current POSIX shell.
+- Add `--force` before the pipe or inside the command substitution to replace the existing vendored Node.js directory.
 - `npm install`: installs dependencies and downloads the Electron app binary via `postinstall`.
 - `npm run dev`: starts the Electron/Vite development app.
 - `npm run build`: builds production output into `out/`.

@@ -16,6 +16,7 @@ from typing import Optional
 
 NODE_VERSION = "22.22.3"
 NODE_BASE_URL = "https://nodejs.org/dist"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ def bootstrap(force: bool) -> Path:
     extension = "zip" if os_name == "win" else "tar.xz"
     root_name = f"node-v{NODE_VERSION}-{os_name}-{arch}"
     filename = f"{root_name}.{extension}"
-    node_dir = Path(f".node.{os_name}-{arch}")
+    node_dir = PROJECT_ROOT / f".node.{os_name}-{arch}"
     node_binary = node_dir / ("node.exe" if os_name == "win" else "bin/node")
 
     if node_binary.exists() and not force:
@@ -216,33 +217,35 @@ def print_env(node_dir: Path) -> None:
         path_dir_value = shlex.quote(str(path_dir.resolve()))
         print(
             f"PATH=$(printf %s \"$PATH\" | tr : '\\n' | "
-            f"grep -vx {path_dir_value} | paste -sd : -)"
+            f"grep -Fvx -- {path_dir_value} | paste -sd : -)"
         )
         print(f"export PATH={path_dir_value}:$PATH")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Vendor Node.js into .node.<platform>-<arch>."
+        description=(
+            "Install the expected Node.js version if needed and print shell commands "
+            "to activate it (PowerShell on Windows, POSIX shell on Linux/macOS)."
+        ),
+        epilog=(
+            "PowerShell: python scripts/bootstrap.py | iex\n"
+            'Linux/macOS: eval "$(python scripts/bootstrap.py)"'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--force",
         action="store_true",
         help="replace the existing vendored Node directory",
     )
-    parser.add_argument(
-        "--print-env",
-        action="store_true",
-        help="print shell commands for using the vendored Node",
-    )
     args = parser.parse_args()
 
-    log_level = logging.WARNING if args.print_env else logging.INFO
-    logging.basicConfig(format="%(message)s", level=log_level)
+    # Stdout is evaluated by the caller's shell; keep diagnostics on stderr.
+    logging.basicConfig(format="%(message)s", level=logging.INFO)
 
     node_dir = bootstrap(force=args.force)
-    if args.print_env:
-        print_env(node_dir)
+    print_env(node_dir)
 
 
 if __name__ == "__main__":
