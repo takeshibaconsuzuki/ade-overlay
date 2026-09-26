@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -8,8 +9,10 @@ import {
 
 const openSelector = '.worktree-open:not(:disabled)'
 
-export function useWorktreeNavigation() {
+export function useWorktreeNavigation(resultsKey: string) {
   const listRef = useRef<HTMLUListElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [highlightVisible, setHighlightVisible] = useState(() =>
     document.hasFocus(),
   )
@@ -20,20 +23,57 @@ export function useWorktreeNavigation() {
     mode: 'mouse' | 'keyboard'
   }>({ key: undefined, mode: 'keyboard' })
 
+  const selectFirst = useCallback(() => {
+    const list = listRef.current
+    if (!list) return
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+    mode.current = 'keyboard'
+    setHighlight({
+      key: list.querySelector<HTMLButtonElement>(openSelector)?.dataset
+        .worktreeKey,
+      mode: 'keyboard',
+    })
+    setHighlightVisible(document.hasFocus())
+  }, [])
+
   useLayoutEffect(() => {
-    // Returning to the window restores DOM focus, but only fresh input should
-    // restore the row highlight. Keep its key so arrows resume from that row.
+    const list = listRef.current
+    if (!list) return
+    // Move focus off an old result before resetting selection, so Enter cannot
+    // activate a row left over from the previous results.
+    if (
+      list.contains(document.activeElement) ||
+      (document.activeElement === document.body &&
+        document.hasFocus() &&
+        !document.querySelector('[role="dialog"], [role="alertdialog"]'))
+    )
+      searchRef.current?.focus({ preventScroll: true })
+    selectFirst()
+  }, [resultsKey, selectFirst])
+
+  useLayoutEffect(() => {
     const onBlur = () => setHighlightVisible(false)
+    const onFocus = () => {
+      // A modal owns focus until it closes, including across window switches.
+      if (!document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        searchRef.current?.focus({ preventScroll: true })
+        // The field may already own DOM focus when the window reactivates.
+        selectFirst()
+      }
+    }
     window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
     return () => {
       window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
     }
-  }, [])
+  }, [selectFirst])
 
   function onPointerMove(event: PointerEvent<HTMLElement>) {
     if (event.pointerType !== 'mouse') return
     if (!document.hasFocus()) return
     if (!event.currentTarget.contains(event.target as Node)) return
+    if (event.target === searchRef.current) return
     const { clientX: x, clientY: y } = event
     // Scrolling can move rows beneath the pointer without mouse input.
     if (
@@ -53,6 +93,7 @@ export function useWorktreeNavigation() {
 
   useLayoutEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (event.isComposing || event.defaultPrevented) return
       const workspace = listRef.current?.closest('.workspace')
       // Hover must work before anything is focused; portalled dialogs keep their keys.
       if (
@@ -74,7 +115,11 @@ export function useWorktreeNavigation() {
       const list = listRef.current
       if (!list) return
       const target = event.target as HTMLElement
-      if (target.closest('input, textarea, select, [contenteditable="true"]'))
+      const inSearch = target === searchRef.current
+      if (
+        !inSearch &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      )
         return
 
       const buttons = [
@@ -83,7 +128,10 @@ export function useWorktreeNavigation() {
       const current = buttons.findIndex(
         (button) => button.dataset.worktreeKey === highlight.key,
       )
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (inSearch && event.key === 'Enter') {
+        event.preventDefault()
+        if (!event.repeat) (buttons[current] ?? buttons[0])?.click()
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         if (!buttons.length) return
         event.preventDefault()
         mode.current = 'keyboard'
@@ -102,7 +150,7 @@ export function useWorktreeNavigation() {
               )
         const button = buttons[next]
         setHighlight({ key: button.dataset.worktreeKey, mode: 'keyboard' })
-        button.focus({ preventScroll: true })
+        if (!inSearch) button.focus({ preventScroll: true })
         button
           .closest('li')
           ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -122,6 +170,9 @@ export function useWorktreeNavigation() {
   }, [highlight])
 
   return {
+    searchRef,
+    scrollRef,
+    onSearchFocus: selectFirst,
     highlight,
     workspaceProps: {
       onPointerMove,

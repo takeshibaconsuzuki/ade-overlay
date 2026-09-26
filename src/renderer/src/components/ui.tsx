@@ -10,6 +10,7 @@ import {
   Callout,
   Dialog,
   Select,
+  ScrollArea as RadixScrollArea,
   Spinner as RadixSpinner,
   TextField,
   Theme,
@@ -90,6 +91,28 @@ export function Notice({ children }: { children: ReactNode }) {
       <Callout.Text>{children}</Callout.Text>
     </Callout.Root>
   )
+}
+
+export function SearchField(
+  props: Pick<
+    ComponentPropsWithRef<'input'>,
+    | 'ref'
+    | 'className'
+    | 'aria-label'
+    | 'aria-controls'
+    | 'placeholder'
+    | 'onChange'
+    | 'onFocus'
+    | 'autoFocus'
+  > & { value: string },
+) {
+  return <TextField.Root {...props} type="search" size="3" autoComplete="off" />
+}
+
+export function ScrollBox(
+  props: Pick<ComponentPropsWithRef<'div'>, 'ref' | 'className' | 'children'>,
+) {
+  return <RadixScrollArea {...props} scrollbars="vertical" type="auto" />
 }
 
 export function Field({

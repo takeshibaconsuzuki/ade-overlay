@@ -25,12 +25,17 @@ body {
 .toolbar {
   margin-bottom: 16px;
 }
-.worktree-list {
+.worktree-search {
+  margin-bottom: 12px;
+}
+.worktree-scrollbox {
   flex: 1;
   min-height: 200px;
-  overflow-y: auto;
+}
+.worktree-scrollbox [data-radix-scroll-area-viewport] {
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+}
+.worktree-list {
   list-style: none;
   margin: 0;
   padding: 0;
