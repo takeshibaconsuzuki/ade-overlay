@@ -119,7 +119,7 @@ export function CreateWorktree({
               !connected || !project || !baseBranch.trim() || !path.trim()
             }
           >
-            {busy ? 'Creating…' : 'Create worktree'}
+            Create worktree
           </Button>
         </div>
       </form>

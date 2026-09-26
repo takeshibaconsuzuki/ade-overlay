@@ -5,9 +5,15 @@ body {
   margin: 0;
 }
 .workspace {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: auto;
   padding: 20px;
   color: var(--app-text);
+}
+.workspace > * {
+  flex-shrink: 0;
 }
 .toolbar,
 .dialog-actions {
@@ -20,6 +26,11 @@ body {
   margin-bottom: 16px;
 }
 .worktree-list {
+  flex: 1;
+  min-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -27,39 +38,56 @@ body {
 .worktree-list li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
   border-bottom: 1px solid var(--app-border);
   font-size: 14px;
-  overflow-wrap: anywhere;
+}
+.worktree-list li:first-child {
+  border-top: 1px solid var(--app-border);
+}
+.worktree-list[data-highlight-visible='true'] li[data-highlighted] {
+  background: var(--accent-a4);
+}
+.worktree-list[data-navigation='mouse'] .worktree-open:focus-visible,
+.worktree-list[data-highlight-visible='false'] .worktree-open:focus-visible {
+  outline: none;
 }
 .worktree-branch {
   color: var(--app-muted);
 }
 .worktree-open {
-  display: flex;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0;
   width: 100%;
   height: auto;
-  min-height: 42px;
-  padding: 10px 12px;
+  min-height: 64px;
+  padding: 0;
+  border-radius: 0;
   text-align: left;
-  white-space: normal;
 }
-.worktree-open .worktree-branch {
-  margin-left: auto;
+.worktree-open,
+.worktree-open:hover,
+.worktree-open:active {
+  background: transparent;
 }
 .worktree-name {
   display: grid;
-  gap: 3px;
+  gap: 2px;
+  min-width: 0;
 }
-.worktree-name small {
-  color: var(--app-muted);
-  font-weight: normal;
+.worktree-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-status {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: 16px;
+  height: 16px;
 }
 .editor-dot {
-  flex: 0 0 8px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -67,6 +95,11 @@ body {
 }
 .editor-dot.running {
   background: var(--green-9, #30a46c);
+}
+.worktree-delete {
+  display: flex;
+  align-items: center;
+  padding: 12px;
 }
 .worktree-form {
   display: grid;

@@ -1,5 +1,6 @@
 import {
   useId,
+  useState,
   type ComponentPropsWithRef,
   type ReactElement,
   type ReactNode,
@@ -9,10 +10,12 @@ import {
   Callout,
   Dialog,
   Select,
-  Spinner,
+  Spinner as RadixSpinner,
   TextField,
   Theme,
+  Tooltip as RadixTooltip,
 } from '@radix-ui/themes'
+import { Tooltip as TooltipPrimitive } from 'radix-ui'
 import '@radix-ui/themes/styles.css'
 import './ui.css'
 
@@ -25,7 +28,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
       grayColor="slate"
       radius="medium"
     >
-      {children}
+      <TooltipPrimitive.Provider delayDuration={500} skipDelayDuration={0}>
+        {children}
+      </TooltipPrimitive.Provider>
     </Theme>
   )
 }
@@ -47,11 +52,35 @@ export function Button({
       variant={tone === 'primary' ? 'solid' : 'soft'}
       color={tone === 'danger' ? 'red' : undefined}
       disabled={disabled || busy}
-      aria-busy={busy}
+      loading={busy}
+      aria-busy={busy || (props['aria-busy'] ?? false)}
     >
-      {busy && <Spinner />}
       {children}
     </RadixButton>
+  )
+}
+
+export function Spinner() {
+  return <RadixSpinner size="2" aria-hidden />
+}
+
+export function Tooltip({
+  content,
+  children,
+}: {
+  content?: string
+  children: ReactElement
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <RadixTooltip
+      content={content}
+      open={!!content && open}
+      onOpenChange={(next) => setOpen(!!content && next)}
+      disableHoverableContent
+    >
+      {children}
+    </RadixTooltip>
   )
 }
 
