@@ -1,5 +1,28 @@
-import { app, BrowserWindow } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  type IpcMainInvokeEvent,
+  type WebContents,
+} from 'electron'
 import { join } from 'node:path'
+import { CompanionClient } from './companion-client.ts'
+import { companionChannels } from '../shared/companion.ts'
+
+const trustedRenderers = new Set<WebContents>()
+const companion = new CompanionClient({
+  url: process.env.ADE_COMPANION_URL,
+  token: process.env.ADE_COMPANION_TOKEN,
+})
+
+function assertTrustedSender(event: IpcMainInvokeEvent): void {
+  if (
+    !trustedRenderers.has(event.sender) ||
+    event.senderFrame !== event.sender.mainFrame
+  ) {
+    throw new Error('Untrusted companion API caller.')
+  }
+}
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -13,6 +36,12 @@ function createWindow(): void {
     },
   })
 
+  const renderer = window.webContents
+  trustedRenderers.add(renderer)
+  renderer.once('destroyed', () => trustedRenderers.delete(renderer))
+  renderer.setWindowOpenHandler(() => ({ action: 'deny' }))
+  renderer.on('will-navigate', (event) => event.preventDefault())
+
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
 
   if (devServerUrl) {
@@ -23,6 +52,21 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle(companionChannels.getStatus, (event) => {
+    assertTrustedSender(event)
+    return companion.getStatus()
+  })
+  ipcMain.handle(companionChannels.reconnect, (event) => {
+    assertTrustedSender(event)
+    return companion.connect()
+  })
+  companion.on('status', (status) => {
+    for (const renderer of trustedRenderers) {
+      if (!renderer.isDestroyed())
+        renderer.send(companionChannels.status, status)
+    }
+  })
+  companion.connect()
   createWindow()
 
   app.on('activate', () => {
@@ -31,6 +75,8 @@ app.whenReady().then(() => {
     }
   })
 })
+
+app.on('before-quit', () => companion.stop())
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
