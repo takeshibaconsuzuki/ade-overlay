@@ -5,11 +5,19 @@ import {
   COMPANION_PROTOCOL_VERSION,
   DEFAULT_COMPANION_URL,
   MAX_MESSAGE_BYTES,
+  MAX_SERVER_MESSAGE_BYTES,
   normalizeCompanionUrl,
   parseServerMessage,
   type ClientMessage,
   type CompanionStatus,
   type PingResult,
+  type ResponseMessage,
+  type WorktreeSnapshot,
+  type WorktreeUpdate,
+  type CreateWorktreeInput,
+  type DeleteWorktreeInput,
+  createWorktreeInputSchema,
+  deleteWorktreeInputSchema,
 } from '../shared/companion.ts'
 
 interface ClientOptions {
@@ -21,15 +29,16 @@ interface ClientOptions {
   heartbeatIntervalMs?: number
 }
 
-interface PendingPing {
-  resolve: (result: PingResult) => void
+interface PendingRequest {
+  resolve: (result: ResponseMessage) => void
   reject: (error: Error) => void
-  startedAt: number
+  expected: ResponseMessage['type']
   timeout: ReturnType<typeof setTimeout>
 }
 
 export class CompanionClient extends EventEmitter<{
   status: [CompanionStatus]
+  worktreesUpdated: [WorktreeUpdate]
 }> {
   private status: CompanionStatus
   private readonly options: ClientOptions
@@ -39,7 +48,7 @@ export class CompanionClient extends EventEmitter<{
   private retryTimer?: ReturnType<typeof setTimeout>
   private helloTimer?: ReturnType<typeof setTimeout>
   private heartbeat?: ReturnType<typeof setInterval>
-  private readonly pending = new Map<string, PendingPing>()
+  private readonly pending = new Map<string, PendingRequest>()
 
   constructor(options: ClientOptions = {}) {
     super()
@@ -74,7 +83,52 @@ export class CompanionClient extends EventEmitter<{
     return this.getStatus()
   }
 
-  ping(): Promise<PingResult> {
+  async ping(): Promise<PingResult> {
+    const startedAt = performance.now()
+    await this.request({ type: 'ping', id: randomUUID() })
+    return { roundTripMs: Math.round(performance.now() - startedAt) }
+  }
+
+  listWorktrees(): Promise<WorktreeSnapshot> {
+    return this.worktreeRequest({ type: 'worktrees:list', id: randomUUID() })
+  }
+
+  refreshWorktrees(): Promise<WorktreeSnapshot> {
+    return this.worktreeRequest({ type: 'worktrees:refresh', id: randomUUID() })
+  }
+
+  createWorktree(input: CreateWorktreeInput): Promise<WorktreeSnapshot> {
+    const parsed = createWorktreeInputSchema.safeParse(input)
+    if (!parsed.success)
+      return Promise.reject(new Error('Invalid worktree creation fields.'))
+    return this.worktreeRequest({
+      type: 'worktrees:create',
+      id: randomUUID(),
+      input: parsed.data,
+    })
+  }
+
+  deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot> {
+    const parsed = deleteWorktreeInputSchema.safeParse(input)
+    if (!parsed.success)
+      return Promise.reject(new Error('Invalid worktree deletion fields.'))
+    return this.worktreeRequest({
+      type: 'worktrees:delete',
+      id: randomUUID(),
+      input: parsed.data,
+    })
+  }
+
+  private async worktreeRequest(
+    message: ClientMessage,
+  ): Promise<WorktreeSnapshot> {
+    const response = await this.request(message)
+    if (response.type !== 'worktrees')
+      throw new Error('Unexpected worktree response.')
+    return response.snapshot
+  }
+
+  private request(message: ClientMessage): Promise<ResponseMessage> {
     const socket = this.socket
     if (
       this.status.state !== 'connected' ||
@@ -84,20 +138,34 @@ export class CompanionClient extends EventEmitter<{
     }
     if (this.pending.size >= 32)
       return Promise.reject(new Error('Too many pending requests.'))
-    const id = randomUUID()
+    const payload = JSON.stringify(message)
+    if (Buffer.byteLength(payload) > MAX_MESSAGE_BYTES)
+      return Promise.reject(new Error('Request exceeds the 16 KiB limit.'))
+    const id = message.id
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error('Companion ping timed out.'))
-      }, this.options.requestTimeoutMs ?? 5_000)
+      const timeout = setTimeout(
+        () => {
+          this.pending.delete(id)
+          reject(
+            new Error(
+              message.type === 'ping'
+                ? 'Companion ping timed out.'
+                : 'Worktree request timed out. Refresh to check the result before retrying.',
+            ),
+          )
+        },
+        this.options.requestTimeoutMs ??
+          (message.type === 'ping' || message.type === 'worktrees:list'
+            ? 5_000
+            : 120_000),
+      )
       this.pending.set(id, {
         resolve,
         reject,
         timeout,
-        startedAt: performance.now(),
+        expected: message.type === 'ping' ? 'pong' : 'worktrees',
       })
-      const message: ClientMessage = { type: 'ping', id }
-      socket.send(JSON.stringify(message), (error) => {
+      socket.send(payload, (error) => {
         if (!error) return
         const request = this.pending.get(id)
         if (!request) return
@@ -134,7 +202,7 @@ export class CompanionClient extends EventEmitter<{
     try {
       socket = new WebSocket(normalizeCompanionUrl(this.status.url), {
         handshakeTimeout: this.options.requestTimeoutMs ?? 5_000,
-        maxPayload: MAX_MESSAGE_BYTES,
+        maxPayload: MAX_SERVER_MESSAGE_BYTES,
         headers: this.options.token
           ? { Authorization: `Bearer ${this.options.token}` }
           : undefined,
@@ -186,14 +254,25 @@ export class CompanionClient extends EventEmitter<{
         })
       } else if (!welcomed) {
         fail('Companion server did not send a handshake.')
-      } else if (message.type === 'pong') {
+      } else if (message.type === 'worktrees:updated') {
+        this.emit('worktreesUpdated', {
+          change: message.change,
+          snapshot: message.snapshot,
+        })
+      } else if (
+        message.type === 'pong' ||
+        message.type === 'worktrees' ||
+        (message.type === 'error' && message.id)
+      ) {
+        if (!message.id) return
         const request = this.pending.get(message.id)
         if (!request) return
         clearTimeout(request.timeout)
         this.pending.delete(message.id)
-        request.resolve({
-          roundTripMs: Math.round(performance.now() - request.startedAt),
-        })
+        if (message.type === 'error') request.reject(new Error(message.message))
+        else if (message.type !== request.expected)
+          request.reject(new Error('Unexpected companion response.'))
+        else request.resolve(message)
       } else {
         fail(message.message)
       }

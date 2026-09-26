@@ -90,7 +90,10 @@ test(
   'standalone server health and multiple clients exchanging correlated pings',
   { timeout: 5_000 },
   async (t) => {
-    const server = await startCompanionServer({ port: 0 })
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+    })
     t.after(() => server.close())
     const health = await fetch(
       server.url.replace('ws:', 'http:').replace('/companion', '/health'),
@@ -120,7 +123,10 @@ test(
   'server rejects invalid requests and binary messages, and limits message size',
   { timeout: 5_000 },
   async (t) => {
-    const server = await startCompanionServer({ port: 0 })
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+    })
     t.after(() => server.close())
     const socket = await rawClient(t, server.url)
     for (const invalid of [
@@ -152,7 +158,11 @@ test(
   'server checks the endpoint, browser origin, and optional authentication token',
   { timeout: 5_000 },
   async (t) => {
-    const server = await startCompanionServer({ port: 0, token: 'test-secret' })
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+      token: 'test-secret',
+    })
     t.after(() => server.close())
     const cases = [
       {
@@ -200,7 +210,11 @@ test(
   'rejected half-open upgrade sockets do not block server shutdown',
   { timeout: 5_000 },
   async (t) => {
-    const server = await startCompanionServer({ port: 0, token: 'test-secret' })
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+      token: 'test-secret',
+    })
     const url = new URL(server.url)
     const peers: Socket[] = []
     t.after(async () => {
@@ -278,20 +292,29 @@ test(
   'client reconnects when the server starts later and after a server restart',
   { timeout: 5_000 },
   async (t) => {
-    const initial = await startCompanionServer({ port: 0 })
+    const initial = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+    })
     const url = initial.url
     const port = Number(new URL(url).port)
     await initial.close()
     const client = makeClient(t, url)
     client.connect()
     assert.ok((await waitForStatus(client, 'reconnecting')).error)
-    const server = await startCompanionServer({ port })
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port,
+    })
     t.after(() => server.close())
     await waitForStatus(client, 'connected')
     await client.ping()
     await server.close()
     await waitForStatus(client, 'reconnecting')
-    const restarted = await startCompanionServer({ port })
+    const restarted = await startCompanionServer({
+      config: { projects: [] },
+      port,
+    })
     t.after(() => restarted.close())
     await waitForStatus(client, 'connected')
     await client.ping()
@@ -302,7 +325,10 @@ test(
 )
 
 test('shutdown cancels retries', { timeout: 5_000 }, async (t) => {
-  const server = await startCompanionServer({ port: 0 })
+  const server = await startCompanionServer({
+    config: { projects: [] },
+    port: 0,
+  })
   t.after(() => server.close())
   const client = makeClient(t, server.url)
   client.connect()

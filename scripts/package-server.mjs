@@ -10,7 +10,11 @@ const manifest = {
   main: 'server/index.js',
   scripts: { start: 'node server/index.js' },
   engines: { node: '>=22.22.3' },
-  dependencies: { ws: app.dependencies.ws },
+  dependencies: {
+    ws: app.dependencies.ws,
+    yaml: app.dependencies.yaml,
+    zod: app.dependencies.zod,
+  },
 }
 
 await writeFile(

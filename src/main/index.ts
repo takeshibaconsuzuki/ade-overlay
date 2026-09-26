@@ -60,6 +60,28 @@ app.whenReady().then(() => {
     assertTrustedSender(event)
     return companion.connect()
   })
+  ipcMain.handle(companionChannels.listWorktrees, (event) => {
+    assertTrustedSender(event)
+    return companion.listWorktrees()
+  })
+  ipcMain.handle(companionChannels.refreshWorktrees, (event) => {
+    assertTrustedSender(event)
+    return companion.refreshWorktrees()
+  })
+  ipcMain.handle(companionChannels.createWorktree, (event, input) => {
+    assertTrustedSender(event)
+    return companion.createWorktree(input)
+  })
+  ipcMain.handle(companionChannels.deleteWorktree, (event, input) => {
+    assertTrustedSender(event)
+    return companion.deleteWorktree(input)
+  })
+  companion.on('worktreesUpdated', (update) => {
+    for (const renderer of trustedRenderers) {
+      if (!renderer.isDestroyed())
+        renderer.send(companionChannels.worktreesUpdated, update)
+    }
+  })
   companion.on('status', (status) => {
     for (const renderer of trustedRenderers) {
       if (!renderer.isDestroyed())

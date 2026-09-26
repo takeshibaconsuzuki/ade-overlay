@@ -1,61 +1,52 @@
-﻿import React, { useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
-import type { CompanionStatus } from '../../shared/companion'
+﻿import { createRoot } from 'react-dom/client'
+import { Button, Notice, UIProvider } from './components/ui'
+import { CreateWorktree, DeleteWorktree } from './components/worktree-actions'
+import { useCompanion } from './use-companion'
 import './style.css'
 
-function App(): React.JSX.Element {
-  const [status, setStatus] = useState<CompanionStatus | null>(null)
-  const [reconnecting, setReconnecting] = useState(false)
+function basename(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).at(-1) ?? path
+}
 
-  useEffect(() => {
-    let active = true
-    let receivedUpdate = false
-    const unsubscribe = window.companion.onStatus((next) => {
-      receivedUpdate = true
-      if (active) setStatus(next)
-    })
-    void window.companion
-      .getStatus()
-      .then((initial) => {
-        if (active && !receivedUpdate) setStatus(initial)
-      })
-      .catch(console.error)
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [])
-
-  async function reconnect(): Promise<void> {
-    setReconnecting(true)
-    try {
-      await window.companion.reconnect()
-    } catch (error) {
-      console.error('Could not reconnect to companion:', error)
-    } finally {
-      setReconnecting(false)
-    }
-  }
-
+function App() {
+  const { status, snapshot, loading, error, refresh, reconnect } =
+    useCompanion()
+  const connected = status?.state === 'connected'
   return (
-    <main aria-label="Companion connection">
-      {status?.state === 'connected' && !reconnecting ? (
-        <button
-          type="button"
-          onClick={() => void reconnect()}
-          title="Force reconnect"
+    <UIProvider>
+      <main className="workspace" aria-label="Worktrees">
+        <div className="toolbar">
+          <Button tone="secondary" onClick={() => void reconnect()}>
+            Reconnect
+          </Button>
+          <Button
+            tone="secondary"
+            busy={loading && connected}
+            disabled={!connected}
+            onClick={() => void refresh()}
+          >
+            Refresh worktrees
+          </Button>
+          <CreateWorktree snapshot={snapshot} connected={connected} />
+        </div>
+        {(error || status?.error) && <Notice>{error || status?.error}</Notice>}
+        <ul
+          className="worktree-list"
+          aria-label="Worktrees"
+          aria-busy={loading}
         >
-          Reconnect
-        </button>
-      ) : (
-        <span
-          className="spinner"
-          role="status"
-          aria-label="Connecting to companion server"
-          title={status?.error ?? 'Connecting to companion server'}
-        />
-      )}
-    </main>
+          {snapshot?.worktrees.map((worktree) => (
+            <li key={`${worktree.project}\0${worktree.path}`}>
+              <span>{basename(worktree.path)}</span>
+              <span className="worktree-branch">
+                {worktree.branch ?? 'Detached HEAD'}
+              </span>
+              <DeleteWorktree worktree={worktree} connected={connected} />
+            </li>
+          ))}
+        </ul>
+      </main>
+    </UIProvider>
   )
 }
 

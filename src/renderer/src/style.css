@@ -1,57 +1,51 @@
-﻿:root {
-  color: #f4f4f5;
-  background: #18181b;
-  font-family: system-ui, sans-serif;
-}
-
-* {
+﻿* {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
 }
-
-main {
-  display: grid;
+.workspace {
   min-height: 100vh;
-  place-items: center;
+  padding: 20px;
+  color: var(--app-text);
 }
-
-button {
-  border: 0;
-  border-radius: 8px;
-  padding: 10px 16px;
-  background: #c4b5fd;
-  color: #18181b;
-  font: inherit;
+.toolbar,
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.toolbar {
+  margin-bottom: 16px;
+}
+.worktree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.worktree-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border);
   font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
+  overflow-wrap: anywhere;
 }
-
-button:focus-visible {
-  outline: 2px solid #c4b5fd;
-  outline-offset: 3px;
+.worktree-branch {
+  color: var(--app-muted);
 }
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid #3f3f46;
-  border-top-color: #c4b5fd;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.worktree-form {
+  display: grid;
+  gap: 12px;
 }
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.dialog-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation: none;
-  }
+.delete-path {
+  overflow-wrap: anywhere;
+  font-size: 13px;
 }

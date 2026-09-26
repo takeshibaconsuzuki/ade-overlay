@@ -7,14 +7,23 @@ import {
   DEFAULT_COMPANION_PORT,
   MAX_MESSAGE_BYTES,
   parseClientMessage,
+  requestId,
   type ServerMessage,
 } from '../shared/companion.ts'
+import {
+  loadServerConfig,
+  serverConfigSchema,
+  type ServerConfig,
+} from './config.ts'
+import { WorktreeStore } from './worktrees.ts'
 
 export interface ServerOptions {
   host?: string
   port?: number
   token?: string
   heartbeatIntervalMs?: number
+  configPath?: string
+  config?: ServerConfig
 }
 
 function authorized(header: string | undefined, token: string): boolean {
@@ -24,6 +33,12 @@ function authorized(header: string | undefined, token: string): boolean {
 }
 
 export async function startCompanionServer(options: ServerOptions = {}) {
+  // Finish config validation and discovery before binding any listening socket.
+  const config =
+    options.config === undefined
+      ? await loadServerConfig(options.configPath)
+      : serverConfigSchema.parse(options.config)
+  const worktrees = await WorktreeStore.open(config.projects)
   const host = options.host ?? '127.0.0.1'
   const port = options.port ?? DEFAULT_COMPANION_PORT
   const sockets = new WebSocketServer({
@@ -31,6 +46,13 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     maxPayload: MAX_MESSAGE_BYTES,
   })
   const alive = new Set<WebSocket>()
+  worktrees.on('update', (update) => {
+    const message: ServerMessage = { type: 'worktrees:updated', ...update }
+    const data = JSON.stringify(message)
+    for (const client of sockets.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(data)
+    }
+  })
   const server = createServer((request, response) => {
     if (request.method === 'GET' && request.url === '/health') {
       response.writeHead(200, {
@@ -88,16 +110,36 @@ export async function startCompanionServer(options: ServerOptions = {}) {
       if (!message) {
         send({
           type: 'error',
+          id: isBinary ? undefined : requestId(data.toString()),
           message:
-            'Expected a JSON ping message with a non-empty id (up to 128 characters).',
+            'Expected a supported JSON command with a non-empty id (up to 128 characters) and valid fields.',
         })
         return
       }
-      // Add app-specific commands to ClientMessage and dispatch them here.
-      send({
-        type: 'pong',
-        id: message.id,
-      })
+      if (message.type === 'ping') return send({ type: 'pong', id: message.id })
+      if (message.type === 'worktrees:list')
+        return send({
+          type: 'worktrees',
+          id: message.id,
+          snapshot: worktrees.list(),
+        })
+      const operation =
+        message.type === 'worktrees:create'
+          ? worktrees.create(message.input)
+          : message.type === 'worktrees:delete'
+            ? worktrees.delete(message.input)
+            : worktrees.refresh()
+      void operation
+        .then((snapshot) =>
+          send({ type: 'worktrees', id: message.id, snapshot }),
+        )
+        .catch((error: unknown) => {
+          send({
+            type: 'error',
+            id: message.id,
+            message: error instanceof Error ? error.message : String(error),
+          })
+        })
     })
     send({
       type: 'hello',
@@ -136,6 +178,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
           server.close((error) => (error ? reject(error) : resolve()))
           server.closeAllConnections()
         })
+        await worktrees.settled()
       })()
       return closing
     },

@@ -1,7 +1,9 @@
 import { DEFAULT_COMPANION_PORT } from '../shared/companion.ts'
 import { startCompanionServer } from './server.ts'
+import { parseServerArgs } from './config.ts'
 
 async function main(): Promise<void> {
+  const args = parseServerArgs(process.argv.slice(2))
   const rawPort =
     process.env.ADE_COMPANION_PORT ?? String(DEFAULT_COMPANION_PORT)
   const port = Number(rawPort)
@@ -16,6 +18,7 @@ async function main(): Promise<void> {
     )
   }
   const server = await startCompanionServer({
+    ...args,
     host: process.env.ADE_COMPANION_HOST ?? '127.0.0.1',
     port,
     token: process.env.ADE_COMPANION_TOKEN || undefined,
