@@ -1,6 +1,9 @@
 import { DEFAULT_COMPANION_PORT } from '../shared/companion.ts'
 import { startCompanionServer } from './server.ts'
 import { parseServerArgs } from './config.ts'
+import { createServerLogger, serverLogPath } from './logging.ts'
+
+const logging = createServerLogger()
 
 async function main(): Promise<void> {
   const args = parseServerArgs(process.argv.slice(2))
@@ -22,24 +25,31 @@ async function main(): Promise<void> {
     host: process.env.ADE_COMPANION_HOST ?? '127.0.0.1',
     port,
     token: process.env.ADE_COMPANION_TOKEN || undefined,
+    logger: logging.logger,
   })
-  console.log(`ADE companion listening at ${server.url}`)
-  console.log('Press Ctrl+C to stop.')
+  server.startEditorUpdates()
+  logging.logger.info(
+    { url: server.url, logFile: serverLogPath },
+    'Companion ready. Press Ctrl+C to stop.',
+  )
 
   const shutdown = (): void => {
-    void server.close().catch((error: unknown) => {
-      console.error('Failed to stop companion server:', error)
-      process.exitCode = 1
-    })
+    logging.logger.info('Stopping companion')
+    void server
+      .close()
+      .then(() => logging.logger.info('Companion stopped'))
+      .catch((error: unknown) => {
+        logging.logger.error({ err: error }, 'Failed to stop companion')
+        process.exitCode = 1
+      })
+      .finally(() => logging.close())
   }
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
 }
 
 main().catch((error: unknown) => {
-  console.error(
-    'Could not start companion server:',
-    error instanceof Error ? error.message : error,
-  )
+  logging.logger.error({ err: error }, 'Could not start companion server')
+  logging.close()
   process.exitCode = 1
 })

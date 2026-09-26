@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CompanionStatus, WorktreeSnapshot } from '../../shared/companion'
+import type {
+  CompanionStatus,
+  WorktreeSnapshot,
+  OpenEditorInput,
+} from '../../shared/companion'
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -10,6 +14,8 @@ export function useCompanion() {
   const [snapshot, setSnapshot] = useState<WorktreeSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [opening, setOpening] = useState<string | null>(null)
+  const openRequest = useRef(0)
   const epoch = useRef(0)
   const apply = useCallback((next: WorktreeSnapshot, generation: number) => {
     if (generation !== epoch.current) return
@@ -31,6 +37,8 @@ export function useCompanion() {
       setSnapshot(null)
       setError('')
       setLoading(connected)
+      openRequest.current++
+      setOpening(null)
       if (connected)
         void window.companion
           .listWorktrees()
@@ -85,5 +93,26 @@ export function useCompanion() {
       setError(errorMessage(cause))
     }
   }
-  return { status, snapshot, loading, error, refresh, reconnect }
+  async function openEditor(input: OpenEditorInput): Promise<void> {
+    const request = ++openRequest.current
+    setOpening(input.path)
+    setError('')
+    try {
+      await window.companion.openEditor(input)
+    } catch (cause) {
+      if (request === openRequest.current) setError(errorMessage(cause))
+    } finally {
+      if (request === openRequest.current) setOpening(null)
+    }
+  }
+  return {
+    status,
+    snapshot,
+    loading,
+    error,
+    refresh,
+    reconnect,
+    opening,
+    openEditor,
+  }
 }

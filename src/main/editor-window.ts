@@ -1,0 +1,259 @@
+import {
+  BaseWindow,
+  WebContentsView,
+  session,
+  type Session,
+  type WebContents,
+  type PermissionRequest,
+  type MediaAccessPermissionRequest,
+} from 'electron'
+import { createHash } from 'node:crypto'
+import { EditorSettingsSync } from './settings-sync.ts'
+import { EditorPage } from './editor-page.ts'
+import type {
+  EditorSession,
+  OpenEditorInput,
+  WorktreeSnapshot,
+} from '../shared/companion.ts'
+
+interface EditorView {
+  view: WebContentsView
+  token: string
+  page: EditorPage
+  worktree: OpenEditorInput
+  forget: () => void
+}
+
+// Views remain connected when hidden or when the editor window is closed.
+// VS Code keys workspace state by folder. Sharing a persistent browser session
+// also shares web extensions, while remote extensions live on the companion.
+export class EditorWindow {
+  private window?: BaseWindow
+  private active?: EditorView
+  private readonly views = new Map<string, EditorView>()
+  private readonly sessions = new Map<
+    string,
+    { browser: Session; tokens: Map<string, string>; sync: EditorSettingsSync }
+  >()
+  private generation = 0
+
+  async open(
+    companionUrl: string,
+    editor: EditorSession,
+    worktree: OpenEditorInput,
+  ): Promise<void> {
+    const generation = ++this.generation
+    const origin = new URL(companionUrl)
+    origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
+    const url = new URL(editor.path, origin)
+    const key = createHash('sha256').update(url.href).digest('hex')
+    const browserSession = this.browserSession(url)
+    browserSession.tokens.set(editor.path, editor.accessToken)
+    let entry = this.views.get(key)
+    if (
+      entry &&
+      (entry.token !== editor.accessToken ||
+        entry.page.state === 'failed' ||
+        entry.page.state === 'disposed')
+    ) {
+      this.discard(key, entry, false)
+      entry = undefined
+      // discard removes the previous view's request credentials.
+      browserSession.tokens.set(editor.path, editor.accessToken)
+    }
+    if (!entry) {
+      const view = new WebContentsView({
+        webPreferences: {
+          session: browserSession.browser,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          backgroundThrottling: false,
+        },
+      })
+      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      view.webContents.on('will-navigate', (event, target) => {
+        const next = new URL(target)
+        if (
+          next.origin !== url.origin ||
+          !next.pathname.startsWith(editor.path)
+        )
+          event.preventDefault()
+      })
+      entry = {
+        view,
+        token: editor.accessToken,
+        page: new EditorPage(view.webContents, url.href),
+        worktree,
+        forget: () => browserSession.tokens.delete(editor.path),
+      }
+      const created = entry
+      view.webContents.once('destroyed', () => this.discard(key, created))
+      this.views.set(key, entry)
+    }
+    if (generation !== this.generation) return
+    const window = this.ensureWindow()
+    if (this.active && this.active !== entry) {
+      window.contentView.removeChildView(this.active.view)
+      this.active.view.setVisible(false)
+    }
+    this.active = entry
+    window.contentView.addChildView(entry.view)
+    entry.view.setVisible(true)
+    this.resize()
+    window.setTitle(`${worktree.path} — VS Code`)
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+    entry.view.webContents.focus()
+    try {
+      await entry.page.whenReady()
+    } catch (error) {
+      if (entry.page.state === 'failed') this.discard(key, entry)
+      throw error
+    }
+    if (this.views.get(key) === entry && entry.page.state === 'ready')
+      browserSession.sync.add(entry.view.webContents, url, editor.accessToken)
+  }
+
+  private discard(key: string, entry: EditorView, closeWindow = true): void {
+    if (this.views.get(key) !== entry) return
+    this.views.delete(key)
+    entry.forget()
+    if (this.active === entry) {
+      this.window?.contentView.removeChildView(entry.view)
+      this.active = undefined
+      if (closeWindow) this.window?.close()
+    }
+    entry.page.dispose()
+  }
+
+  cancelPending(): void {
+    this.generation++
+  }
+
+  reconcile(snapshot: WorktreeSnapshot): void {
+    for (const [key, entry] of this.views) {
+      if (
+        snapshot.worktrees.some(
+          (worktree) =>
+            worktree.project === entry.worktree.project &&
+            worktree.path === entry.worktree.path,
+        )
+      )
+        continue
+      this.discard(key, entry)
+    }
+  }
+
+  private browserSession(url: URL) {
+    const key = createHash('sha256').update(url.origin).digest('hex')
+    let entry = this.sessions.get(key)
+    if (entry) return entry
+    const browser = session.fromPartition(`persist:ade-editor-${key}`)
+    const tokens = new Map<string, string>()
+    entry = { browser, tokens, sync: new EditorSettingsSync(url.origin) }
+    browser.webRequest.onBeforeSendHeaders((details, callback) => {
+      const request = new URL(details.url)
+      const protocol = request.protocol.replace(/^ws/, 'http')
+      const path = /^\/editors\/[a-f0-9]{64}\//.exec(request.pathname)?.[0]
+      const token = path ? tokens.get(path) : undefined
+      if (protocol === url.protocol && request.host === url.host && token)
+        details.requestHeaders.Authorization = `Bearer ${token}`
+      callback({ requestHeaders: details.requestHeaders })
+    })
+    const trustedPage = (
+      contents: WebContents | null,
+      details: Pick<PermissionRequest, 'isMainFrame'> & {
+        requestingUrl?: string
+      },
+    ): boolean => {
+      if (
+        !contents ||
+        contents.isDestroyed() ||
+        this.active?.view.webContents !== contents
+      )
+        return false
+      const page = URL.parse(contents.getURL())
+      if (page?.origin !== url.origin || !tokens.has(page.pathname))
+        return false
+      // Include extension webviews belonging to this workbench. Chromium and
+      // VS Code still enforce each frame's sandbox and Permissions Policy.
+      return contents.mainFrame.framesInSubtree.some(
+        (frame) => frame.url === details.requestingUrl,
+      )
+    }
+    // Read checks fall through to the request handler so each paste needs a
+    // current user gesture; no lasting clipboard grant is shared across views.
+    browser.setPermissionCheckHandler(
+      (contents, permission, _origin, details) =>
+        trustedPage(contents, details) &&
+        (permission === 'clipboard-sanitized-write' ||
+          (permission === 'media' && details.mediaType === 'audio')),
+    )
+    browser.setPermissionRequestHandler(
+      (contents, permission, callback, details) => {
+        if (!trustedPage(contents, details)) return callback(false)
+        if (permission === 'clipboard-sanitized-write') return callback(true)
+        if (permission === 'media') {
+          const { mediaTypes } = details as MediaAccessPermissionRequest
+          return callback(
+            !!mediaTypes?.length &&
+              mediaTypes.every((type) => type === 'audio'),
+          )
+        }
+        if (permission !== 'clipboard-read') return callback(false)
+        void contents
+          .executeJavaScript('navigator.userActivation.isActive')
+          .then(
+            (active) =>
+              callback(active === true && trustedPage(contents, details)),
+            () => callback(false),
+          )
+      },
+    )
+    this.sessions.set(key, entry)
+    return entry
+  }
+
+  private ensureWindow(): BaseWindow {
+    if (this.window && !this.window.isDestroyed()) return this.window
+    const window = new BaseWindow({
+      width: 1280,
+      height: 850,
+      show: false,
+      title: 'VS Code',
+    })
+    this.window = window
+    // Showing a native window can change its content bounds after the initial
+    // size calculation (for example when the Windows menu/frame is laid out).
+    // Follow the actual parent view so the editor never extends below it.
+    window.contentView.on('bounds-changed', () => this.resize())
+    window.once('show', () => window.maximize())
+    window.on('closed', () => {
+      this.active?.view.setVisible(false)
+      this.window = undefined
+      this.active = undefined
+    })
+    return window
+  }
+
+  private resize(): void {
+    if (!this.window || !this.active) return
+    const { width, height } = this.window.contentView.getBounds()
+    this.active.view.setBounds({ x: 0, y: 0, width, height })
+  }
+
+  close(): void {
+    this.generation++
+    for (const { sync } of this.sessions.values()) sync.close()
+    for (const [key, entry] of this.views) {
+      entry.view.webContents.session.flushStorageData()
+      this.discard(key, entry, false)
+    }
+  }
+
+  reconnectSettings(): void {
+    for (const { sync } of this.sessions.values()) void sync.sync()
+  }
+}

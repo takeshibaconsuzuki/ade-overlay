@@ -11,8 +11,12 @@ import {
   type Worktree,
   type WorktreeSnapshot,
   type WorktreeUpdate,
+  type OpenEditorInput,
+  type EditorSession,
+  openEditorInputSchema,
 } from '../shared/companion.ts'
 import { expandHome } from './config.ts'
+import type { EditorManager } from './editors.ts'
 
 const execute = promisify(execFile)
 
@@ -64,6 +68,7 @@ async function scan(project: string): Promise<Worktree[]> {
         main: index === 0,
         locked: fields.has('locked'),
         prunable: fields.has('prunable'),
+        editor: 'stopped' as const,
       }
     })
 }
@@ -76,9 +81,17 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
   }
   private queue: Promise<unknown> = Promise.resolve()
   private pending = 0
+  private editors?: EditorManager
 
-  static async open(projects: string[]): Promise<WorktreeStore> {
+  static async open(
+    projects: string[],
+    editors?: EditorManager,
+  ): Promise<WorktreeStore> {
     const store = new WorktreeStore()
+    store.editors = editors
+    editors?.on('status', () =>
+      store.publish(store.snapshot.worktrees, 'editor'),
+    )
     const unique = new Map<string, string>()
     for (const project of projects) {
       const canonical = await realpath(project)
@@ -99,7 +112,8 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
         }),
       )
     ).flat()
-    store.snapshot = { revision: 1, projects: paths, worktrees }
+    store.snapshot.projects = paths
+    await store.applyWorktrees(worktrees, 'refreshed', true)
     return store
   }
 
@@ -108,9 +122,7 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
     return structuredClone(this.snapshot)
   }
 
-  private serialize(
-    operation: () => Promise<WorktreeSnapshot>,
-  ): Promise<WorktreeSnapshot> {
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
     if (this.pending >= 32)
       return Promise.reject(new Error('Too many pending worktree operations.'))
     this.pending++
@@ -128,11 +140,19 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
   private publish(
     worktrees: Worktree[],
     change: WorktreeUpdate['change'],
+    force = true,
   ): WorktreeSnapshot {
+    const entries = worktrees.map((worktree) => ({
+      ...worktree,
+      editor: this.editors?.status(worktree) ?? 'stopped',
+      editorDetail: this.editors?.detail(worktree),
+    }))
+    if (!force && isDeepStrictEqual(entries, this.snapshot.worktrees))
+      return this.list()
     this.snapshot = {
       ...this.snapshot,
       revision: this.snapshot.revision + 1,
-      worktrees,
+      worktrees: entries,
     }
     this.emit('update', { change, snapshot: this.list() })
     return this.list()
@@ -146,31 +166,59 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
     return project
   }
 
+  // All Git membership changes pass here. Status-only broadcasts use publish
+  // directly, so stopping a process cannot recursively trigger reconciliation.
+  private async applyWorktrees(
+    worktrees: Worktree[],
+    change: WorktreeUpdate['change'],
+    force = false,
+  ): Promise<WorktreeSnapshot> {
+    await this.editors?.retain(worktrees)
+    return this.publish(worktrees, change, force)
+  }
+
   private async reconcileProject(
     project: string,
     change: WorktreeUpdate['change'],
   ): Promise<WorktreeSnapshot> {
     const entries = await scan(project)
-    const current = this.snapshot.worktrees.filter(
-      (entry) => entry.project === project,
-    )
-    if (isDeepStrictEqual(entries, current)) return this.list()
-    return this.publish(
-      [
-        ...this.snapshot.worktrees.filter((entry) => entry.project !== project),
-        ...entries,
-      ],
+    return this.applyWorktrees(
+      this.snapshot.projects.flatMap((path) =>
+        path === project
+          ? entries
+          : this.snapshot.worktrees.filter((entry) => entry.project === path),
+      ),
       change,
     )
   }
 
   refresh(): Promise<WorktreeSnapshot> {
-    return this.serialize(async () =>
-      this.publish(
-        (await Promise.all(this.snapshot.projects.map(scan))).flat(),
-        'refreshed',
-      ),
-    )
+    return this.serialize(async () => {
+      const entries = (
+        await Promise.all(this.snapshot.projects.map(scan))
+      ).flat()
+      return this.applyWorktrees(entries, 'refreshed', true)
+    })
+  }
+
+  openEditor(input: OpenEditorInput): Promise<EditorSession> {
+    return this.serialize(async () => {
+      input = openEditorInputSchema.parse(input)
+      const project = this.project(input.project)
+      const worktree = this.snapshot.worktrees.find(
+        (entry) =>
+          entry.project === project &&
+          pathKey(entry.path) === pathKey(input.path),
+      )
+      if (!worktree || worktree.prunable)
+        throw new Error('Worktree is unavailable. Refresh the list first.')
+      if (!this.editors)
+        throw new Error('Editors are not available on this server.')
+      await realpath(worktree.path)
+      // Register startup in order, but do not hold the Git queue during a
+      // download or readiness wait. EditorManager owns startup cancellation.
+      return { ready: this.editors.open(worktree) }
+    }).then(({ ready }) => ready)
   }
 
   create(input: CreateWorktreeInput): Promise<WorktreeSnapshot> {
@@ -229,9 +277,14 @@ export class WorktreeStore extends EventEmitter<{ update: [WorktreeUpdate] }> {
       if (worktree.locked)
         throw new Error('Unlock this worktree in Git before deleting it.')
       // Git refuses dirty or locked trees; never force removal or delete branches.
+      await this.editors?.stop(worktree)
       await git(project, ['worktree', 'remove', '--', worktree.path])
-      return this.publish(
-        this.snapshot.worktrees.filter((entry) => entry !== worktree),
+      return this.applyWorktrees(
+        this.snapshot.worktrees.filter(
+          (entry) =>
+            entry.project !== worktree.project ||
+            pathKey(entry.path) !== pathKey(worktree.path),
+        ),
         'deleted',
       )
     })

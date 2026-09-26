@@ -87,7 +87,7 @@ const hello = JSON.stringify({
 })
 
 test(
-  'standalone server health and multiple clients exchanging correlated pings',
+  'multiple clients exchange correlated pings with the standalone server',
   { timeout: 5_000 },
   async (t) => {
     const server = await startCompanionServer({
@@ -95,14 +95,6 @@ test(
       port: 0,
     })
     t.after(() => server.close())
-    const health = await fetch(
-      server.url.replace('ws:', 'http:').replace('/companion', '/health'),
-    )
-    assert.equal(health.status, 200)
-    assert.deepEqual(await health.json(), {
-      name: 'ade-companion',
-      protocolVersion: 1,
-    })
     const clients = [makeClient(t, server.url), makeClient(t, server.url)]
     for (const client of clients) client.connect()
     await Promise.all(

@@ -18,6 +18,9 @@ import {
   type DeleteWorktreeInput,
   createWorktreeInputSchema,
   deleteWorktreeInputSchema,
+  openEditorInputSchema,
+  type OpenEditorInput,
+  type EditorSession,
 } from '../shared/companion.ts'
 
 interface ClientOptions {
@@ -93,6 +96,19 @@ export class CompanionClient extends EventEmitter<{
     return this.worktreeRequest({ type: 'worktrees:list', id: randomUUID() })
   }
 
+  async openEditor(input: OpenEditorInput): Promise<EditorSession> {
+    const parsed = openEditorInputSchema.safeParse(input)
+    if (!parsed.success) throw new Error('Invalid editor worktree.')
+    const response = await this.request({
+      type: 'editor:open',
+      id: randomUUID(),
+      input: parsed.data,
+    })
+    if (response.type !== 'editor')
+      throw new Error('Unexpected editor response.')
+    return response.session
+  }
+
   refreshWorktrees(): Promise<WorktreeSnapshot> {
     return this.worktreeRequest({ type: 'worktrees:refresh', id: randomUUID() })
   }
@@ -150,20 +166,29 @@ export class CompanionClient extends EventEmitter<{
             new Error(
               message.type === 'ping'
                 ? 'Companion ping timed out.'
-                : 'Worktree request timed out. Refresh to check the result before retrying.',
+                : message.type === 'editor:open'
+                  ? 'Editor startup timed out. Try opening the worktree again.'
+                  : 'Worktree request timed out. Refresh to check the result before retrying.',
             ),
           )
         },
         this.options.requestTimeoutMs ??
-          (message.type === 'ping' || message.type === 'worktrees:list'
-            ? 5_000
-            : 120_000),
+          (message.type === 'editor:open'
+            ? 180_000
+            : message.type === 'ping' || message.type === 'worktrees:list'
+              ? 5_000
+              : 120_000),
       )
       this.pending.set(id, {
         resolve,
         reject,
         timeout,
-        expected: message.type === 'ping' ? 'pong' : 'worktrees',
+        expected:
+          message.type === 'ping'
+            ? 'pong'
+            : message.type === 'editor:open'
+              ? 'editor'
+              : 'worktrees',
       })
       socket.send(payload, (error) => {
         if (!error) return
@@ -261,6 +286,7 @@ export class CompanionClient extends EventEmitter<{
         })
       } else if (
         message.type === 'pong' ||
+        message.type === 'editor' ||
         message.type === 'worktrees' ||
         (message.type === 'error' && message.id)
       ) {

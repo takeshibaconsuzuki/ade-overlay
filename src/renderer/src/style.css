@@ -26,7 +26,7 @@ body {
 }
 .worktree-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   padding: 10px 0;
@@ -36,6 +36,37 @@ body {
 }
 .worktree-branch {
   color: var(--app-muted);
+}
+.worktree-open {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 42px;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: normal;
+}
+.worktree-open .worktree-branch {
+  margin-left: auto;
+}
+.worktree-name {
+  display: grid;
+  gap: 3px;
+}
+.worktree-name small {
+  color: var(--app-muted);
+  font-weight: normal;
+}
+.editor-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray-8);
+}
+.editor-dot.running {
+  background: var(--green-9, #30a46c);
 }
 .worktree-form {
   display: grid;

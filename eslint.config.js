@@ -6,10 +6,15 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**'],
+    ignores: ['out/**', 'dist/**', 'node_modules/**', '.worktrees/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    languageOptions: {
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
+    },
+  },
   {
     files: [
       'electron.vite.config.ts',
@@ -17,11 +22,16 @@ export default tseslint.config(
       'src/preload/**/*.ts',
       'src/server/**/*.ts',
       'tests/**/*.ts',
+      'tests/**/*.mjs',
       'scripts/**/*.mjs',
     ],
     languageOptions: {
       globals: globals.node,
     },
+  },
+  {
+    files: ['src/server/settings-sync-client.ts'],
+    languageOptions: { globals: globals.browser },
   },
   {
     files: ['src/renderer/**/*.{ts,tsx}'],

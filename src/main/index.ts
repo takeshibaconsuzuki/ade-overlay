@@ -7,13 +7,27 @@ import {
 } from 'electron'
 import { join } from 'node:path'
 import { CompanionClient } from './companion-client.ts'
-import { companionChannels } from '../shared/companion.ts'
+import {
+  companionChannels,
+  type WorktreeSnapshot,
+} from '../shared/companion.ts'
+import { EditorWindow } from './editor-window.ts'
 
 const trustedRenderers = new Set<WebContents>()
+const editorWindow = new EditorWindow()
+let editorRequest = 0
+let connectionEpoch = 0
+let editorRevision = -1
 const companion = new CompanionClient({
   url: process.env.ADE_COMPANION_URL,
   token: process.env.ADE_COMPANION_TOKEN,
 })
+
+function reconcileEditors(snapshot: WorktreeSnapshot, epoch: number): void {
+  if (epoch !== connectionEpoch || snapshot.revision < editorRevision) return
+  editorRevision = snapshot.revision
+  editorWindow.reconcile(snapshot)
+}
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   if (
@@ -39,6 +53,8 @@ function createWindow(): void {
   const renderer = window.webContents
   trustedRenderers.add(renderer)
   renderer.once('destroyed', () => trustedRenderers.delete(renderer))
+  // The picker owns the desktop app's lifetime, including on macOS.
+  window.once('closed', () => app.quit())
   renderer.setWindowOpenHandler(() => ({ action: 'deny' }))
   renderer.on('will-navigate', (event) => event.preventDefault())
 
@@ -58,11 +74,16 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(companionChannels.reconnect, (event) => {
     assertTrustedSender(event)
+    editorRequest++
+    editorWindow.cancelPending()
     return companion.connect()
   })
-  ipcMain.handle(companionChannels.listWorktrees, (event) => {
+  ipcMain.handle(companionChannels.listWorktrees, async (event) => {
     assertTrustedSender(event)
-    return companion.listWorktrees()
+    const epoch = connectionEpoch
+    const snapshot = await companion.listWorktrees()
+    reconcileEditors(snapshot, epoch)
+    return snapshot
   })
   ipcMain.handle(companionChannels.refreshWorktrees, (event) => {
     assertTrustedSender(event)
@@ -76,13 +97,27 @@ app.whenReady().then(() => {
     assertTrustedSender(event)
     return companion.deleteWorktree(input)
   })
+  ipcMain.handle(companionChannels.openEditor, async (event, input) => {
+    assertTrustedSender(event)
+    const request = ++editorRequest
+    const editor = await companion.openEditor(input)
+    if (request !== editorRequest) return
+    await editorWindow.open(companion.getStatus().url, editor, input)
+  })
   companion.on('worktreesUpdated', (update) => {
+    reconcileEditors(update.snapshot, connectionEpoch)
     for (const renderer of trustedRenderers) {
       if (!renderer.isDestroyed())
         renderer.send(companionChannels.worktreesUpdated, update)
     }
   })
   companion.on('status', (status) => {
+    connectionEpoch++
+    editorRevision = -1
+    if (status.state !== 'connected') {
+      editorRequest++
+      editorWindow.cancelPending()
+    } else editorWindow.reconnectSettings()
     for (const renderer of trustedRenderers) {
       if (!renderer.isDestroyed())
         renderer.send(companionChannels.status, status)
@@ -90,18 +125,9 @@ app.whenReady().then(() => {
   })
   companion.connect()
   createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
-  })
 })
 
-app.on('before-quit', () => companion.stop())
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+app.on('before-quit', () => {
+  editorWindow.close()
+  companion.stop()
 })

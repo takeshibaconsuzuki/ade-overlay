@@ -6,6 +6,33 @@ import { parse } from 'yaml'
 import { z } from 'zod'
 
 export const serverConfigSchema = z.object({
+  editor: z
+    .object({
+      dataDir: z
+        .string()
+        .regex(/\S/)
+        .refine((value) => !value.includes('\0'))
+        .optional(),
+      // Node timers overflow above 2^31-1 milliseconds; zero expires immediately.
+      reconnectionGraceSeconds: z
+        .number()
+        .int()
+        .min(1)
+        .max(2_147_483)
+        .optional(),
+      localUserDataDir: z
+        .string()
+        .regex(/\S/)
+        .refine((value) => !value.includes('\0'))
+        .optional(),
+      localExtensionsDir: z
+        .string()
+        .regex(/\S/)
+        .refine((value) => !value.includes('\0'))
+        .optional(),
+    })
+    .strict()
+    .optional(),
   projects: z.array(
     z
       .string()
@@ -67,6 +94,37 @@ export async function loadServerConfig(
   }
   return {
     ...config,
+    ...(config.editor
+      ? {
+          editor: {
+            ...config.editor,
+            ...(config.editor.dataDir
+              ? {
+                  dataDir: resolve(
+                    dirname(path),
+                    expandHome(config.editor.dataDir),
+                  ),
+                }
+              : {}),
+            ...(config.editor.localUserDataDir
+              ? {
+                  localUserDataDir: resolve(
+                    dirname(path),
+                    expandHome(config.editor.localUserDataDir),
+                  ),
+                }
+              : {}),
+            ...(config.editor.localExtensionsDir
+              ? {
+                  localExtensionsDir: resolve(
+                    dirname(path),
+                    expandHome(config.editor.localExtensionsDir),
+                  ),
+                }
+              : {}),
+          },
+        }
+      : {}),
     projects: config.projects.map((project) =>
       resolve(dirname(path), expandHome(project)),
     ),
