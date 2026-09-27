@@ -14,6 +14,7 @@ export const companionChannels = {
   refreshWorktrees: 'companion:worktrees:refresh',
   createWorktree: 'companion:worktrees:create',
   deleteWorktree: 'companion:worktrees:delete',
+  setWorktreeError: 'companion:worktrees:set-error',
   openEditor: 'companion:editor:open',
   worktreesUpdated: 'companion:worktrees:updated',
 } as const
@@ -36,6 +37,7 @@ export interface CompanionAPI {
   refreshWorktrees(): Promise<WorktreeSnapshot>
   createWorktree(input: CreateWorktreeInput): Promise<WorktreeSnapshot>
   deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot>
+  setWorktreeError(input: SetWorktreeErrorInput): Promise<WorktreeSnapshot>
   openEditor(input: OpenEditorInput): Promise<void>
   onWorktreesUpdated(callback: (update: WorktreeUpdate) => void): () => void
 }
@@ -58,6 +60,9 @@ export const deleteWorktreeInputSchema = z.object({
   path: textSchema,
 })
 export const openEditorInputSchema = deleteWorktreeInputSchema
+export const setWorktreeErrorInputSchema = deleteWorktreeInputSchema.extend({
+  error: z.string().max(4096).optional(),
+})
 export const editorSessionSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
   path: z.string().regex(/^\/editors\/[a-f0-9]{64}\/$/),
@@ -73,6 +78,9 @@ const worktreeSchema = z.object({
   prunable: z.boolean(),
   editor: z.enum(['stopped', 'starting', 'running']),
   editorDetail: z.string().max(512).optional(),
+  operation: z.enum(['creating', 'deleting']).optional(),
+  error: z.string().optional(),
+  missing: z.boolean().optional(),
 })
 const worktreeSnapshotSchema = z.object({
   revision: z.int().nonnegative(),
@@ -80,11 +88,16 @@ const worktreeSnapshotSchema = z.object({
   worktrees: z.array(worktreeSchema),
 })
 const worktreeUpdateSchema = z.object({
-  change: z.enum(['created', 'deleted', 'refreshed', 'editor']),
+  change: z.enum(['created', 'deleted', 'refreshed', 'editor', 'operation']),
   snapshot: worktreeSnapshotSchema,
 })
 
 const clientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('worktrees:set-error'),
+    id: idSchema,
+    input: setWorktreeErrorInputSchema,
+  }),
   z.object({
     type: z.literal('editor:open'),
     id: idSchema,
@@ -133,6 +146,7 @@ const requestEnvelopeSchema = z.object({ id: idSchema })
 export type CreateWorktreeInput = z.infer<typeof createWorktreeInputSchema>
 export type DeleteWorktreeInput = z.infer<typeof deleteWorktreeInputSchema>
 export type OpenEditorInput = z.infer<typeof openEditorInputSchema>
+export type SetWorktreeErrorInput = z.infer<typeof setWorktreeErrorInputSchema>
 export type EditorSession = z.infer<typeof editorSessionSchema>
 export type Worktree = z.infer<typeof worktreeSchema>
 export type WorktreeSnapshot = z.infer<typeof worktreeSnapshotSchema>

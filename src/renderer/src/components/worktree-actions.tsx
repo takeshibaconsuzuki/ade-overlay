@@ -58,7 +58,6 @@ export function CreateWorktree({
       description="Leave the new branch name blank to check out the base branch."
       open={open}
       onOpenChange={changeOpen}
-      busy={busy}
       trigger={
         <Button disabled={!connected || !snapshot?.projects.length}>
           Create worktree
@@ -105,11 +104,7 @@ export function CreateWorktree({
           <Notice>Reconnect to the server to create a worktree.</Notice>
         )}
         <div className="dialog-actions">
-          <Button
-            tone="secondary"
-            onClick={() => setOpen(false)}
-            disabled={busy}
-          >
+          <Button tone="secondary" onClick={() => setOpen(false)}>
             Cancel
           </Button>
           <Button
@@ -169,11 +164,16 @@ export function DeleteWorktree({
         setError('')
         setOpen(next)
       }}
-      busy={busy}
       trigger={
         <Button
           tone="danger"
-          disabled={!connected || worktree.main || worktree.locked}
+          disabled={
+            !connected ||
+            worktree.main ||
+            worktree.locked ||
+            !!worktree.operation ||
+            worktree.missing
+          }
           title={reason}
           aria-label={reason}
         >
@@ -184,7 +184,7 @@ export function DeleteWorktree({
       <p className="delete-path">{worktree.path}</p>
       {error && <Notice>{error}</Notice>}
       <div className="dialog-actions">
-        <Button tone="secondary" disabled={busy} onClick={() => setOpen(false)}>
+        <Button tone="secondary" onClick={() => setOpen(false)}>
           Cancel
         </Button>
         <Button

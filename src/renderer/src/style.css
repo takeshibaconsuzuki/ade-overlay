@@ -41,6 +41,7 @@ body {
   padding: 0;
 }
 .worktree-list li {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   border-bottom: 1px solid var(--app-border);
@@ -59,12 +60,16 @@ body {
 .worktree-branch {
   color: var(--app-muted);
 }
+.worktree-entry {
+  position: relative;
+  min-width: 0;
+}
 .worktree-open {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   min-height: 64px;
   padding: 0;
   border-radius: 0;
@@ -100,6 +105,23 @@ body {
 }
 .editor-dot.running {
   background: var(--green-9, #30a46c);
+}
+.editor-status.has-error {
+  visibility: hidden;
+}
+.worktree-error {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  z-index: 1;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+  background: transparent;
 }
 .worktree-delete {
   display: flex;

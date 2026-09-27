@@ -39,7 +39,7 @@ The companion runs independently of the desktop app. Deploy its build to a machi
 
 The desktop app separates presentation from privileged work. The renderer owns the UI, the main process owns connections and OS access, and preload provides a narrow bridge between them. The companion credential stays in the main process. App-owned UI components wrap the component library so it can be replaced without rewriting features.
 
-The companion server owns configuration, Git operations, and the shared view of worktrees. Git is the source of truth; the server keeps a cache so listing is fast. Changes and refreshes run in order so concurrent clients see consistent results.
+The companion server owns configuration, Git operations, and the shared view of worktrees. Git is the source of truth for membership; the server keeps a cache so listing is fast. Pending operations and per-worktree errors are a server-owned overlay, included in snapshots and retained across desktop reconnects. Status precedence is pending operation, retained error, then editor running or stopped. Opening an editor preserves row errors until explicitly cleared. Synthetic creation rows never participate in editor reconciliation. Clearing an error removes a synthetic row only when Git has no corresponding worktree. Changes and refreshes run in order so concurrent clients see consistent results.
 
 Every accepted Git worktree list follows one application path: reconcile editor processes against the complete list, then publish the resulting state. Project scans first merge with other projects' cached worktrees. Editor-status broadcasts do not change membership or trigger reconciliation.
 
@@ -57,7 +57,7 @@ The active editor view and its extension frames may use the clipboard and microp
 
 The app's main process opens a WebSocket connection directly at `/companion`, independently of loading any editor page, so the server can push changes to every connected app. The main process handles authentication and reconnection. When configured, it supplies `ADE_COMPANION_TOKEN` as a bearer token during the upgrade; the operator sets the same shared secret on the app and server. The server rejects browser connections to `/companion`, while editor pages use separate connections under `/editors/`. Remote deployments require authentication and encrypted transport.
 
-Worktree commands return the current list in a `worktrees` reply. Changes and refreshes also broadcast `worktrees:updated` to all connected apps, including the requester. Failures return `error` without disconnecting the app. Message fields and validation rules live in the shared contract.
+Worktree commands return the current list in a `worktrees` reply. Creation and deletion acknowledge acceptance before queued work runs; completion and failures arrive in snapshots. `worktrees:set-error` reports editor-page failures or clears a row error for every client. Changes and refreshes also broadcast `worktrees:updated` to all connected apps, including the requester. Rejected commands return `error` without disconnecting the app. Message fields and validation rules live in the shared contract.
 
 ## Startup
 
@@ -114,7 +114,7 @@ sequenceDiagram
 
 ## Create Worktree
 
-The user chooses a project, base branch, and path, then the app sends `worktrees:create`. A new branch name is optional; leaving it blank checks out the base branch directly. Git enforces its checkout rules. Creation can leave a worktree behind even when Git reports an error, so the server checks the actual Git state and shares any changes before returning the result. The app still shows the original error.
+The server config uses project objects with `mainWorktreePath` and an optional `bootstrapCommand`. Bootstrap runs in the newly created directory under the companion account's default shell, inside the creation operation. The queue and its status belong to the server, independently of desktop connections. Failed checkouts or bootstrap commands can leave real worktrees behind; reconciliation preserves these and the original error.
 
 ```mermaid
 sequenceDiagram
@@ -122,23 +122,33 @@ sequenceDiagram
     participant App
     participant Server as Server (/companion)
     participant Git
+    participant Shell
     participant Clients as All connected apps
     User->>App: Submit worktree details
     App->>Server: worktrees:create
-    Server->>Git: Create worktree
-    Git-->>Server: Success or error
+    Note over Server: Register pending row before queued work starts
+    Server-->>Clients: worktrees:updated (creating)
+    Server-->>App: worktrees (accepted)
+    Note over App: Close dialog
+    Server->>Git: git worktree add
+    Git-->>Server: Created or failed
+    Note over Server,Shell: After successful creation, run configured bootstrapCommand in the worktree
+    Server->>Shell: Execute bootstrapCommand, when configured
+    Shell-->>Server: Completed or failed
     Server->>Git: Read actual worktrees
     Git-->>Server: Current worktrees
-    Note over Server: Reconcile editors against the complete list, then update cache if worktrees changed
-    Server-->>Clients: worktrees:updated if worktrees changed
-    Note over Clients: Apply the updated list when received
-    Server-->>App: worktrees on success, error on failure
-    Note over App: Show the returned list or the original error
+    Note over Server: Reconcile editors against Git membership, then finish operation or retain row error
+    Server-->>Clients: worktrees:updated (finished or error)
+    Note over Clients: Replace spinner with status or a red X; tooltip shows error
+    User->>App: Click red X
+    App->>Server: worktrees:set-error without error
+    Server-->>Clients: worktrees:updated (error cleared)
+    Server-->>App: worktrees
 ```
 
 ## Delete Worktree
 
-The user confirms which worktree to remove, then the app sends `worktrees:delete`. The server protects main and locked worktrees, stops the worktree's editor, and asks Git to remove it safely. Git refuses removal when local changes would be lost. The branch and saved editor state are retained; an editor stopped for a failed deletion can be reopened.
+Main and locked worktrees are protected. Removal never forces Git or deletes the branch or saved editor state. An editor stopped for a failed deletion can be reopened. Admission failures leave the confirmation dialog available; accepted operations release it immediately.
 
 ```mermaid
 sequenceDiagram
@@ -149,12 +159,16 @@ sequenceDiagram
     participant Clients as All connected apps
     User->>App: Confirm deletion
     App->>Server: worktrees:delete
+    Note over Server: Mark row deleting before queued work starts
+    Server-->>Clients: worktrees:updated (deleting)
+    Server-->>App: worktrees (accepted)
+    Note over App: Close dialog
     Note over Server: Stop this worktree's editor process
-    Server->>Git: Remove worktree safely
-    Git-->>Server: Worktree removed
-    Note over Server: Update cache
-    Server-->>Clients: worktrees:updated
-    Server-->>App: worktrees
+    Server->>Git: git worktree remove without force
+    Git-->>Server: Removed or refused
+    Note over Server: Remove row on success; retain row and error on failure
+    Server-->>Clients: worktrees:updated (removed or error)
+    Note over Clients: Remove row or replace spinner with red X and error tooltip
 ```
 
 ## Editor Updates
@@ -208,7 +222,7 @@ sequenceDiagram
     Editor-->>Server: Ready or startup failure
     Server-->>App: worktrees:updated with status and progress, broadcast to all apps
     Server-->>App: editor with ID, path and accessToken, or error
-    Note over App: Show errors, otherwise configure request authentication and select editor view
+    Note over App: Errors belong to the worktree row; otherwise configure authentication and select editor view
     App->>Page: Load /editors/id/ in the single editor window for a new or replaced view
     Note over Page,Server: Main process adds the editor bearer token to HTTP and WebSocket upgrades
     Page->>Server: GET /editors/id/ and assets

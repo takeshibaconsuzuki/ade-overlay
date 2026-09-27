@@ -19,6 +19,8 @@ import {
   createWorktreeInputSchema,
   deleteWorktreeInputSchema,
   openEditorInputSchema,
+  setWorktreeErrorInputSchema,
+  type SetWorktreeErrorInput,
   type OpenEditorInput,
   type EditorSession,
 } from '../shared/companion.ts'
@@ -132,6 +134,14 @@ export class CompanionClient extends EventEmitter<{
       type: 'worktrees:delete',
       id: randomUUID(),
       input: parsed.data,
+    })
+  }
+
+  setWorktreeError(input: SetWorktreeErrorInput): Promise<WorktreeSnapshot> {
+    return this.worktreeRequest({
+      type: 'worktrees:set-error',
+      id: randomUUID(),
+      input: setWorktreeErrorInputSchema.parse(input),
     })
   }
 

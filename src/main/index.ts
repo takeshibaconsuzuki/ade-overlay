@@ -97,12 +97,33 @@ app.whenReady().then(() => {
     assertTrustedSender(event)
     return companion.deleteWorktree(input)
   })
+  ipcMain.handle(companionChannels.setWorktreeError, (event, input) => {
+    assertTrustedSender(event)
+    return companion.setWorktreeError(input)
+  })
   ipcMain.handle(companionChannels.openEditor, async (event, input) => {
     assertTrustedSender(event)
     const request = ++editorRequest
-    const editor = await companion.openEditor(input)
-    if (request !== editorRequest) return
-    await editorWindow.open(companion.getStatus().url, editor, input)
+    try {
+      const editor = await companion.openEditor(input)
+      if (request !== editorRequest) return
+      await editorWindow.open(companion.getStatus().url, editor, input)
+    } catch (error) {
+      if (request !== editorRequest) return
+      try {
+        await companion.setWorktreeError({
+          project: input.project,
+          path: input.path,
+          error: (error instanceof Error ? error.message : String(error)).slice(
+            0,
+            4096,
+          ),
+        })
+      } catch {
+        // Fall back to a local row error only when the companion cannot own it.
+        throw error
+      }
+    }
   })
   companion.on('worktreesUpdated', (update) => {
     reconcileEditors(update.snapshot, connectionEpoch)

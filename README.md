@@ -8,11 +8,12 @@ Create `~/.ade-overlay/server.yaml` (`~` is your home directory):
 
 ```yaml
 projects:
-  - ~/code/my-project
-  - E:/Devel/another-project
+  - mainWorktreePath: ~/code/my-project
+    bootstrapCommand: npm install
+  - mainWorktreePath: E:/Devel/another-project
 ```
 
-Each project must be a main Git worktree root. Paths may be absolute, start with `~`, or be relative to the config file. Duplicate projects are combined.
+Each project object requires `mainWorktreePath`, pointing to a main Git worktree root. Paths may be absolute, start with `~`, or be relative to the config file. Duplicate projects are combined; the last entry supplies the bootstrap command. The optional `bootstrapCommand` runs in each newly created worktree using the companion account and the server's default shell. Creation stays pending until it exits. A nonzero exit marks creation as failed and retains the worktree for inspection.
 
 Run `npm run server`, or choose a config with `npm run server -- --config path/to/server.yaml`. The server scans all projects before accepting connections. A missing default config starts with no projects; an explicitly selected missing file, invalid config, or invalid project stops startup. Restart the server after changing the config.
 
@@ -54,11 +55,11 @@ The companion writes structured logs to its terminal and `~/.ade-overlay/server.
 Run `npm run dev`. Worktrees load on connection and after reconnecting. Closing the worktree picker quits the app, including its editor window; the companion and remote sessions keep running. Closing only the editor window keeps the picker open.
 
 - **Create worktree**: choose a project, base branch, and path. Enter a new branch name to create a branch, or leave it blank to check out the base branch directly. Git refuses branches already checked out elsewhere. Relative worktree paths start at the selected project.
-- **Click a worktree**: open its remote VS Code session. Worktrees opened through ADE are automatically trusted. A grey dot means stopped or starting; green means running. All worktrees use one editor window, which switches to the selected worktree. Closing that window leaves the remote sessions running.
+- **Click a worktree**: open its remote VS Code session. Worktrees opened through ADE are automatically trusted. A grey dot means stopped; green means running. A spinner means an operation is pending and takes priority over errors; errors take priority over green or grey status. A red X indicates an error: hover or focus the row for details, and click the X to clear it. Opening an editor preserves the error until it is explicitly cleared. All worktrees use one editor window, which switches to the selected worktree. Closing that window leaves the remote sessions running.
 - **Delete** on a worktree row: remove the working directory and keep its branch. Main and locked worktrees cannot be deleted; Git refuses worktrees with uncommitted or untracked files.
 - **Refresh worktrees**: rescan Git to include changes made outside the app.
 - **Reconnect**: force a new connection. The app also retries automatically after disconnects.
 
-Create and delete changes appear automatically in every connected app.
+Create and delete dialogs close once the server accepts the request. Creation immediately adds a pending row; deletion shows a spinner on the existing row. Progress and errors appear in every connected app and survive desktop restarts while the companion stays running. Failed creations that never produced a Git worktree keep an error row until its X is cleared. The branch and directory remain available when bootstrap fails. Restarting the companion rescans Git and resets operation/error state.
 
 Files, layout and terminal sessions are restored when you reopen a worktree after restarting the desktop app. Keep the companion running to retain terminal processes; disconnected sessions use the configured reconnection grace period. Restarting the companion or server machine stops running processes. Each worktree keeps its own workspace state, and all editors share installed extensions. Already-open editors may need **Developer: Reload Window** to activate an extension installed elsewhere.

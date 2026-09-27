@@ -1,9 +1,12 @@
 import {
   useId,
+  useRef,
   useState,
   type ComponentPropsWithRef,
+  type HTMLAttributes,
   type ReactElement,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react'
 import {
   Button as RadixButton,
@@ -16,7 +19,7 @@ import {
   Theme,
   Tooltip as RadixTooltip,
 } from '@radix-ui/themes'
-import { Tooltip as TooltipPrimitive } from 'radix-ui'
+import { Slot, Tooltip as TooltipPrimitive } from 'radix-ui'
 import '@radix-ui/themes/styles.css'
 import './ui.css'
 
@@ -68,19 +71,65 @@ export function Spinner() {
 export function Tooltip({
   content,
   children,
+  dismissVersion = 0,
+  keepOpenOnClick = false,
 }: {
   content?: string
   children: ReactElement
+  dismissVersion?: number
+  keepOpenOnClick?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [openVersion, setOpenVersion] = useState<number | null>(null)
+  const interactionVersion = useRef(dismissVersion)
+  const ignoredPointerDown = useRef<Event | null>(null)
+  function preventIgnoredClick(event: SyntheticEvent<HTMLElement>) {
+    const button = (event.target as Element).closest('button')
+    if (
+      button
+        ? button.disabled || button.getAttribute('aria-disabled') === 'true'
+        : keepOpenOnClick
+    ) {
+      event.preventDefault()
+      if (event.type === 'pointerdown')
+        ignoredPointerDown.current = event.nativeEvent
+    }
+  }
+  const onPointerMove: HTMLAttributes<HTMLElement>['onPointerMove'] = () => {
+    // A delayed hover may finish after keyboard navigation dismissed it.
+    interactionVersion.current = dismissVersion
+  }
+  const onFocus: HTMLAttributes<HTMLElement>['onFocus'] = () => {
+    interactionVersion.current = dismissVersion
+  }
+  const onPointerDown: HTMLAttributes<HTMLElement>['onPointerDown'] = (
+    event,
+  ) => {
+    preventIgnoredClick(event)
+  }
+  const onClick: HTMLAttributes<HTMLElement>['onClick'] = (event) => {
+    preventIgnoredClick(event)
+  }
   return (
     <RadixTooltip
       content={content}
-      open={!!content && open}
-      onOpenChange={(next) => setOpen(!!content && next)}
+      open={!!content && openVersion === dismissVersion}
+      onOpenChange={(next) =>
+        setOpenVersion(content && next ? interactionVersion.current : null)
+      }
+      onPointerDownOutside={(event) => {
+        if (event.detail.originalEvent === ignoredPointerDown.current)
+          event.preventDefault()
+      }}
       disableHoverableContent
     >
-      {children}
+      <Slot.Root
+        onPointerMove={onPointerMove}
+        onFocus={onFocus}
+        onPointerDown={onPointerDown}
+        onClick={onClick}
+      >
+        {children}
+      </Slot.Root>
     </RadixTooltip>
   )
 }

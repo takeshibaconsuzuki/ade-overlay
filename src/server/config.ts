@@ -35,12 +35,20 @@ export const serverConfigSchema = z.object({
     .optional(),
   projects: z.array(
     z
-      .string()
-      .regex(/\S/, 'Project paths must not be blank.')
-      .refine(
-        (path) => !path.includes('\0'),
-        'Project paths must not contain a null byte.',
-      ),
+      .object({
+        mainWorktreePath: z
+          .string()
+          .regex(/\S/, 'Project paths must not be blank.')
+          .refine(
+            (path) => !path.includes('\0'),
+            'Project paths must not contain a null byte.',
+          ),
+        bootstrapCommand: z
+          .string()
+          .refine((value) => !value.includes('\0'))
+          .optional(),
+      })
+      .strict(),
   ),
 })
 
@@ -125,8 +133,12 @@ export async function loadServerConfig(
           },
         }
       : {}),
-    projects: config.projects.map((project) =>
-      resolve(dirname(path), expandHome(project)),
-    ),
+    projects: config.projects.map((project) => ({
+      ...project,
+      mainWorktreePath: resolve(
+        dirname(path),
+        expandHome(project.mainWorktreePath),
+      ),
+    })),
   }
 }

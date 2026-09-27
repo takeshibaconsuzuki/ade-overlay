@@ -1,3 +1,7 @@
+import {
+  completeCreate,
+  completeDelete,
+} from './helpers/worktree-operations.ts'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { Server, type IncomingMessage } from 'node:http'
@@ -122,7 +126,7 @@ async function fixture(t: TestContext, startupDelayMs = 0) {
     cleanups,
     editorRuntime: new FixtureRuntime(root, runtimePath),
     config: {
-      projects: [project],
+      projects: [{ mainWorktreePath: project }],
       editor: {
         dataDir,
         localExtensionsDir: join(root, 'local extensions'),
@@ -516,7 +520,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const second = join(root, 'second')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path: second,
       baseBranch: 'main',
@@ -613,7 +617,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const linked = join(root, 'second ü worktree')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path: linked,
       baseBranch: 'main',
@@ -660,7 +664,7 @@ test(
     assert.equal(reopened.id, main.id)
     assert.notEqual(reopened.accessToken, main.accessToken)
     assert.equal(await readFile(settings, 'utf8'), '{"custom": true}')
-    await client.deleteWorktree({ project, path: linked })
+    await completeDelete(client, { project, path: linked })
     assert.equal(
       (
         await fetch(editorUrl(server.url, other), {
@@ -684,13 +688,19 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
       await execute('git', ['clone', '--no-hardlinks', project, otherProject])
       const server = await startCompanionServer({
         port: 0,
-        config: { ...config, projects: [project, otherProject] },
+        config: {
+          ...config,
+          projects: [
+            { mainWorktreePath: project },
+            { mainWorktreePath: otherProject },
+          ],
+        },
         editorRuntime,
       })
       cleanups.push(() => server.close())
       const client = await connect(t, server.url)
       const removed = join(root, 'removed externally')
-      await client.createWorktree({
+      await completeCreate(client, {
         project,
         path: removed,
         branch: 'removed',
@@ -740,7 +750,7 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
             hooks,
           ])
         }
-        const create = client.createWorktree({
+        const create = completeCreate(client, {
           project,
           path: join(root, 'created'),
           branch: 'created',
@@ -796,7 +806,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const removed = join(root, 'removed while starting')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path: removed,
       branch: 'removed',
@@ -809,7 +819,7 @@ test(
     )
     await starting
     await execute('git', ['-C', project, 'worktree', 'remove', '--', removed])
-    const result = await client.createWorktree({
+    const result = await completeCreate(client, {
       project,
       path: join(root, 'replacement'),
       branch: 'replacement',
@@ -846,7 +856,7 @@ test('new editor processes use an updated runtime without replacing existing ses
   await cp(editorRuntime.runtimeRoot, nextRoot, { recursive: true })
   editorRuntime.runtimeRoot = nextRoot
   const nextPath = join(root, 'new worktree')
-  await client.createWorktree({
+  await completeCreate(client, {
     project,
     path: nextPath,
     branch: 'next',
@@ -878,10 +888,11 @@ test('new editor processes use an updated runtime without replacing existing ses
 })
 
 test(
-  'startup errors return stopped status and leave the connection usable',
+  'startup errors survive reconnects and successful opens until explicitly cleared',
   { timeout: 15_000 },
   async (t) => {
     const { project, config, cleanups, editorRuntime } = await fixture(t)
+    const workingRuntime = editorRuntime.runtimeRoot
     editorRuntime.runtimeRoot = join(editorRuntime.runtimeRoot, 'missing')
     const server = await startCompanionServer({
       port: 0,
@@ -895,6 +906,38 @@ test(
       /ENOENT/,
     )
     assert.equal((await client.listWorktrees()).worktrees[0].editor, 'stopped')
+    assert.match((await client.listWorktrees()).worktrees[0].error!, /ENOENT/)
+    const reconnected = await connect(t, server.url)
+    assert.match(
+      (await reconnected.listWorktrees()).worktrees[0].error!,
+      /ENOENT/,
+    )
+    editorRuntime.runtimeRoot = workingRuntime
+    const failure = (await reconnected.listWorktrees()).worktrees[0].error
+    const updates: WorktreeUpdate[] = []
+    reconnected.on('worktreesUpdated', (update) => updates.push(update))
+    const opening = reconnected.openEditor({ project, path: project })
+    assert.equal(
+      (await reconnected.listWorktrees()).worktrees[0].error,
+      failure,
+    )
+    const session = await opening
+    assert.deepEqual(
+      await reconnected.openEditor({ project, path: project }),
+      session,
+    )
+    assert.ok(
+      updates.some(
+        (update) => update.snapshot.worktrees[0].editor === 'starting',
+      ),
+    )
+    for (const update of updates)
+      assert.equal(update.snapshot.worktrees[0].error, failure)
+    const reopened = (await client.listWorktrees()).worktrees[0]
+    assert.equal(reopened.editor, 'running')
+    assert.equal(reopened.error, failure)
+    await reconnected.setWorktreeError({ project, path: project })
+    assert.equal((await client.listWorktrees()).worktrees[0].error, undefined)
     await client.ping()
   },
 )
@@ -915,7 +958,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const path = join(root, 'slow')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path,
       branch: 'slow',
@@ -936,7 +979,7 @@ test(
       refreshed.worktrees.find((worktree) => worktree.path === path)
         ?.editorDetail,
     )
-    await client.deleteWorktree({ project, path })
+    await completeDelete(client, { project, path })
     await cancelled
     assert.equal((await client.listWorktrees()).worktrees.length, 1)
   },
@@ -1017,7 +1060,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const second = join(root, 'second')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path: second,
       baseBranch: 'main',
@@ -1108,7 +1151,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const second = join(root, 'second')
-    await client.createWorktree({
+    await completeCreate(client, {
       project,
       path: second,
       baseBranch: 'main',

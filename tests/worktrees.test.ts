@@ -1,4 +1,8 @@
-﻿import assert from 'node:assert/strict'
+import {
+  completeCreate,
+  completeDelete,
+} from './helpers/worktree-operations.ts'
+import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { once } from 'node:events'
 import {
@@ -7,15 +11,17 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { homedir, tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import os, { homedir, tmpdir } from 'node:os'
+import { dirname, join, resolve, sep } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { promisify } from 'node:util'
 import { WebSocket } from 'ws'
 import { stringify } from 'yaml'
+import which from 'which'
 import { CompanionClient } from '../src/main/companion-client.ts'
 import { loadServerConfig, parseServerArgs } from '../src/server/config.ts'
 import { startCompanionServer } from '../src/server/server.ts'
@@ -89,6 +95,20 @@ async function connectClient(
   return client
 }
 
+function nextChange(
+  client: CompanionClient,
+  change: WorktreeUpdate['change'],
+): Promise<[WorktreeUpdate]> {
+  return new Promise((resolve) => {
+    const listener = (update: WorktreeUpdate) => {
+      if (update.change !== change) return
+      client.off('worktreesUpdated', listener)
+      resolve([update])
+    }
+    client.on('worktreesUpdated', listener)
+  })
+}
+
 test('config arguments and YAML validate projects and resolve home/relative paths', async (t) => {
   const { root } = await fixture(t)
   const path = join(root, 'server.yaml')
@@ -104,10 +124,24 @@ test('config arguments and YAML validate projects and resolve home/relative path
     assert.throws(() => parseServerArgs(args))
   await writeFile(
     path,
-    stringify({ projects: ['./relative repo', '~/project'] }),
+    stringify({
+      projects: [
+        {
+          mainWorktreePath: './relative repo',
+          bootstrapCommand: 'npm install',
+        },
+        { mainWorktreePath: '~/project' },
+      ],
+    }),
   )
   assert.deepEqual(await loadServerConfig(path), {
-    projects: [join(root, 'relative repo'), join(homedir(), 'project')],
+    projects: [
+      {
+        mainWorktreePath: join(root, 'relative repo'),
+        bootstrapCommand: 'npm install',
+      },
+      { mainWorktreePath: join(homedir(), 'project') },
+    ],
   })
   for (const source of [
     '',
@@ -138,7 +172,11 @@ test('startup cache covers all repositories and sync list stays cached until ref
   await git(first, 'worktree', 'lock', '--reason', 'test lock', linked)
   const detached = join(root, 'detached')
   await git(second, 'worktree', 'add', '--detach', detached)
-  const store = await WorktreeStore.open([first, second, first])
+  const store = await WorktreeStore.open([
+    { mainWorktreePath: first },
+    { mainWorktreePath: second },
+    { mainWorktreePath: first },
+  ])
   const snapshot = store.list()
   assert.equal(snapshot.worktrees.length, 4)
   assert.deepEqual(snapshot.projects, [first, second])
@@ -156,14 +194,17 @@ test('startup cache covers all repositories and sync list stays cached until ref
   await git(second, 'worktree', 'add', '-b', 'external', join(root, 'external'))
   assert.equal(store.list().worktrees.length, 4)
   assert.equal((await store.refresh()).worktrees.length, 5)
-  await assert.rejects(WorktreeStore.open([linked]), /main worktree root/)
-  await assert.rejects(WorktreeStore.open([root]))
+  await assert.rejects(
+    WorktreeStore.open([{ mainWorktreePath: linked }]),
+    /main worktree root/,
+  )
+  await assert.rejects(WorktreeStore.open([{ mainWorktreePath: root }]))
 })
 
 test('async mutations preserve cache on failure, serialize conflicts and protect dirty/main/locked trees', async (t) => {
   const { root, makeProject } = await fixture(t)
   const project = await makeProject('project')
-  const store = await WorktreeStore.open([project])
+  const store = await WorktreeStore.open([{ mainWorktreePath: project }])
   const input = {
     project,
     baseBranch: 'main',
@@ -214,7 +255,11 @@ test('async mutations preserve cache on failure, serialize conflicts and protect
   assert.ok(
     await git(project, 'rev-parse', '--verify', 'refs/heads/feature/test'),
   )
-  assert.deepEqual(changes, ['created', 'refreshed', 'refreshed', 'deleted'])
+  assert.deepEqual(
+    changes.filter((change) => change === 'created' || change === 'deleted'),
+    ['created', 'deleted'],
+  )
+  assert.ok(changes.includes('operation'))
 })
 
 test(
@@ -224,17 +269,20 @@ test(
     const { root, makeProject } = await fixture(t)
     const project = await makeProject('project')
     const configPath = join(root, 'server.yaml')
-    await writeFile(configPath, stringify({ projects: [project] }))
+    await writeFile(
+      configPath,
+      stringify({ projects: [{ mainWorktreePath: project }] }),
+    )
     const server = await startCompanionServer({ port: 0, configPath })
     t.after(() => server.close())
     const first = await connectClient(t, server.url)
     const second = await connectClient(t, server.url)
     assert.equal((await first.listWorktrees()).worktrees.length, 1)
     const createdEvents = [
-      once(first, 'worktreesUpdated'),
-      once(second, 'worktreesUpdated'),
+      nextChange(first, 'created'),
+      nextChange(second, 'created'),
     ]
-    const created = await first.createWorktree({
+    const created = await completeCreate(first, {
       project,
       baseBranch: 'main',
       branch: 'feature',
@@ -245,7 +293,7 @@ test(
       assert.deepEqual(event[0].snapshot, created)
     }
     await assert.rejects(
-      first.createWorktree({
+      completeCreate(first, {
         project,
         baseBranch: 'main',
         branch: 'feature',
@@ -253,12 +301,13 @@ test(
       }),
     )
     assert.equal(first.getStatus().state, 'connected')
+    await first.setWorktreeError({ project, path: join(root, 'duplicate') })
     await first.ping()
     const removedEvents = [
-      once(first, 'worktreesUpdated'),
-      once(second, 'worktreesUpdated'),
+      nextChange(first, 'deleted'),
+      nextChange(second, 'deleted'),
     ]
-    const removed = await second.deleteWorktree({
+    const removed = await completeDelete(second, {
       project,
       path: join(root, 'feature'),
     })
@@ -279,7 +328,7 @@ test(
     assert.equal((await first.refreshWorktrees()).worktrees.length, 2)
     assert.equal((await refreshedEvent)[0].change, 'refreshed')
     first.stop()
-    await second.createWorktree({
+    await completeCreate(second, {
       project,
       baseBranch: 'main',
       branch: 'offline',
@@ -323,7 +372,12 @@ test(
     await git(project, 'config', 'core.hooksPath', hooks)
     const server = await startCompanionServer({
       port: 0,
-      config: { projects: [project, otherProject] },
+      config: {
+        projects: [
+          { mainWorktreePath: project },
+          { mainWorktreePath: otherProject },
+        ],
+      },
     })
     t.after(() => server.close())
     const creator = await connectClient(t, server.url)
@@ -342,7 +396,7 @@ test(
         path,
       }
       await assert.rejects(
-        creator.createWorktree(input),
+        completeCreate(creator, input),
         /checkout-hook-failed/,
       )
       assert.equal(
@@ -351,7 +405,11 @@ test(
       )
       const snapshot = await creator.listWorktrees()
       assert.equal(snapshot.worktrees.length, before.worktrees.length + 1)
-      assert.equal(snapshot.revision, before.revision + 1)
+      assert.ok(snapshot.revision > before.revision)
+      assert.match(
+        snapshot.worktrees.find((entry) => entry.path === path)?.error ?? '',
+        /checkout-hook-failed/,
+      )
       assert.equal(
         snapshot.worktrees.find((entry) => entry.path === path)?.branch,
         branch || 'existing',
@@ -363,7 +421,7 @@ test(
       const reconnected = await connectClient(t, server.url)
       assert.deepEqual(await reconnected.listWorktrees(), snapshot)
       await assert.rejects(
-        creator.createWorktree(input),
+        completeCreate(creator, input),
         /already exists|already (checked out|used)/,
       )
       assert.deepEqual(await creator.listWorktrees(), snapshot)
@@ -371,7 +429,12 @@ test(
     // The observer's subsequent reply follows all broadcasts on the same socket.
     assert.deepEqual(await observer.listWorktrees(), updates.at(-1)?.snapshot)
     assert.deepEqual(observed, updates)
-    assert.equal(updates.length, 2)
+    assert.equal(
+      updates.filter((update) =>
+        update.snapshot.worktrees.some((row) => row.operation),
+      ).length,
+      4,
+    )
     assert.equal(creator.getStatus().state, 'connected')
   },
 )
@@ -392,7 +455,7 @@ test(
     )
     const server = await startCompanionServer({
       port: 0,
-      config: { projects: [project] },
+      config: { projects: [{ mainWorktreePath: project }] },
     })
     t.after(() => server.close())
     const creator = await connectClient(t, server.url)
@@ -402,8 +465,8 @@ test(
       ['another', '   '],
     ]) {
       const path = join(root, `${baseBranch}-worktree`)
-      const pushed = once(observer, 'worktreesUpdated')
-      const snapshot = await creator.createWorktree({
+      const pushed = nextChange(observer, 'created')
+      const snapshot = await completeCreate(creator, {
         project,
         baseBranch,
         branch,
@@ -423,7 +486,7 @@ test(
     }
     const before = await creator.listWorktrees()
     await assert.rejects(
-      creator.createWorktree({
+      completeCreate(creator, {
         project,
         baseBranch: 'main',
         branch: '',
@@ -432,14 +495,24 @@ test(
       /already (checked out|used)/,
     )
     await assert.rejects(
-      creator.createWorktree({
+      completeCreate(creator, {
         project,
         baseBranch: 'missing',
         branch: '',
         path: join(root, 'missing'),
       }),
     )
-    assert.deepEqual(await creator.listWorktrees(), before)
+    const failed = await creator.listWorktrees()
+    assert.equal(
+      failed.worktrees.filter((row) => row.missing && row.error).length,
+      2,
+    )
+    await creator.setWorktreeError({ project, path: join(root, 'duplicate') })
+    const cleared = await creator.setWorktreeError({
+      project,
+      path: join(root, 'missing'),
+    })
+    assert.deepEqual(cleared.worktrees, before.worktrees)
     assert.equal(
       await git(project, 'for-each-ref', '--format=%(refname)', 'refs/heads/'),
       branches,
@@ -447,6 +520,104 @@ test(
     assert.equal(creator.getStatus().state, 'connected')
   },
 )
+
+test('bootstrap uses the account shell for shell-specific commands', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  // Git for Windows supplies Bash even when the Windows account has no shell.
+  const shell =
+    process.platform === 'win32'
+      ? resolve(dirname(await which('git')), '../bin/bash.exe')
+      : await which('bash')
+  const account = os.userInfo()
+  t.mock.method(os, 'userInfo', () => ({ ...account, shell }))
+  const project = await makeProject('project')
+  const store = await WorktreeStore.open([
+    {
+      mainWorktreePath: project,
+      bootstrapCommand: `printf 'bootstrap_value=account-shell' > setup.sh && source ./setup.sh && printf '%s' "$bootstrap_value" > bootstrap-result.txt`,
+    },
+  ])
+  const path = join(root, 'shell-worktree')
+  const snapshot = await store.create({
+    project,
+    path,
+    branch: 'shell-worktree',
+    baseBranch: 'main',
+  })
+  assert.equal(
+    await readFile(join(path, 'bootstrap-result.txt'), 'utf8'),
+    'account-shell',
+  )
+  const row = snapshot.worktrees.find((row) => row.path === path)!
+  assert.equal(row.operation, undefined)
+  assert.equal(row.error, undefined)
+})
+
+test('creation failures through directory aliases stay on the canonical worktree', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const physical = join(root, 'physical')
+  const alias = join(root, 'alias')
+  await mkdir(physical)
+  await symlink(
+    physical,
+    alias,
+    process.platform === 'win32' ? 'junction' : 'dir',
+  )
+  const store = await WorktreeStore.open([
+    {
+      mainWorktreePath: project,
+      bootstrapCommand: 'echo alias-bootstrap-failed >&2 && exit 1',
+    },
+  ])
+  const updates: WorktreeUpdate[] = []
+  store.on('update', (update) => updates.push(update))
+  for (const name of ['nested/new', 'existing']) {
+    const path = join(physical, name)
+    if (name === 'existing') await mkdir(path)
+    const input = {
+      project,
+      path: join(alias, name),
+      branch: name,
+      baseBranch: 'main',
+    }
+    const accepted = await store.startCreate(input)
+    assert.equal(
+      accepted.worktrees.find((row) => row.path === path)?.operation,
+      'creating',
+    )
+    await store.settled()
+    assert.equal(await realpath(input.path), path)
+    const failed = store.list()
+    const row = failed.worktrees.find((row) => row.path === path)!
+    assert.ok(row)
+    assert.match(row.error!, /alias-bootstrap-failed/)
+    assert.equal(row.operation, undefined)
+    assert.equal(row.missing, undefined)
+    assert.equal(
+      failed.worktrees.filter((row) => row.branch === name).length,
+      1,
+    )
+    assert.equal(
+      (await store.refresh()).worktrees.find((row) => row.path === path)?.error,
+      row.error,
+    )
+    await assert.rejects(store.create(input), /already exists/)
+    const cleared = store.setError({ project, path })
+    assert.equal(cleared.worktrees.length, failed.worktrees.length)
+    assert.equal(
+      cleared.worktrees.find((row) => row.path === path)?.error,
+      undefined,
+    )
+  }
+  for (const { snapshot } of updates) {
+    for (const branch of ['nested/new', 'existing']) {
+      assert.ok(
+        snapshot.worktrees.filter((row) => row.branch === branch).length <= 1,
+      )
+    }
+  }
+})
 
 test('invalid startup config or project never opens a listener', async (t) => {
   const { root } = await fixture(t)
@@ -458,7 +629,10 @@ test('invalid startup config or project never opens a listener', async (t) => {
   const port = address.port
   await new Promise<void>((resolve) => probe.close(() => resolve()))
   await assert.rejects(
-    startCompanionServer({ port, config: { projects: [root] } }),
+    startCompanionServer({
+      port,
+      config: { projects: [{ mainWorktreePath: root }] },
+    }),
   )
   // Rebinding proves failed initialization left no accepting server behind.
   probe.listen(port, '127.0.0.1')
@@ -524,3 +698,160 @@ test('worktree protocol validates inputs and full snapshots', () => {
     null,
   )
 })
+
+test(
+  'accepted operations and bootstrap progress survive desktop reconnects, with persistent row failures',
+  { timeout: 30_000 },
+  async (t) => {
+    const { root, makeProject } = await fixture(t)
+    const project = await makeProject('project')
+    const existing = join(root, 'existing')
+    await git(project, 'worktree', 'add', '-b', 'existing', existing)
+    const script = join(root, 'bootstrap.cjs')
+    const gate = join(root, 'release')
+    await writeFile(
+      script,
+      `
+    const fs = require('node:fs');
+    fs.writeFileSync('bootstrap-started.txt', process.cwd());
+    const timer = setInterval(() => {
+      if (!fs.existsSync(process.argv[2])) return;
+      clearInterval(timer);
+      const failure = fs.readFileSync(process.argv[2], 'utf8');
+      if (failure) { console.error(failure); process.exit(1); }
+    }, 20);
+    setTimeout(() => process.exit(2), 10000).unref();
+  `,
+    )
+    const server = await startCompanionServer({
+      port: 0,
+      config: {
+        projects: [
+          {
+            mainWorktreePath: project,
+            bootstrapCommand: `"${process.execPath}" "${script}" "${gate}"`,
+          },
+        ],
+      },
+    })
+    t.after(() => server.close())
+    try {
+      const creator = await connectClient(t, server.url)
+      const observer = await connectClient(t, server.url)
+      const path = join(root, 'new')
+      const created = await creator.createWorktree({
+        project,
+        path,
+        branch: 'new',
+        baseBranch: 'main',
+      })
+      assert.equal(
+        created.worktrees.find((row) => row.path === path)?.operation,
+        'creating',
+      )
+      const deleting = await creator.deleteWorktree({ project, path: existing })
+      assert.equal(
+        deleting.worktrees.find((row) => row.path === existing)?.operation,
+        'deleting',
+      )
+      await assert.rejects(
+        creator.createWorktree({
+          project,
+          path,
+          branch: 'new',
+          baseBranch: 'main',
+        }),
+        /already running/,
+      )
+      creator.stop()
+      const restarted = await connectClient(t, server.url)
+      const recovered = await restarted.listWorktrees()
+      assert.equal(
+        recovered.worktrees.find((row) => row.path === path)?.operation,
+        'creating',
+      )
+      assert.equal(
+        recovered.worktrees.find((row) => row.path === existing)?.operation,
+        'deleting',
+      )
+      assert.deepEqual(await observer.listWorktrees(), recovered)
+      await restarted.ping()
+      const finished = nextChange(restarted, 'deleted')
+      await writeFile(gate, '')
+      await finished
+      assert.equal(
+        await readFile(join(path, 'bootstrap-started.txt'), 'utf8'),
+        path,
+      )
+      assert.equal(
+        (await restarted.listWorktrees()).worktrees.find(
+          (row) => row.path === path,
+        )?.operation,
+        undefined,
+      )
+      assert.ok(
+        !(await observer.listWorktrees()).worktrees.some(
+          (row) => row.path === existing,
+        ),
+      )
+
+      await writeFile(gate, 'bootstrap exploded')
+      const failedPath = join(root, 'failed-bootstrap')
+      await assert.rejects(
+        completeCreate(restarted, {
+          project,
+          path: failedPath,
+          branch: 'failed-bootstrap',
+          baseBranch: 'main',
+        }),
+        /Bootstrap command failed:.*bootstrap exploded/s,
+      )
+      restarted.stop()
+      const afterFailure = await connectClient(t, server.url)
+      const row = (await afterFailure.listWorktrees()).worktrees.find(
+        (row) => row.path === failedPath,
+      )!
+      assert.match(row.error!, /bootstrap exploded/)
+      assert.equal(row.operation, undefined)
+      assert.equal(row.missing, undefined)
+      assert.equal(
+        await git(failedPath, 'symbolic-ref', '--short', 'HEAD'),
+        'failed-bootstrap',
+      )
+      await afterFailure.setWorktreeError({ project, path: failedPath })
+      assert.equal(
+        (await observer.listWorktrees()).worktrees.find(
+          (row) => row.path === failedPath,
+        )?.error,
+        undefined,
+      )
+
+      // Bootstrap's untracked file makes safe deletion fail, on this row only.
+      await assert.rejects(
+        completeDelete(afterFailure, { project, path: failedPath }),
+        /untracked|modified/i,
+      )
+      const dirty = (await afterFailure.listWorktrees()).worktrees.find(
+        (row) => row.path === failedPath,
+      )!
+      assert.match(dirty.error!, /untracked|modified/i)
+      assert.equal(dirty.operation, undefined)
+      assert.equal(
+        (await afterFailure.refreshWorktrees()).worktrees.find(
+          (row) => row.path === failedPath,
+        )?.error,
+        dirty.error,
+      )
+      await afterFailure.setWorktreeError({ project, path: failedPath })
+      assert.equal(
+        (await observer.listWorktrees()).worktrees.find(
+          (row) => row.path === failedPath,
+        )?.error,
+        undefined,
+      )
+    } finally {
+      await writeFile(gate, '')
+      await server.close()
+    }
+  },
+)

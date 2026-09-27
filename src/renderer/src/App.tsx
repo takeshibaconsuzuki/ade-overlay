@@ -26,6 +26,8 @@ export default function App() {
     reconnect,
     opening,
     openEditor,
+    rowErrors,
+    clearError,
   } = useCompanion()
   const [search, setSearch] = useState('')
   const query = search.trim().toLowerCase()
@@ -46,14 +48,18 @@ export default function App() {
     ]),
   ])
   const connected = status?.state === 'connected'
+  const availabilityKey = JSON.stringify([
+    connected,
+    worktrees.map(({ operation, missing }) => [!!operation, !!missing]),
+  ])
   const {
     searchRef,
     scrollRef,
-    onSearchFocus,
     highlight,
+    tooltipDismissVersion,
     workspaceProps,
     listProps,
-  } = useWorktreeNavigation(resultsKey)
+  } = useWorktreeNavigation(resultsKey, search, availabilityKey)
   return (
     <UIProvider>
       <main className="workspace" aria-label="Worktrees" {...workspaceProps}>
@@ -74,7 +80,6 @@ export default function App() {
         {(error || status?.error) && <Notice>{error || status?.error}</Notice>}
         <SearchField
           ref={searchRef}
-          onFocus={onSearchFocus}
           className="worktree-search"
           aria-label="Search worktrees by basename or branch"
           aria-controls="worktree-results"
@@ -97,61 +102,99 @@ export default function App() {
             {worktrees.map((worktree) => {
               const key = JSON.stringify([worktree.project, worktree.path])
               const isOpening = opening === worktree.path
-              const starting = isOpening || worktree.editor === 'starting'
+              const rowError = rowErrors[key] || worktree.error
+              const starting =
+                !!worktree.operation ||
+                isOpening ||
+                worktree.editor === 'starting'
+              const showError = !!rowError && !starting
+              const unavailable =
+                !connected ||
+                worktree.prunable ||
+                !!worktree.operation ||
+                worktree.missing
+              const detail =
+                worktree.operation === 'creating'
+                  ? 'Creating worktree'
+                  : worktree.operation === 'deleting'
+                    ? 'Deleting worktree'
+                    : (worktree.editorDetail ?? 'Opening VS Code')
               return (
                 <li
                   key={key}
                   data-highlighted={
-                    (connected &&
-                      !worktree.prunable &&
-                      highlight.key === key) ||
+                    (connected && !unavailable && highlight.key === key) ||
                     undefined
                   }
                 >
                   <Tooltip
-                    content={
-                      starting
-                        ? (worktree.editorDetail ?? 'Opening VS Code')
-                        : undefined
-                    }
+                    content={starting ? detail : rowError || undefined}
+                    dismissVersion={tooltipDismissVersion}
+                    keepOpenOnClick={isOpening || unavailable}
                   >
-                    <Button
-                      tone="secondary"
-                      className="worktree-open"
-                      data-worktree-key={key}
-                      disabled={!connected || worktree.prunable}
-                      aria-busy={starting}
-                      aria-disabled={
-                        isOpening || !connected || worktree.prunable
-                      }
-                      onClick={() => {
-                        if (!isOpening) void openEditor(worktree)
-                      }}
-                    >
-                      <span
-                        className="editor-status"
-                        role="img"
-                        aria-label={
-                          starting
-                            ? 'Editor opening'
-                            : `Editor ${worktree.editor}`
-                        }
+                    <div className="worktree-entry">
+                      {showError && (
+                        <Button
+                          tone="danger"
+                          className="worktree-error"
+                          aria-label={`Clear error for ${basename(worktree.path)}: ${rowError}`}
+                          onClick={() => void clearError(worktree)}
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 16 16"
+                            aria-hidden="true"
+                            focusable="false"
+                          >
+                            <path
+                              d="M3 3 13 13M13 3 3 13"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </Button>
+                      )}
+                      <Button
+                        tone="secondary"
+                        className="worktree-open"
+                        data-worktree-key={key}
+                        disabled={unavailable}
+                        aria-busy={starting}
+                        aria-disabled={isOpening || unavailable}
+                        onClick={() => {
+                          if (!isOpening) void openEditor(worktree)
+                        }}
                       >
-                        {starting ? (
-                          <Spinner />
-                        ) : (
-                          <span
-                            className={`editor-dot ${worktree.editor === 'running' ? 'running' : ''}`}
-                          />
-                        )}
-                      </span>
-                      <span className="worktree-name">
-                        <span>{basename(worktree.path)}</span>
-                        <span className="worktree-branch">
-                          {worktree.branch ?? 'Detached HEAD'}
+                        <span
+                          className={`editor-status ${showError ? 'has-error' : ''}`}
+                          role="img"
+                          aria-label={
+                            starting
+                              ? detail
+                              : showError
+                                ? 'Worktree error'
+                                : `Editor ${worktree.editor}`
+                          }
+                        >
+                          {starting ? (
+                            <Spinner />
+                          ) : (
+                            <span
+                              className={`editor-dot ${worktree.editor === 'running' ? 'running' : ''}`}
+                            />
+                          )}
                         </span>
-                      </span>
-                    </Button>
+                        <span className="worktree-name">
+                          <span>{basename(worktree.path)}</span>
+                          <span className="worktree-branch">
+                            {worktree.branch ?? 'Detached HEAD'}
+                          </span>
+                        </span>
+                      </Button>
+                    </div>
                   </Tooltip>
                   <div className="worktree-delete">
                     <DeleteWorktree worktree={worktree} connected={connected} />

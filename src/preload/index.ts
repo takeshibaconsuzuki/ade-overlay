@@ -16,6 +16,8 @@ const companion: CompanionAPI = {
     ipcRenderer.invoke(companionChannels.createWorktree, input),
   deleteWorktree: (input) =>
     ipcRenderer.invoke(companionChannels.deleteWorktree, input),
+  setWorktreeError: (input) =>
+    ipcRenderer.invoke(companionChannels.setWorktreeError, input),
   openEditor: (input) =>
     ipcRenderer.invoke(companionChannels.openEditor, input),
   onWorktreesUpdated: (callback) => {

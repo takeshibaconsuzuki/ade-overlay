@@ -58,6 +58,12 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     options.editorRuntime,
   )
   const worktrees = await WorktreeStore.open(config.projects, editors)
+  worktrees.on('operationFailed', (worktree, error) => {
+    logger.error(
+      { project: worktree.project, path: worktree.path, err: error },
+      'Worktree operation failed',
+    )
+  })
   const proxy = createProxyServer({ ws: true })
   // Some downstream socket errors are emitted directly by the proxy, bypassing
   // per-request callbacks. Handle both HTTP and upgraded connections here.
@@ -351,17 +357,23 @@ export async function startCompanionServer(options: ServerOptions = {}) {
           })
         return
       }
-      const operation =
+      const operation = Promise.resolve().then(() =>
         message.type === 'worktrees:create'
-          ? worktrees.create(message.input)
+          ? worktrees.startCreate(message.input)
           : message.type === 'worktrees:delete'
-            ? worktrees.delete(message.input)
-            : worktrees.refresh()
+            ? worktrees.startDelete(message.input)
+            : message.type === 'worktrees:set-error'
+              ? worktrees.setError(message.input)
+              : worktrees.refresh(),
+      )
       void operation
         .then((snapshot) => {
           requestLog.info(
             { elapsedMs: Math.round(performance.now() - started) },
-            'Command completed',
+            message.type === 'worktrees:create' ||
+              message.type === 'worktrees:delete'
+              ? 'Command accepted'
+              : 'Command completed',
           )
           send({ type: 'worktrees', id: message.id, snapshot })
         })

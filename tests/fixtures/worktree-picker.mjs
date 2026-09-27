@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import assert from 'node:assert/strict'
+import { once } from 'node:events'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +12,8 @@ app.setPath('userData', join(input.root, 'profile'))
 let window
 let stage = 'startup'
 const opened = []
+let holdOpen = false
+let finishOpen
 const worktree = (path, branch) => ({
   project: 'C:/demo',
   path,
@@ -79,6 +82,31 @@ async function focusWindow(enabled) {
   )
   await delay(60)
 }
+async function moveMouse(selector) {
+  const point = await evaluate(`(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+    return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+  })()`)
+  window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+  await delay(40)
+  return point
+}
+async function clickMouse(selector) {
+  const point = await moveMouse(selector)
+  window.webContents.sendInputEvent({
+    type: 'mouseDown',
+    button: 'left',
+    clickCount: 1,
+    ...point,
+  })
+  window.webContents.sendInputEvent({
+    type: 'mouseUp',
+    button: 'left',
+    clickCount: 1,
+    ...point,
+  })
+  await delay(40)
+}
 async function assertListAlignment() {
   const bounds = await evaluate(`(() => {
     const search = document.querySelector('.worktree-search').getBoundingClientRect();
@@ -91,11 +119,53 @@ async function assertListAlignment() {
   assert.equal(bounds.rowRight, bounds.searchRight)
   assert.equal(bounds.scrollWidth, bounds.width, 'no horizontal overflow')
 }
+async function assertSelectionInView() {
+  assert.equal(
+    await evaluate(`(() => {
+    const row = document.querySelector('.worktree-list li[data-highlighted]').getBoundingClientRect();
+    const viewport = document.querySelector('[data-radix-scroll-area-viewport]').getBoundingClientRect();
+    return row.top >= viewport.top && row.bottom <= viewport.bottom;
+  })()`),
+    true,
+    'the Enter target must be within the visible scroll area',
+  )
+}
 async function run() {
   await app.whenReady()
   ipcMain.handle('test:list', () => snapshot)
   ipcMain.handle('test:open', (_event, value) => {
     opened.push(value.path)
+    if (holdOpen)
+      return new Promise((resolve) => {
+        finishOpen = resolve
+      })
+  })
+  ipcMain.handle('test:create', async (_event, value) => {
+    await update([
+      ...snapshot.worktrees,
+      {
+        ...worktree(value.path, value.branch),
+        operation: 'creating',
+        missing: true,
+      },
+    ])
+    return snapshot
+  })
+  ipcMain.handle('test:delete', async (_event, value) => {
+    await update(
+      snapshot.worktrees.map((row) =>
+        row.path === value.path ? { ...row, operation: 'deleting' } : row,
+      ),
+    )
+    return snapshot
+  })
+  ipcMain.handle('test:error', async (_event, value) => {
+    await update(
+      snapshot.worktrees.map((row) =>
+        row.path === value.path ? { ...row, error: value.error } : row,
+      ),
+    )
+    return snapshot
   })
   window = new BrowserWindow({
     show: false,
@@ -165,6 +235,88 @@ async function run() {
     })),
   )
   assert.deepEqual(await state(), before)
+  stage = 'window reactivation preserves scrolled selection'
+  await focusWindow(false)
+  await focusWindow(true)
+  assert.deepEqual(await state(), before)
+  stage = 'focusing search from a result preserves scrolled selection'
+  await evaluate(
+    "document.querySelector('.worktree-list li[data-highlighted] .worktree-open').focus({preventScroll:true})",
+  )
+  await evaluate(
+    "document.querySelector('input[type=search]').focus({preventScroll:true})",
+  )
+  assert.deepEqual(await state(), before)
+  await key('DOWN')
+  assert.equal((await state()).index, before.index + 1)
+  assert.ok((await state()).scroll > 0)
+  stage = 'mouse movement off rows preserves the Enter target'
+  const keyboardSelection = await state()
+  await moveMouse('.toolbar button')
+  assert.deepEqual(await state(), keyboardSelection)
+  await key('ENTER')
+  assert.equal(opened.at(-1), JSON.parse(keyboardSelection.selected)[1])
+  await moveMouse('.worktree-list li:nth-child(13) .worktree-open')
+  const hovered = await state()
+  assert.equal(hovered.index, 12)
+  assert.equal(hovered.highlightVisible, true)
+  await moveMouse('.worktree-list li:nth-child(13) .worktree-delete')
+  assert.deepEqual(await state(), hovered)
+  await moveMouse('.toolbar button')
+  assert.deepEqual(await state(), hovered)
+  window.webContents.sendInputEvent({ type: 'mouseLeave', x: 0, y: 0 })
+  await delay(40)
+  assert.deepEqual(await state(), hovered)
+  await key('ENTER')
+  assert.equal(opened.at(-1), JSON.parse(hovered.selected)[1])
+  stage = 'hover highlights without keyboard focus and clears on leaving'
+  const openCount = opened.length
+  await evaluate("document.querySelector('input[type=search]').blur()")
+  assert.equal((await state()).highlightVisible, false)
+  await moveMouse('.worktree-list li:nth-child(12) .worktree-open')
+  assert.equal((await state()).highlightVisible, true)
+  assert.equal((await state()).index, 11)
+  await key('ENTER')
+  assert.equal(opened.length, openCount)
+  await moveMouse('.toolbar button')
+  assert.equal((await state()).highlightVisible, false)
+  for (const selector of [
+    '.toolbar button',
+    '.worktree-list li:nth-child(13) .worktree-delete button',
+  ]) {
+    await evaluate(
+      `document.querySelector(${JSON.stringify(selector)}).focus({preventScroll:true})`,
+    )
+    assert.equal((await state()).highlightVisible, false)
+    await moveMouse('.worktree-list li:nth-child(12) .worktree-open')
+    assert.equal((await state()).highlightVisible, true)
+    await moveMouse('.toolbar button')
+    assert.equal((await state()).highlightVisible, false)
+  }
+  stage = 'hover also works while the window is inactive'
+  await focusWindow(false)
+  await moveMouse('.worktree-list li:nth-child(13) .worktree-open')
+  assert.equal((await state()).highlightVisible, true)
+  assert.equal((await state()).index, 12)
+  window.webContents.sendInputEvent({ type: 'mouseLeave', x: 0, y: 0 })
+  await delay(40)
+  assert.equal((await state()).highlightVisible, false)
+  await focusWindow(true)
+  await evaluate(
+    "document.querySelector('input[type=search]').focus({preventScroll:true})",
+  )
+  assert.deepEqual(await state(), hovered)
+  await evaluate(
+    "document.querySelector('.worktree-list li[data-highlighted] .worktree-open').focus({preventScroll:true})",
+  )
+  assert.equal((await state()).highlightVisible, true)
+  await key('ENTER')
+  assert.equal(opened.length, openCount + 1)
+  assert.equal(opened.at(-1), JSON.parse(hovered.selected)[1])
+  await evaluate(
+    "document.querySelector('input[type=search]').focus({preventScroll:true})",
+  )
+  assert.deepEqual(await state(), hovered)
   stage = 'typing after arrow navigation continues filtering'
   await window.webContents.insertText('-1')
   await until(
@@ -176,24 +328,43 @@ async function run() {
   assert.equal(opened.at(-1), 'C:/demo/worktree-1')
 
   stage = 'changed membership resets focused result before Enter'
-  await key('DOWN')
+  await search('worktree')
+  for (let i = 0; i < 12; i++) await key('DOWN')
+  assert.ok((await state()).scroll > 0)
   const selected = JSON.parse((await state()).selected)[1]
   await update(snapshot.worktrees.filter((w) => w.path !== selected))
   assert.equal((await state()).scroll, 0)
   assert.equal((await state()).searchFocused, true)
   assert.equal((await state()).index, 0)
+  await assertSelectionInView()
   await key('ENTER')
-  assert.equal(opened.at(-1), 'C:/demo/worktree-1')
+  assert.equal(opened.at(-1), 'C:/demo/worktree-0')
+
+  stage = 'added membership resets scrolled selection into view'
+  for (let i = 0; i < 12; i++) await key('DOWN')
+  assert.ok((await state()).scroll > 0)
+  await update([
+    ...snapshot.worktrees,
+    worktree('C:/demo/worktree-added', 'added'),
+  ])
+  assert.equal((await state()).scroll, 0)
+  assert.equal((await state()).index, 0)
+  await assertSelectionInView()
+  await key('ENTER')
+  assert.equal(opened.at(-1), 'C:/demo/worktree-0')
+  await search('worktree-1')
 
   stage = 'window reactivation focuses search and preserves query'
   await key('DOWN')
   await key('UP')
   assert.equal((await state()).searchFocused, true)
   await key('DOWN')
+  const beforeReactivation = await state()
   await focusWindow(false)
   await focusWindow(true)
   assert.equal((await state()).searchFocused, true)
-  assert.equal((await state()).index, 0)
+  assert.equal((await state()).index, beforeReactivation.index)
+  assert.equal((await state()).scroll, beforeReactivation.scroll)
   assert.equal((await state()).highlightVisible, true)
   assert.equal(
     await evaluate("document.querySelector('input[type=search]').value"),
@@ -204,17 +375,331 @@ async function run() {
   await evaluate("document.querySelectorAll('.toolbar button')[2].click()")
   await until("!!document.querySelector('[role=dialog] input')")
   await evaluate("document.querySelector('[role=dialog] input').focus()")
+  assert.equal((await state()).highlightVisible, false)
   await focusWindow(false)
   await focusWindow(true)
   assert.equal(
     await evaluate("!!document.activeElement.closest('[role=dialog]')"),
     true,
   )
+  assert.equal((await state()).highlightVisible, false)
   await key('DOWN')
   assert.equal(
     await evaluate("!!document.activeElement.closest('[role=dialog]')"),
     true,
   )
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=dialog]')")
+
+  stage = 'creation closes its dialog while the pending row spins'
+  await search('')
+  await evaluate("document.querySelectorAll('.toolbar button')[2].click()")
+  await until("!!document.querySelector('[role=dialog] input')")
+  await evaluate(`(() => {
+    const fields = document.querySelectorAll('[role=dialog] input');
+    for (const [index, value] of [[1, 'pending-create'], [2, 'C:/demo/pending-create']]) {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(fields[index], value);
+      fields[index].dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  })()`)
+  await evaluate("document.querySelector('[role=dialog] form').requestSubmit()")
+  await until("!document.querySelector('[role=dialog]')")
+  await search('pending-create')
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.worktree-open').getAttribute('aria-busy')",
+    ),
+    'true',
+  )
+  assert.equal(
+    await evaluate("document.querySelector('.worktree-open').disabled"),
+    true,
+  )
+
+  stage = 'a fresh picker restores pending operation status'
+  const reloaded = once(window.webContents, 'did-finish-load')
+  window.reload()
+  await reloaded
+  await until("!!document.querySelector('.worktree-open')")
+  await search('pending-create')
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.worktree-open').getAttribute('aria-busy')",
+    ),
+    'true',
+  )
+
+  stage = 'availability changes preserve a valid keyboard selection'
+  await search('worktree')
+  for (let i = 0; i < 12; i++) await key('DOWN')
+  const beforeAvailability = await state()
+  assert.ok(beforeAvailability.scroll > 0)
+  const firstPath = snapshot.worktrees.find((row) =>
+    row.path.includes('worktree-'),
+  ).path
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === firstPath ? { ...row, operation: 'deleting' } : row,
+    ),
+  )
+  assert.deepEqual(await state(), beforeAvailability)
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === firstPath ? { ...row, operation: undefined } : row,
+    ),
+  )
+  assert.deepEqual(await state(), beforeAvailability)
+  const selectedPath = JSON.parse(beforeAvailability.selected)[1]
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === selectedPath ? { ...row, operation: 'deleting' } : row,
+    ),
+  )
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+  await assertSelectionInView()
+  await key('ENTER')
+  assert.equal(opened.at(-1), firstPath)
+
+  stage = 'selection reset reveals the first enabled row below disabled rows'
+  const disabledPaths = snapshot.worktrees
+    .filter((row) => row.path.includes('worktree-'))
+    .slice(0, 20)
+    .map((row) => row.path)
+  await update(
+    snapshot.worktrees.map((row) =>
+      disabledPaths.includes(row.path)
+        ? { ...row, operation: 'deleting' }
+        : row,
+    ),
+  )
+  assert.equal((await state()).index, 20)
+  await assertSelectionInView()
+  const enabledPath = JSON.parse((await state()).selected)[1]
+  await key('ENTER')
+  assert.equal(opened.at(-1), enabledPath)
+
+  stage = 'deletion closes its dialog while the existing row spins'
+  await search('Alpha')
+  await evaluate("document.querySelector('.worktree-delete button').click()")
+  await until("!!document.querySelector('[role=dialog]')")
+  await evaluate(
+    "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === 'Delete worktree').click()",
+  )
+  await until("!document.querySelector('[role=dialog]')")
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.worktree-open').getAttribute('aria-busy')",
+    ),
+    'true',
+  )
+  assert.equal(
+    await evaluate("document.querySelector('.worktree-open').disabled"),
+    true,
+  )
+
+  stage = 'row failure tooltip and clearing without opening the editor'
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.branch === 'main'
+        ? {
+            ...row,
+            editor: 'stopped',
+            operation: undefined,
+            error: 'Git refused deletion: untracked files',
+          }
+        : row,
+    ),
+  )
+  await until("!!document.querySelector('.worktree-error')")
+  assert.equal(
+    await evaluate("document.querySelectorAll('[role=alert]').length"),
+    0,
+  )
+  const alignment = await evaluate(`(() => {
+    const icon = document.querySelector('.worktree-error svg').getBoundingClientRect();
+    const status = document.querySelector('.editor-status').getBoundingClientRect();
+    const row = document.querySelector('.worktree-entry').getBoundingClientRect();
+    return { dx: icon.x + icon.width / 2 - status.x - status.width / 2,
+      dy: icon.y + icon.height / 2 - status.y - status.height / 2,
+      x: Math.round(row.x + row.width / 2), y: Math.round(row.y + row.height / 2) };
+  })()`)
+  assert.ok(
+    Math.abs(alignment.dx) < 1 && Math.abs(alignment.dy) < 1,
+    'X aligns with the status icon',
+  )
+  window.webContents.sendInputEvent({
+    type: 'mouseMove',
+    x: alignment.x,
+    y: alignment.y,
+  })
+  await until(
+    "document.querySelector('[role=tooltip]')?.textContent.includes('Git refused deletion')",
+  )
+  holdOpen = true
+  await evaluate("document.querySelector('.worktree-open').click()")
+  await until(
+    "document.querySelector('.worktree-open').getAttribute('aria-busy') === 'true'",
+  )
+  assert.equal(
+    await evaluate("!!document.querySelector('.worktree-error')"),
+    false,
+    'opening spinner takes precedence over a retained error',
+  )
+  assert.equal(
+    snapshot.worktrees.find((row) => row.branch === 'main').error,
+    'Git refused deletion: untracked files',
+  )
+  finishOpen()
+  holdOpen = false
+  await until(
+    "document.querySelector('.worktree-open').getAttribute('aria-busy') === 'false'",
+  )
+  assert.equal(
+    await evaluate("!!document.querySelector('.worktree-error')"),
+    true,
+    'opening preserves the failure',
+  )
+  for (const [editor, operation] of [
+    ['starting', undefined],
+    ['running', 'creating'],
+    ['running', 'deleting'],
+  ]) {
+    await update(
+      snapshot.worktrees.map((row) =>
+        row.branch === 'main' ? { ...row, editor, operation } : row,
+      ),
+    )
+    assert.equal(
+      await evaluate(
+        "document.querySelector('.worktree-open').getAttribute('aria-busy')",
+      ),
+      'true',
+    )
+    assert.equal(
+      await evaluate("!!document.querySelector('.worktree-error')"),
+      false,
+      'spinner takes precedence over error and running status',
+    )
+  }
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.branch === 'main'
+        ? { ...row, editor: 'running', operation: undefined }
+        : row,
+    ),
+  )
+  assert.equal(
+    await evaluate("!!document.querySelector('.worktree-error')"),
+    true,
+    'error takes precedence over running status',
+  )
+  const beforeClear = opened.length
+  await evaluate("document.querySelector('.worktree-error').click()")
+  await until("!document.querySelector('.worktree-error')")
+  assert.equal(opened.length, beforeClear)
+  assert.equal(
+    await evaluate(
+      "!!document.querySelector('.editor-status:not(.has-error) .editor-dot.running')",
+    ),
+    true,
+  )
+  assert.equal(
+    snapshot.worktrees.find((row) => row.branch === 'main').error,
+    undefined,
+  )
+  await search('pending-create')
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.worktree-open').getAttribute('aria-busy')",
+    ),
+    'true',
+  )
+  stage =
+    'completed creation becomes the keyboard selection without changing search'
+  assert.equal((await state()).index, -1)
+  const pendingOpenCount = opened.length
+  await key('ENTER')
+  assert.equal(opened.length, pendingOpenCount)
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === 'C:/demo/pending-create'
+        ? { ...row, operation: undefined, missing: undefined }
+        : row,
+    ),
+  )
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).searchFocused, true)
+  await key('ENTER')
+  assert.equal(opened.length, pendingOpenCount + 1)
+  assert.equal(opened.at(-1), 'C:/demo/pending-create')
+
+  stage = 'keyboard navigation dismisses open and delayed tooltips'
+  await update(
+    ['tooltip-a', 'tooltip-b'].map((name) => ({
+      ...worktree(`C:/demo/${name}`, name),
+      editor: 'starting',
+      editorDetail: 'Starting test editor',
+    })),
+  )
+  await search('tooltip')
+  const firstRow = '.worktree-list li:first-child .worktree-open'
+  const tooltipOpen = "!!document.querySelector('[role=tooltip]')"
+  const tooltipClosed = "!document.querySelector('[role=tooltip]')"
+  await moveMouse(firstRow)
+  await until(tooltipOpen)
+  await key('DOWN')
+  await until(tooltipClosed)
+  assert.equal((await state()).searchFocused, true)
+  assert.equal((await state()).index, 1)
+  await moveMouse('.toolbar button')
+  await moveMouse(firstRow)
+  await key('DOWN')
+  await delay(650)
+  assert.equal(
+    await evaluate(tooltipClosed),
+    true,
+    'delayed hover stays dismissed',
+  )
+
+  stage = 'actionable spinning rows dismiss tooltips on click'
+  await moveMouse('.toolbar button')
+  await moveMouse(firstRow)
+  await until(tooltipOpen)
+  holdOpen = true
+  const beforeTooltipOpen = opened.length
+  await clickMouse(firstRow)
+  await until(tooltipClosed)
+  assert.equal(opened.length, beforeTooltipOpen + 1)
+
+  stage = 'ignored busy clicks preserve tooltips; Escape and leaving dismiss'
+  await moveMouse('.toolbar button')
+  await moveMouse(firstRow)
+  await until(tooltipOpen)
+  await clickMouse(firstRow)
+  assert.equal(await evaluate(tooltipOpen), true)
+  assert.equal(opened.length, beforeTooltipOpen + 1)
+  await key('ESCAPE')
+  await until(tooltipClosed)
+  await moveMouse('.toolbar button')
+  await moveMouse(firstRow)
+  await until(tooltipOpen)
+  await moveMouse('.toolbar button')
+  await until(tooltipClosed)
+  finishOpen()
+  holdOpen = false
+
+  stage = 'native disabled rows also preserve tooltips on ignored clicks'
+  await update(
+    snapshot.worktrees.map((row) => ({ ...row, operation: 'creating' })),
+  )
+  await moveMouse(firstRow)
+  await until(tooltipOpen)
+  await clickMouse(firstRow)
+  assert.equal(await evaluate(tooltipOpen), true)
+  assert.equal(opened.length, beforeTooltipOpen + 1)
+  await moveMouse('.toolbar button')
+  await until(tooltipClosed)
 }
 run()
   .then(() => writeFileSync(input.result, JSON.stringify({ ok: true })))

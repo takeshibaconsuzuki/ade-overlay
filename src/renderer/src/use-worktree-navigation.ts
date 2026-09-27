@@ -9,32 +9,57 @@ import {
 
 const openSelector = '.worktree-open:not(:disabled)'
 
-export function useWorktreeNavigation(resultsKey: string) {
+export function useWorktreeNavigation(
+  resultsKey: string,
+  search: string,
+  availabilityKey: string,
+) {
   const listRef = useRef<HTMLUListElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const [highlightVisible, setHighlightVisible] = useState(() =>
-    document.hasFocus(),
-  )
+  const [highlightVisible, setHighlightVisible] = useState(false)
+  const [tooltipDismissVersion, setTooltipDismissVersion] = useState(0)
   const mode = useRef<'mouse' | 'keyboard'>('keyboard')
   const pointer = useRef<{ x: number; y: number } | null>(null)
+  const hovering = useRef(false)
   const [highlight, setHighlight] = useState<{
     key: string | undefined
     mode: 'mouse' | 'keyboard'
   }>({ key: undefined, mode: 'keyboard' })
 
+  const canOpenWithEnter = useCallback((target: Element | null) => {
+    return (
+      target === searchRef.current ||
+      (!!target &&
+        !!listRef.current?.contains(target) &&
+        target.matches(openSelector))
+    )
+  }, [])
+
+  const syncHighlightVisibility = useCallback(() => {
+    setHighlightVisible(
+      !document.querySelector('[role="dialog"], [role="alertdialog"]') &&
+        (hovering.current ||
+          (document.hasFocus() && canOpenWithEnter(document.activeElement))),
+    )
+  }, [canOpenWithEnter])
+
   const selectFirst = useCallback(() => {
     const list = listRef.current
     if (!list) return
+    const first = list.querySelector<HTMLButtonElement>(openSelector)
     if (scrollRef.current) scrollRef.current.scrollTop = 0
+    first
+      ?.closest('li')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    hovering.current = false
     mode.current = 'keyboard'
     setHighlight({
-      key: list.querySelector<HTMLButtonElement>(openSelector)?.dataset
-        .worktreeKey,
+      key: first?.dataset.worktreeKey,
       mode: 'keyboard',
     })
-    setHighlightVisible(document.hasFocus())
-  }, [])
+    syncHighlightVisibility()
+  }, [syncHighlightVisibility])
 
   useLayoutEffect(() => {
     const list = listRef.current
@@ -49,53 +74,67 @@ export function useWorktreeNavigation(resultsKey: string) {
     )
       searchRef.current?.focus({ preventScroll: true })
     selectFirst()
-  }, [resultsKey, selectFirst])
+  }, [resultsKey, search, selectFirst])
 
   useLayoutEffect(() => {
-    const onBlur = () => setHighlightVisible(false)
+    const buttons = [
+      ...(listRef.current?.querySelectorAll<HTMLButtonElement>(openSelector) ??
+        []),
+    ]
+    // Operations can enable or disable rows without changing the results.
+    // Keep a valid selection in place, including during editor progress updates.
+    if (buttons.some((button) => button.dataset.worktreeKey === highlight.key))
+      return
+    if (highlight.key !== buttons[0]?.dataset.worktreeKey) selectFirst()
+  }, [availabilityKey, highlight.key, selectFirst])
+
+  useLayoutEffect(() => {
     const onFocus = () => {
       // A modal owns focus until it closes, including across window switches.
       if (!document.querySelector('[role="dialog"], [role="alertdialog"]')) {
         searchRef.current?.focus({ preventScroll: true })
-        // The field may already own DOM focus when the window reactivates.
-        selectFirst()
       }
+      syncHighlightVisibility()
     }
-    window.addEventListener('blur', onBlur)
+    document.addEventListener('focusin', syncHighlightVisibility)
+    document.addEventListener('focusout', syncHighlightVisibility)
+    window.addEventListener('blur', syncHighlightVisibility)
     window.addEventListener('focus', onFocus)
     return () => {
-      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('focusin', syncHighlightVisibility)
+      document.removeEventListener('focusout', syncHighlightVisibility)
+      window.removeEventListener('blur', syncHighlightVisibility)
       window.removeEventListener('focus', onFocus)
     }
-  }, [selectFirst])
+  }, [syncHighlightVisibility])
 
   function onPointerMove(event: PointerEvent<HTMLElement>) {
     if (event.pointerType !== 'mouse') return
-    if (!document.hasFocus()) return
     if (!event.currentTarget.contains(event.target as Node)) return
-    if (event.target === searchRef.current) return
     const { clientX: x, clientY: y } = event
     // Scrolling can move rows beneath the pointer without mouse input.
     if (
-      (mode.current === 'keyboard' || !highlightVisible) &&
+      mode.current === 'keyboard' &&
       pointer.current?.x === x &&
       pointer.current?.y === y
     )
       return
     pointer.current = { x, y }
-    mode.current = 'mouse'
-    setHighlightVisible(true)
     const button = (event.target as Element).closest<HTMLButtonElement>(
       openSelector,
     )
-    setHighlight({ key: button?.dataset.worktreeKey, mode: 'mouse' })
+    hovering.current = !!button
+    syncHighlightVisibility()
+    if (!button) return
+    mode.current = 'mouse'
+    setHighlight({ key: button.dataset.worktreeKey, mode: 'mouse' })
   }
 
   useLayoutEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.isComposing || event.defaultPrevented) return
       const workspace = listRef.current?.closest('.workspace')
-      // Hover must work before anything is focused; portalled dialogs keep their keys.
+      // Portalled dialogs keep their keys.
       if (
         event.target !== document.body &&
         !workspace?.contains(event.target as Node)
@@ -107,8 +146,10 @@ export function useWorktreeNavigation(resultsKey: string) {
         !event.ctrlKey &&
         !event.metaKey
       ) {
+        setTooltipDismissVersion((version) => version + 1)
         mode.current = 'keyboard'
-        setHighlightVisible(true)
+        hovering.current = false
+        syncHighlightVisibility()
       }
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
         return
@@ -128,14 +169,19 @@ export function useWorktreeNavigation(resultsKey: string) {
       const current = buttons.findIndex(
         (button) => button.dataset.worktreeKey === highlight.key,
       )
-      if (inSearch && event.key === 'Enter') {
+      if (
+        (event.key === 'Enter' && canOpenWithEnter(target)) ||
+        (event.key === ' ' && target.matches(openSelector))
+      ) {
+        // Hover alone does not enable keyboard activation.
         event.preventDefault()
-        if (!event.repeat) (buttons[current] ?? buttons[0])?.click()
+        if (!event.repeat) buttons[current]?.click()
       } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         if (!buttons.length) return
         event.preventDefault()
         mode.current = 'keyboard'
-        setHighlightVisible(true)
+        hovering.current = false
+        syncHighlightVisibility()
         const next =
           current < 0
             ? event.key === 'ArrowDown'
@@ -149,41 +195,32 @@ export function useWorktreeNavigation(resultsKey: string) {
                 ),
               )
         const button = buttons[next]
+        if (next !== current) setTooltipDismissVersion((version) => version + 1)
         setHighlight({ key: button.dataset.worktreeKey, mode: 'keyboard' })
         if (!inSearch) button.focus({ preventScroll: true })
         button
           .closest('li')
           ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-      } else if (
-        (event.key === 'Enter' || event.key === ' ') &&
-        target.matches(openSelector) &&
-        highlight.mode === 'mouse' &&
-        current >= 0
-      ) {
-        // Mouse hover may have moved the highlight away from the focused button.
-        event.preventDefault()
-        if (!event.repeat) buttons[current].click()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [highlight])
+  }, [canOpenWithEnter, highlight, syncHighlightVisibility])
 
   return {
     searchRef,
     scrollRef,
-    onSearchFocus: selectFirst,
     highlight,
+    tooltipDismissVersion,
     workspaceProps: {
       onPointerMove,
+      onPointerLeave: () => {
+        hovering.current = false
+        syncHighlightVisibility()
+      },
       onPointerDown: (event: PointerEvent<HTMLElement>) => {
         if (!event.currentTarget.contains(event.target as Node)) return
         mode.current = 'mouse'
-        setHighlightVisible(true)
-      },
-      onPointerLeave: () => {
-        if (mode.current === 'mouse')
-          setHighlight({ key: undefined, mode: 'mouse' })
       },
     },
     listProps: {
@@ -192,16 +229,8 @@ export function useWorktreeNavigation(resultsKey: string) {
       'data-highlight-visible': highlightVisible,
       onFocus: (event: FocusEvent<HTMLUListElement>) => {
         const button = event.target.closest<HTMLButtonElement>(openSelector)
-        setHighlight({ key: button?.dataset.worktreeKey, mode: mode.current })
-      },
-      onBlur: (event: FocusEvent<HTMLUListElement>) => {
-        if (
-          document.hasFocus() &&
-          !event.currentTarget.contains(event.relatedTarget) &&
-          mode.current === 'keyboard'
-        ) {
-          setHighlight({ key: undefined, mode: 'keyboard' })
-        }
+        if (button)
+          setHighlight({ key: button.dataset.worktreeKey, mode: mode.current })
       },
     },
   }

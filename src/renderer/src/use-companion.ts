@@ -15,6 +15,7 @@ export function useCompanion() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [opening, setOpening] = useState<string | null>(null)
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const openRequest = useRef(0)
   const epoch = useRef(0)
   const apply = useCallback((next: WorktreeSnapshot, generation: number) => {
@@ -36,6 +37,7 @@ export function useCompanion() {
       connected = next.state === 'connected'
       setSnapshot(null)
       setError('')
+      setRowErrors({})
       setLoading(connected)
       openRequest.current++
       setOpening(null)
@@ -95,14 +97,37 @@ export function useCompanion() {
   }
   async function openEditor(input: OpenEditorInput): Promise<void> {
     const request = ++openRequest.current
+    const generation = epoch.current
+    const key = JSON.stringify([input.project, input.path])
     setOpening(input.path)
-    setError('')
     try {
       await window.companion.openEditor(input)
     } catch (cause) {
-      if (request === openRequest.current) setError(errorMessage(cause))
+      if (generation === epoch.current && request === openRequest.current)
+        setRowErrors((current) => ({
+          ...current,
+          [key]: errorMessage(cause),
+        }))
     } finally {
       if (request === openRequest.current) setOpening(null)
+    }
+  }
+  async function clearError(input: OpenEditorInput): Promise<void> {
+    const generation = epoch.current
+    const key = JSON.stringify([input.project, input.path])
+    try {
+      apply(
+        await window.companion.setWorktreeError({
+          project: input.project,
+          path: input.path,
+        }),
+        generation,
+      )
+      if (generation === epoch.current)
+        setRowErrors((current) => ({ ...current, [key]: '' }))
+    } catch (cause) {
+      if (generation === epoch.current)
+        setRowErrors((current) => ({ ...current, [key]: errorMessage(cause) }))
     }
   }
   return {
@@ -114,5 +139,7 @@ export function useCompanion() {
     reconnect,
     opening,
     openEditor,
+    rowErrors,
+    clearError,
   }
 }
