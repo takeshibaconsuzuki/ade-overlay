@@ -6,6 +6,8 @@
 - `npm run server:dev`: run the companion with file watching; accepts the same config argument.
 - `npm run build` / `npm run build:server`: build everything / just the companion into `out/`.
 - `npm run build:extension`: package the workspace extension as `out/ade-terminals.vsix`.
+- `npm run package`: build desktop installers and a companion archive for the host OS and architecture into `dist/`. Use the Node runtime pinned in `.node-version`. `npm run package:dir` skips desktop installers for local checks.
+- `npm run test:package`: smoke-test the extracted companion without system Node, extension setup and desktop package contents after packaging.
 - `npm run test:extension`: run isolated VS Code extension-host tests; set `ADE_TEST_VSCODE_EXECUTABLE` to an existing VS Code executable to avoid downloading a test runtime.
 - `npm run typecheck`: check app, companion, and tests.
 - `npm test`: run socket and temporary Git repository integration tests. Git must be on PATH.
@@ -16,7 +18,13 @@
 
 ## Server Deployment
 
-The companion runs independently of the desktop app. Deploy its build to a machine with Git and a compatible Node.js runtime, install production dependencies, and supply the server configuration. Worktree paths refer to that machine's filesystem.
+The companion runs independently of the desktop app. Release archives include Node, locked production dependencies and the matching VSIX. Extract to a stable path on a machine with Git and VS Code, supply the configuration, install the bundled extension and run the launcher under the repository owner's account. Worktree paths refer to that machine's filesystem.
+
+## Packaging
+
+Desktop and companion payloads are staged separately from the root lockfile. The desktop contains only its runtime dependencies; external companion scripts stay on disk for Node and VS Code to execute. The root package version drives all artifacts, including the VSIX. Upgrades are manual and coordinated because restarting the companion stops its editors. Persistent state stays outside installation directories, with a stable desktop application-data identity.
+
+The Package workflow builds and checks native artifacts on Windows, Linux and both Mac architectures. Manual runs can produce unsigned test builds; version tags must match `package.json` and require desktop signing on Windows and signing/notarization on macOS. Set `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`, `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`, and `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` as Actions secrets. Local builds use electron-builder's `CSC_LINK` and `CSC_KEY_PASSWORD` variables; `ADE_REQUIRE_SIGNING=true` enforces release signing. Workflow artifacts are uploaded for review, not automatically published. Verify VS Code Server usage and redistribution terms before a public release; its binaries are downloaded by the installed CLI and are not included in our packages.
 
 # Architecture
 

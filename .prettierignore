@@ -1,5 +1,6 @@
 node_modules/
 out/
+dist/
 .node.*/
 .mypy_cache/
 .vscode-test/

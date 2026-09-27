@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  dialog,
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron'
@@ -12,6 +13,18 @@ import {
   type WorktreeSnapshot,
 } from '../shared/companion.ts'
 import { EditorWindow } from './editor-window.ts'
+import { loadDesktopConfig } from './config.ts'
+
+// Keep Chromium storage at the original location when the installer changes the
+// visible product name. Editor cookies and settings must survive an upgrade.
+app.setName('ade-overlay')
+let configuration: ReturnType<typeof loadDesktopConfig> = {}
+let configurationError: unknown
+try {
+  configuration = loadDesktopConfig()
+} catch (error) {
+  configurationError = error
+}
 
 const trustedRenderers = new Set<WebContents>()
 const editorWindow = new EditorWindow()
@@ -21,10 +34,7 @@ let chatNavigation:
   | undefined
 let connectionEpoch = 0
 let editorRevision = -1
-const companion = new CompanionClient({
-  url: process.env.ADE_COMPANION_URL,
-  token: process.env.ADE_COMPANION_TOKEN,
-})
+const companion = new CompanionClient(configuration)
 
 function nextEditorRequest(): number {
   const previous = chatNavigation
@@ -81,6 +91,16 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  if (configurationError) {
+    dialog.showErrorBox(
+      'Could not load ADE configuration',
+      configurationError instanceof Error
+        ? configurationError.message
+        : 'Invalid desktop configuration.',
+    )
+    app.quit()
+    return
+  }
   ipcMain.handle(companionChannels.getStatus, (event) => {
     assertTrustedSender(event)
     return companion.getStatus()

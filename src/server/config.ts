@@ -62,15 +62,30 @@ export function expandHome(path: string): string {
       : path
 }
 
-export function parseServerArgs(args: string[]): { configPath?: string } {
+export function parseServerArgs(args: string[]): {
+  configPath?: string
+  help?: boolean
+  version?: boolean
+  installExtension?: boolean
+} {
   const { values } = parseArgs({
     args,
-    options: { config: { type: 'string' } },
+    options: {
+      config: { type: 'string' },
+      help: { type: 'boolean', short: 'h' },
+      version: { type: 'boolean' },
+      'install-extension': { type: 'boolean' },
+    },
     allowPositionals: false,
   })
   if (values.config !== undefined && !values.config.trim())
     throw new Error('--config requires a file path.')
-  return { configPath: values.config }
+  return {
+    configPath: values.config,
+    ...(values.help ? { help: true } : {}),
+    ...(values.version ? { version: true } : {}),
+    ...(values['install-extension'] ? { installExtension: true } : {}),
+  }
 }
 
 export async function loadServerConfig(

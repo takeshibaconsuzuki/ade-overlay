@@ -1,9 +1,10 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createVSIX } from '@vscode/vsce'
 import { build } from 'vite'
 import { builtinModules } from 'node:module'
 import react from '@vitejs/plugin-react'
+import { writeNotices } from './notices.mjs'
 
 await build({
   configFile: false,
@@ -67,7 +68,18 @@ await build({
 })
 
 await mkdir(new URL('../out/', import.meta.url), { recursive: true })
+await writeNotices(
+  new URL(
+    '../extensions/ade-terminals/out/THIRD_PARTY_NOTICES.txt',
+    import.meta.url,
+  ),
+)
 await createVSIX({
+  version: JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ).version,
+  updatePackageJson: false,
+  gitTagVersion: false,
   cwd: fileURLToPath(new URL('../extensions/ade-terminals/', import.meta.url)),
   packagePath: fileURLToPath(
     new URL('../out/ade-terminals.vsix', import.meta.url),
