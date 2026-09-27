@@ -1,7 +1,6 @@
 ﻿# Contributor Commands
 
-- `python scripts/bootstrap.py | iex` (PowerShell) or `eval "$(python scripts/bootstrap.py)"` (POSIX): install and activate the expected Node.js version. Add `--force` to replace the vendored installation.
-- `npm install`: install dependencies and the Electron binary.
+- `python scripts/bootstrap.py | iex` (PowerShell) or `eval "$(python scripts/bootstrap.py)"` (POSIX): set up the development environment by installing and activating Node.js and installing dependencies and Electron. Add `--force` to replace the vendored Node installation.
 - `npm run dev`: start Electron/Vite.
 - `npm run server`: build and start the companion in a separate terminal. Append `-- --config path/to/server.yaml` to select a config.
 - `npm run server:dev`: run the companion with file watching; accepts the same config argument.

@@ -3,10 +3,12 @@
 import argparse
 import hashlib
 import logging
+import os
 import platform
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -197,6 +199,35 @@ def powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def install_dependencies(node_dir: Path) -> None:
+    os_name, _ = node_platform()
+    path_dir = node_dir if os_name == "win" else node_dir / "bin"
+    node_binary = path_dir / ("node.exe" if os_name == "win" else "node")
+    npm_cli = node_dir / (
+        "node_modules/npm/bin/npm-cli.js"
+        if os_name == "win"
+        else "lib/node_modules/npm/bin/npm-cli.js"
+    )
+    env = os.environ.copy()
+    env["PATH"] = str(path_dir) + os.pathsep + env.get("PATH", "")
+    logger.info("Installing development dependencies and Electron")
+    subprocess.run(
+        [
+            str(node_binary),
+            str(npm_cli),
+            "install",
+            "--include=dev",
+            "--ignore-scripts=false",
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        check=True,
+        # Stdout is shell code; npm and lifecycle output must stay on stderr.
+        stdout=sys.stderr,
+        stderr=sys.stderr,
+    )
+
+
 def print_env(node_dir: Path) -> None:
     os_name, _ = node_platform()
     path_dir = node_dir if os_name == "win" else node_dir / "bin"
@@ -225,8 +256,8 @@ def print_env(node_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Install the expected Node.js version if needed and print shell commands "
-            "to activate it (PowerShell on Windows, POSIX shell on Linux/macOS)."
+            "Set up Node.js, development dependencies and Electron, then print shell "
+            "commands to activate Node.js (PowerShell on Windows, POSIX on Linux/macOS)."
         ),
         epilog=(
             "PowerShell: python scripts/bootstrap.py | iex\n"
@@ -245,6 +276,16 @@ def main() -> None:
     logging.basicConfig(format="%(message)s", level=logging.INFO)
 
     node_dir = bootstrap(force=args.force)
+    try:
+        install_dependencies(node_dir)
+    except (OSError, subprocess.CalledProcessError) as error:
+        logger.error("Dependency installation failed: %s", error)
+        # Preserve failure when the caller evaluates stdout through a shell.
+        os_name, _ = node_platform()
+        print(
+            "throw 'Dependency installation failed.'" if os_name == "win" else "false"
+        )
+        raise SystemExit(1) from error
     print_env(node_dir)
 
 

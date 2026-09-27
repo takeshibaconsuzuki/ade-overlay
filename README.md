@@ -1,6 +1,12 @@
 ﻿# Setup
 
-Install Git and run `npm install` from the repo root.
+Install Git and Python, then set up the development environment from the repo root:
+
+```powershell
+python scripts/bootstrap.py | iex
+```
+
+On Linux/macOS, use `eval "$(python scripts/bootstrap.py)"`. Bootstrap installs Node.js, project dependencies and Electron, and activates Node.js in the current shell.
 
 # Server
 
