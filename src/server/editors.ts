@@ -6,6 +6,7 @@ import { createWriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { Logger } from 'pino'
 import { silentLogger } from './logging.ts'
@@ -23,6 +24,7 @@ import {
   type ImportedProfile,
 } from './local-vscode.ts'
 import { SettingsSync } from './settings-sync.ts'
+import type { ChatService } from './chat-service.ts'
 
 interface RunningEditor {
   session: EditorSession
@@ -71,14 +73,17 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
   private extensions?: string
   private closing = false
   private readonly logger: Logger
+  private readonly chats?: ChatService
   private readonly shutdown = new AbortController()
 
   constructor(
     config: ServerConfig['editor'] = {},
     logger: Logger = silentLogger,
     runtimes?: EditorRuntimeManager,
+    chats?: ChatService,
   ) {
     super()
+    this.chats = chats
     this.logger = logger
     this.config = config
     this.dataDir = resolve(
@@ -213,9 +218,23 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
       logger.error({ err: error }, 'Could not write editor log'),
     )
     logger.info({ logFile: logPath }, 'Launching VS Code')
+    const chatEnvironment = this.chats?.environment(entry.session.id, worktree)
+    const extensionToken = this.chats?.extensionToken(entry.session.id)
     const child = spawn(
       runtime.executable,
       [
+        ...(extensionToken
+          ? [
+              fileURLToPath(
+                new URL(
+                  import.meta.url.endsWith('.ts')
+                    ? './editor-bootstrap.ts'
+                    : './editor-bootstrap.js',
+                  import.meta.url,
+                ),
+              ),
+            ]
+          : []),
         runtime.entrypoint,
         '--accept-server-license-terms',
         // The user selects worktrees from their configured companion projects.
@@ -246,8 +265,13 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
       {
         cwd: worktree.path,
         windowsHide: true,
-        env: codeEnvironment(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...codeEnvironment(),
+          ...chatEnvironment,
+        },
+        stdio: extensionToken
+          ? ['ignore', 'pipe', 'pipe', 'ipc']
+          : ['ignore', 'pipe', 'pipe'],
       },
     )
     entry.child = child
@@ -256,12 +280,20 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
     child.on('error', (error) => {
       failure = error
     })
+    if (extensionToken)
+      child.once('spawn', () =>
+        child.send(extensionToken, (error) => {
+          if (error) failure ??= error
+        }),
+      )
     for (const [stream, name] of [
       [child.stdout!, 'stdout'],
       [child.stderr!, 'stderr'],
     ] as const) {
       createInterface({ input: stream }).on('line', (line) => {
-        const safe = line.replaceAll(entry.token, '[redacted]')
+        const safe = line
+          .replaceAll(entry.token, '[redacted]')
+          .replaceAll(extensionToken ?? entry.token, '[redacted]')
         log.write(safe + '\n')
         logger.debug({ stream: name, output: safe }, 'VS Code output')
       })
@@ -275,6 +307,7 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
     child.once('exit', (code, signal) => {
       logger.info({ code, signal }, 'VS Code exited')
       if (this.entries.get(entry.session.id) === entry) {
+        this.chats?.releaseEditor(entry.session.id)
         this.entries.delete(entry.session.id)
         this.emit('status')
       }
@@ -345,6 +378,7 @@ export class EditorManager extends EventEmitter<{ status: [] }> {
   private async dispose(entry: RunningEditor): Promise<void> {
     if (entry.child) await stopProcess(entry.child)
     if (this.entries.get(entry.session.id) === entry) {
+      this.chats?.releaseEditor(entry.session.id)
       this.entries.delete(entry.session.id)
       this.emit('status')
     }

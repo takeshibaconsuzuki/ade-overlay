@@ -1,4 +1,4 @@
-﻿# Contributor Commands
+# Contributor Commands
 
 - `python scripts/bootstrap.py | iex` (PowerShell) or `eval "$(python scripts/bootstrap.py)"` (POSIX): set up the development environment by installing and activating Node.js and installing dependencies and Electron. Add `--force` to replace the vendored Node installation.
 - `npm run dev`: start Electron/Vite.
@@ -56,7 +56,7 @@ The active editor view and its extension frames may use the clipboard and microp
 
 ## Terminal Launcher Extension
 
-The workspace extension in `extensions/ade-terminals` runs on the companion through its shared local extensions directory. Native sidebar buttons launch shells in editor groups. Provider terminals share a locked group remembered only during the current activation; ordinary terminals use VS Code's placement around locked groups and leave their destination unlocked for files. Empty groups are reused, and a single chat group fills the editor until ordinary content needs a separate group. Launches run sequentially because group focus is global workbench state. VS Code owns terminal titles and persistence. Activation does not adopt existing terminals or clean up groups, and deactivation does not dispose terminals. Group locking governs default placement; users can still move tabs, rename terminals, and unlock groups.
+The workspace extension in `extensions/ade-terminals` runs on the companion through its shared local extensions directory. Its sidebar webview reuses the main window's app-owned theme and UI components. A narrow validated message bridge accepts launch, provider selection and chat navigation actions; credentials remain in the extension host. Provider selection persists in extension global state. Provider terminals share a locked group remembered only during the current activation; ordinary terminals use VS Code's placement around locked groups and leave their destination unlocked for files. Empty groups are reused, and a single chat group fills the editor until ordinary content needs a separate group. Launches run sequentially because group focus is global workbench state. VS Code owns terminal titles and persistence. Activation does not adopt existing terminal groups or clean them up, and deactivation does not dispose terminals. Group locking governs default placement; users can still move tabs, rename terminals, and unlock groups.
 
 ```mermaid
 sequenceDiagram
@@ -64,14 +64,79 @@ sequenceDiagram
     participant Extension as Workspace extension
     participant VSCode as VS Code workbench
     participant Shell as Companion shell
-    User->>Extension: Click Terminal, Codex, or Claude
-    Note over Extension: Queue launch and select workspace directory
+    User->>Extension: Sidebar launch action for Terminal or selected provider
+    Note over Extension: Keep buttons available; queue launches and incoming terminal focus together
     Extension->>VSCode: Reuse an existing or empty group, creating a separate group only when needed
     Extension->>VSCode: createTerminal in editor area with workspace cwd and explicit chat viewColumn
     Note over Extension,VSCode: Lock provider group and unlock ordinary terminal group
     VSCode->>Shell: Start the configured default shell
-    Extension->>Shell: sendText with configured provider command, for chat terminals
+    Extension->>Shell: sendText with configured foreground provider command and shell-owned exit
     Note over VSCode,Shell: Workspace session retains terminals independently of extension activation
+    Shell->>VSCode: Exit when provider command finishes; close its terminal
+```
+
+## Live Chats
+
+Provider adapters own hook configuration, payload mapping, process identification and conversation content. The companion merges its owned commands into global provider hooks under a file lock with atomic replacement; unrelated configuration is preserved. Reporters are bounded and fail quietly, identify the provider through local process ancestry, and send identity, activity and bounded message previews. Normal local CLIs remain unchanged.
+
+Conversation titles are independent of terminal names. Codex previews come from prompt-submission and turn-end hooks; hooks without text preserve the last received message. The companion reads Codex resume titles from local metadata without writing it, honoring the provider home and database configuration. This internal metadata interface must be revalidated when Codex changes; unavailable content shows skeletons. Title refresh runs outside activity processing and retries during reconciliation. No historical transcript content is loaded. The extension forwards snapshots to its webview as plain text data and sends the latest state whenever the view becomes ready.
+
+The companion owns an in-memory registry with only idle and working activity. Activity reports upsert chats; a later conversation replaces the entry for its terminal. Snapshots sort newest prompt or turn end first; tool activity and metadata refresh never reorder chats. Chats without an observed turn stay below those with one, with stable ties. Chat selection follows the active tab in the launcher's owned chat group, independently of focus in other groups. The launcher associates newly created chat tabs with terminal objects; the controller resolves them through validated local identities. Files in the owned group and group closure clear selection. Selection is local and never adopts layout groups across activations. All terminated-chat removal belongs to periodic process reconciliation using PID and start identity. Quiet idle chats never expire, and transport disconnection never changes their activity. Provider hook gaps are accepted; no remote provider observation supplements them.
+
+Each editor gets separate activity and extension-control credentials for a dedicated authenticated loopback service. Terminals receive only the activity credential and an opaque terminal ID. The extension persists shell PID/start identity associations to recover restored terminals without adopting their layout groups. A new extension activation replaces stale control connections. Companion restart resets the registry; crash-survivor recovery is outside this lifecycle.
+
+Process validation shares snapshots across queued requests only when the scan began after those requests arrived. Activity bursts share scan costs with terminal registration while registry updates retain their request order.
+
+Control credentials reach the editor bootstrap over private IPC and are injected only when VS Code forks an extension host. The server and terminal environment never contain them. This startup interface must be revalidated against real native terminals and tasks when updating the runtime.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Extension as Workspace extension
+    participant Provider as Local provider and hook reporter
+    participant Server as Companion loopback service
+    participant OS as Local processes
+    User->>Extension: Launch provider terminal
+    Extension->>Server: WebSocket /extension inventory with terminal ID and shell PID
+    Server->>OS: Validate shell identity
+    Server-->>Extension: Accepted inventory with process start identity
+    Extension->>Provider: Start configured command with ADE identification environment
+    Provider->>OS: Hook identifies provider PID and start identity through ancestry
+    Provider->>Server: POST /activity with session identity, idle or working and available message preview
+    Note over Server: Validate terminal ancestry and report ordering, then upsert chat
+    Server-->>Extension: Snapshot of chats across worktrees for sidebar rendering
+    Note over Server: Read provider title metadata independently and publish updates when available
+    loop Periodic reconciliation
+        Server->>OS: Read process identities
+        Note over Server: Remove chats whose provider or shell process has exited
+        Server-->>Extension: Updated snapshot when membership changes
+    end
+```
+
+Navigation targets the single connected desktop; ambiguous routing is rejected. The desktop selects its retained editor view or loads the worktree. Fresh pages must have a new destination extension activation before focus is dispatched. The companion owns navigation through terminal acknowledgement and notifies its desktop when it finishes. Completion invalidates pending desktop opens without stopping shared editor startup or retained pages. Requests have bounded waits, acknowledgements and supersession cancellation; stale connections cannot complete them.
+
+Each served editor document records the activation it supersedes. Chat navigation keeps that baseline across repeated opens and waits for a different activation with the destination terminal in its inventory. Reloading replaces the baseline; retaining the document preserves it.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Source as Sidebar extension
+    participant Server as Companion
+    participant App as Desktop main
+    participant Target as Destination extension
+    User->>Source: Click live chat
+    Source->>Server: /extension activate with chat ID
+    Server-->>App: /companion chat:activate with worktree
+    App->>Server: /companion editor:open
+    Server-->>App: Editor session
+    Note over App: Select worktree through EditorWindow
+    App->>Server: /companion chat:view-ready or error
+    Target->>Server: /extension inventory after activation or restoration
+    Server-->>Target: focus with terminal ID once view and extension are ready
+    Target->>Target: Show terminal and await activeTerminal
+    Target->>Server: focused acknowledgement or error
+    Server-->>App: /companion chat:finished invalidates the matching navigation
+    Server-->>Source: Result, including timeout or supersession errors
 ```
 
 ## Connections

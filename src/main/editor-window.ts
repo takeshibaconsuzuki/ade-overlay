@@ -41,7 +41,7 @@ export class EditorWindow {
     companionUrl: string,
     editor: EditorSession,
     worktree: OpenEditorInput,
-  ): Promise<void> {
+  ): Promise<EditorPage> {
     const generation = ++this.generation
     const origin = new URL(companionUrl)
     origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
@@ -91,7 +91,8 @@ export class EditorWindow {
       view.webContents.once('destroyed', () => this.discard(key, created))
       this.views.set(key, entry)
     }
-    if (generation !== this.generation) return
+    if (generation !== this.generation)
+      throw new Error('Editor navigation was superseded.')
     const window = this.ensureWindow()
     if (this.active && this.active !== entry) {
       window.contentView.removeChildView(this.active.view)
@@ -114,6 +115,7 @@ export class EditorWindow {
     }
     if (this.views.get(key) === entry && entry.page.state === 'ready')
       browserSession.sync.add(entry.view.webContents, url, editor.accessToken)
+    return entry.page
   }
 
   private discard(key: string, entry: EditorView, closeWindow = true): void {

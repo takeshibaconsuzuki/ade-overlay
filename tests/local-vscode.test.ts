@@ -51,7 +51,10 @@ test('new profiles import keybindings without copying settings into either serve
   })
   assert.deepEqual(
     parse(await readFile(join(workspace, 'Machine', 'settings.json'), 'utf8')),
-    { 'terminal.integrated.enablePersistentSessions': true },
+    {
+      'terminal.integrated.enablePersistentSessions': true,
+      'python-envs.terminal.autoActivationType': 'off',
+    },
   )
   assert.equal(await readFile(source, 'utf8'), original)
   await assert.rejects(readFile(join(dataDir, 'local-import.json')), {
@@ -86,17 +89,19 @@ test('legacy imports are backed up and removed once, preserving edited Remote ov
   assert.deepEqual(parse(await readFile(path, 'utf8')), {
     'editor.fontSize': 29,
     'terminal.integrated.enablePersistentSessions': true,
+    'python-envs.terminal.autoActivationType': 'off',
   })
   assert.match(await readFile(path, 'utf8'), /Keep my font override/)
   assert.equal(await readFile(path + '.before-settings-sync', 'utf8'), original)
   await writeFile(
     path,
-    '{"editor.fontSize":23,"terminal.integrated.enablePersistentSessions":false}',
+    '{"editor.fontSize":23,"terminal.integrated.enablePersistentSessions":true,"python-envs.terminal.autoActivationType":"command"}',
   )
   await prepareEditorSettings(workspace, dataDir)
   assert.deepEqual(parse(await readFile(path, 'utf8')), {
     'editor.fontSize': 23,
     'terminal.integrated.enablePersistentSessions': true,
+    'python-envs.terminal.autoActivationType': 'off',
   })
 })
 
@@ -112,7 +117,7 @@ test('profile import handles missing local data', async (t) => {
   assert.deepEqual(await importLocalVSCode({}, undefined), {})
 })
 
-test('Remote persistence accepts empty settings and leaves malformed settings untouched', async (t) => {
+test('Remote overrides accept empty settings and leave malformed settings untouched', async (t) => {
   const { root, dataDir } = await fixture(t)
   const workspace = join(root, 'workspace')
   await prepareEditorSettings(workspace, dataDir)
@@ -125,6 +130,7 @@ test('Remote persistence accepts empty settings and leaves malformed settings un
     parse(content)['terminal.integrated.enablePersistentSessions'],
     true,
   )
+  assert.equal(parse(content)['python-envs.terminal.autoActivationType'], 'off')
   await writeFile(path, '{"unfinished":')
   await assert.rejects(
     prepareEditorSettings(workspace, dataDir),

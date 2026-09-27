@@ -25,6 +25,7 @@ export function codeEnvironment(): NodeJS.ProcessEnv {
     if (
       [
         'ADE_COMPANION_TOKEN',
+        'ADE_CHAT_EXTENSION_TOKEN',
         'VSCODE_IPC_HOOK_CLI',
         'VSCODE_DEV',
         'VSCODE_PORTABLE',

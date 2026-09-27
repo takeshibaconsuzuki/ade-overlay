@@ -26,6 +26,7 @@
   },
   "files": [
     "out/*.js",
+    "out/*.css",
     "media/*.svg",
     "README.md"
   ],
@@ -59,17 +60,12 @@
     "views": {
       "adeTerminals": [
         {
-          "id": "adeTerminals.launcher",
-          "name": "Terminals"
+          "name": "Terminals",
+          "id": "adeTerminals.sidebar",
+          "type": "webview"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "adeTerminals.launcher",
-        "contents": "[Terminal](command:adeTerminals.terminal)\n[Codex](command:adeTerminals.codex)\n[Claude](command:adeTerminals.claude)"
-      }
-    ],
     "configuration": {
       "title": "ADE Terminals",
       "properties": {

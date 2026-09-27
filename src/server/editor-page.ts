@@ -7,6 +7,7 @@ export function withImportedProfile(
   html: string,
   profile: ImportedProfile | undefined,
   syncPath?: string,
+  activationAfter?: string | null,
 ): string {
   const page = load(html)
   const element = page('#vscode-workbench-web-configuration')
@@ -16,6 +17,16 @@ export function withImportedProfile(
   const config = JSON.parse(settings)
   if (profile) config.profile = profile
   element.attr('data-settings', JSON.stringify(config))
+  if (activationAfter !== undefined) {
+    // A document keeps the activation it superseded, even when another chat
+    // click arrives after its extension connected but before inventory is ready.
+    page('head').append(
+      page('<meta name="ade-chat-activation-after">').attr(
+        'content',
+        activationAfter ?? '',
+      ),
+    )
+  }
   if (syncPath) {
     const script = page('<script></script>')
       .attr('src', syncPath)

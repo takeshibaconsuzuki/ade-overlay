@@ -27,6 +27,8 @@ test('editor child environments remove credentials and profile overrides without
     ...original,
     ADE_COMPANION_TOKEN: 'test-companion-secret',
     ade_companion_token: 'test-lowercase-secret',
+    ADE_CHAT_EXTENSION_TOKEN: 'extension-secret',
+    ade_chat_extension_token: 'lowercase-extension-secret',
     VSCODE_IPC_HOOK_CLI: 'parent-window',
     VSCODE_DEV: '1',
     VSCODE_PORTABLE: 'portable-profile',
@@ -41,6 +43,8 @@ test('editor child environments remove credentials and profile overrides without
   for (const name of [
     'ADE_COMPANION_TOKEN',
     'ade_companion_token',
+    'ADE_CHAT_EXTENSION_TOKEN',
+    'ade_chat_extension_token',
     'VSCODE_IPC_HOOK_CLI',
     'VSCODE_DEV',
     'VSCODE_PORTABLE',

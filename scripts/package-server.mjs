@@ -11,6 +11,9 @@ const manifest = {
   scripts: { start: 'node server/index.js' },
   engines: { node: '>=22.22.3' },
   dependencies: {
+    'smol-toml': app.dependencies['smol-toml'],
+    systeminformation: app.dependencies.systeminformation,
+    'proper-lockfile': app.dependencies['proper-lockfile'],
     'cross-spawn': app.dependencies['cross-spawn'],
     which: app.dependencies.which,
     cheerio: app.dependencies.cheerio,

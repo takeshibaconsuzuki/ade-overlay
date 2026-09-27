@@ -94,6 +94,12 @@ const worktreeUpdateSchema = z.object({
 
 const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({
+    type: z.literal('chat:view-ready'),
+    id: idSchema,
+    error: z.string().max(1024).optional(),
+    activationAfter: z.uuid().nullable(),
+  }),
+  z.object({
     type: z.literal('worktrees:set-error'),
     id: idSchema,
     input: setWorktreeErrorInputSchema,
@@ -132,6 +138,12 @@ const responseMessageSchema = z.discriminatedUnion('type', [
   }),
 ])
 const serverMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('chat:finished'), id: idSchema }),
+  z.object({
+    type: z.literal('chat:activate'),
+    id: idSchema,
+    input: openEditorInputSchema,
+  }),
   z.object({ type: z.literal('hello'), protocolVersion: z.int() }),
   ...responseMessageSchema.options,
   worktreeUpdateSchema.extend({ type: z.literal('worktrees:updated') }),

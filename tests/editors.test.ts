@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
 import pino from 'pino'
 import { load } from 'cheerio'
@@ -1042,6 +1042,105 @@ test('server and editor logs identify startup stages without exposing session to
 })
 
 const idleMs = Number(process.env.ADE_TEST_EDITOR_IDLE_MS ?? 0)
+
+test(
+  'real VS Code keeps extension credentials out of native terminals/tasks and renews document activation on reload',
+  { skip: !process.env.ADE_TEST_VSCODE_RUNTIME, timeout: 90_000 },
+  async (t) => {
+    const {
+      root,
+      project,
+      config: baseConfig,
+      cleanups,
+      editorRuntime,
+    } = await fixture(t)
+    const local = await localVSCodeFixture(root)
+    const extension = join(local.localExtensionsDir, 'ade.bootstrap-test-1.0.0')
+    await mkdir(extension)
+    await writeFile(
+      join(extension, 'package.json'),
+      JSON.stringify({
+        name: 'bootstrap-test',
+        publisher: 'ade',
+        version: '1.0.0',
+        engines: { vscode: '^1.96.0' },
+        main: './index.cjs',
+        extensionKind: ['workspace'],
+        activationEvents: ['onStartupFinished'],
+      }),
+    )
+    await copyFile(
+      fileURLToPath(
+        new URL('./fixtures/bootstrap-extension.cjs', import.meta.url),
+      ),
+      join(extension, 'index.cjs'),
+    )
+    await writeFile(
+      join(extension, 'bootstrap-config.json'),
+      JSON.stringify({ ws: fileURLToPath(import.meta.resolve('ws')) }),
+    )
+    const extensionsFile = join(local.localExtensionsDir, 'extensions.json')
+    const installed = JSON.parse(await readFile(extensionsFile, 'utf8'))
+    installed.push({
+      identifier: { id: 'ade.bootstrap-test' },
+      version: '1.0.0',
+      relativeLocation: 'ade.bootstrap-test-1.0.0',
+      location: {
+        scheme: 'file',
+        path: decodeURIComponent(pathToFileURL(extension).pathname),
+      },
+      metadata: { installedTimestamp: 1 },
+    })
+    await writeFile(extensionsFile, JSON.stringify(installed))
+    editorRuntime.runtimeRoot = process.env.ADE_TEST_VSCODE_RUNTIME!
+    const server = await startCompanionServer({
+      port: 0,
+      config: { ...baseConfig, editor: { ...baseConfig.editor, ...local } },
+      editorRuntime,
+    })
+    cleanups.push(() => server.close())
+    const client = await connect(t, server.url)
+    const editor = await client.openEditor({ project, path: project })
+    const result = join(root, 'bootstrap-result.json')
+    const input = join(root, 'bootstrap-input.json')
+    await writeFile(
+      input,
+      JSON.stringify({
+        project,
+        editor,
+        url: server.url,
+        result,
+        userData: join(root, 'browser'),
+        editorModule: await bundleMain(root, 'editor-window'),
+      }),
+    )
+    let failure
+    try {
+      await execute(
+        electron as unknown as string,
+        [
+          fileURLToPath(
+            new URL('./fixtures/editor-bootstrap.mjs', import.meta.url),
+          ),
+        ],
+        {
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: undefined,
+            ADE_EDITOR_TEST_INPUT: input,
+          },
+          windowsHide: true,
+          timeout: 65_000,
+        },
+      )
+    } catch (error) {
+      failure = error
+    }
+    const outcome = JSON.parse(await readFile(result, 'utf8'))
+    assert.equal(outcome.ok, true, JSON.stringify(outcome))
+    if (failure) throw failure
+  },
+)
 
 test(
   'real VS Code periodically syncs whole User settings files and reconnects after offline saves',

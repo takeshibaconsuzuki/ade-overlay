@@ -38,12 +38,13 @@ interface PendingRequest {
   resolve: (result: ResponseMessage) => void
   reject: (error: Error) => void
   expected: ResponseMessage['type']
-  timeout: ReturnType<typeof setTimeout>
 }
 
 export class CompanionClient extends EventEmitter<{
   status: [CompanionStatus]
   worktreesUpdated: [WorktreeUpdate]
+  chatActivate: [{ id: string; input: OpenEditorInput }]
+  chatFinished: [string]
 }> {
   private status: CompanionStatus
   private readonly options: ClientOptions
@@ -66,6 +67,22 @@ export class CompanionClient extends EventEmitter<{
 
   getStatus(): CompanionStatus {
     return { ...this.status }
+  }
+
+  chatViewReady(
+    id: string,
+    error?: string,
+    activationAfter: string | null = null,
+  ): void {
+    if (this.socket?.readyState === WebSocket.OPEN)
+      this.socket.send(
+        JSON.stringify({
+          type: 'chat:view-ready',
+          id,
+          error: error?.slice(0, 1024),
+          activationAfter,
+        } satisfies ClientMessage),
+      )
   }
 
   connect(): CompanionStatus {
@@ -98,14 +115,20 @@ export class CompanionClient extends EventEmitter<{
     return this.worktreeRequest({ type: 'worktrees:list', id: randomUUID() })
   }
 
-  async openEditor(input: OpenEditorInput): Promise<EditorSession> {
+  async openEditor(
+    input: OpenEditorInput,
+    signal?: AbortSignal,
+  ): Promise<EditorSession> {
     const parsed = openEditorInputSchema.safeParse(input)
     if (!parsed.success) throw new Error('Invalid editor worktree.')
-    const response = await this.request({
-      type: 'editor:open',
-      id: randomUUID(),
-      input: parsed.data,
-    })
+    const response = await this.request(
+      {
+        type: 'editor:open',
+        id: randomUUID(),
+        input: parsed.data,
+      },
+      signal,
+    )
     if (response.type !== 'editor')
       throw new Error('Unexpected editor response.')
     return response.session
@@ -154,7 +177,11 @@ export class CompanionClient extends EventEmitter<{
     return response.snapshot
   }
 
-  private request(message: ClientMessage): Promise<ResponseMessage> {
+  private request(
+    message: ClientMessage,
+    signal?: AbortSignal,
+  ): Promise<ResponseMessage> {
+    if (signal?.aborted) return Promise.reject(signal.reason)
     const socket = this.socket
     if (
       this.status.state !== 'connected' ||
@@ -169,10 +196,19 @@ export class CompanionClient extends EventEmitter<{
       return Promise.reject(new Error('Request exceeds the 16 KiB limit.'))
     const id = message.id
     return new Promise((resolve, reject) => {
+      const cleanup = (): void => {
+        clearTimeout(timeout)
+        this.pending.delete(id)
+        signal?.removeEventListener('abort', abort)
+      }
+      const fail = (error: Error): void => {
+        cleanup()
+        reject(error)
+      }
+      const abort = (): void => fail(signal!.reason)
       const timeout = setTimeout(
         () => {
-          this.pending.delete(id)
-          reject(
+          fail(
             new Error(
               message.type === 'ping'
                 ? 'Companion ping timed out.'
@@ -190,9 +226,11 @@ export class CompanionClient extends EventEmitter<{
               : 120_000),
       )
       this.pending.set(id, {
-        resolve,
-        reject,
-        timeout,
+        resolve: (response) => {
+          cleanup()
+          resolve(response)
+        },
+        reject: fail,
         expected:
           message.type === 'ping'
             ? 'pong'
@@ -200,12 +238,11 @@ export class CompanionClient extends EventEmitter<{
               ? 'editor'
               : 'worktrees',
       })
+      signal?.addEventListener('abort', abort, { once: true })
       socket.send(payload, (error) => {
         if (!error) return
         const request = this.pending.get(id)
         if (!request) return
-        clearTimeout(request.timeout)
-        this.pending.delete(id)
         request.reject(error)
       })
     })
@@ -220,7 +257,6 @@ export class CompanionClient extends EventEmitter<{
     clearTimeout(this.helloTimer)
     clearInterval(this.heartbeat)
     for (const request of this.pending.values()) {
-      clearTimeout(request.timeout)
       request.reject(error)
     }
     this.pending.clear()
@@ -294,6 +330,10 @@ export class CompanionClient extends EventEmitter<{
           change: message.change,
           snapshot: message.snapshot,
         })
+      } else if (message.type === 'chat:activate') {
+        this.emit('chatActivate', { id: message.id, input: message.input })
+      } else if (message.type === 'chat:finished') {
+        this.emit('chatFinished', message.id)
       } else if (
         message.type === 'pong' ||
         message.type === 'editor' ||
@@ -303,8 +343,6 @@ export class CompanionClient extends EventEmitter<{
         if (!message.id) return
         const request = this.pending.get(message.id)
         if (!request) return
-        clearTimeout(request.timeout)
-        this.pending.delete(message.id)
         if (message.type === 'error') request.reject(new Error(message.message))
         else if (message.type !== request.expected)
           request.reject(new Error('Unexpected companion response.'))

@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { z } from 'zod'
 
 interface Navigation {
   ready: Promise<void>
@@ -151,6 +152,21 @@ export class EditorPage {
       if (navigation !== this.navigation) continue
       if (this.state === 'ready') return
       throw this.error
+    }
+    throw this.error
+  }
+
+  async chatActivation(): Promise<string | null> {
+    while (this.state !== 'disposed') {
+      await this.whenReady()
+      const navigation = this.navigation
+      const baseline: unknown = await this.contents.mainFrame.executeJavaScript(
+        `document.querySelector('meta[name="ade-chat-activation-after"]')?.getAttribute('content')`,
+      )
+      if (navigation !== this.navigation) continue
+      if (this.state !== 'ready') throw this.error
+      // Missing metadata is a failure, never permission to focus an old host.
+      return z.union([z.uuid(), z.literal('')]).parse(baseline) || null
     }
     throw this.error
   }

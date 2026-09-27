@@ -1,6 +1,8 @@
 # ADE Terminals
 
-Open **ADE** in the Activity Bar to launch a **Terminal**, **Codex**, or **Claude** in the current workspace. Every click creates a new terminal in the editor area. Ordinary terminals share groups with files; provider terminals share a separate locked group.
+Open **ADE** in the Activity Bar for a sidebar matching the ADE main window. **Terminal** starts a shell; the second button starts the selected chat provider. Choosing **Codex** or **Claude** from its dropdown launches immediately and remembers that provider. Buttons remain available while launches queue. Every launch creates a new terminal in the editor area. Ordinary terminals share groups with files; provider terminals share a separate locked group and close when the configured foreground command finishes. Ordinary shells remain open.
+
+Live chats appear below the buttons, newest prompt or turn end first. Tool activity does not change their order. The current chat tab in this activation's ADE chat group has a left selection line, even when another group has focus. A file selected inside that group clears the line. A spinner means working; a green dot means idle. Rows show the worktree name, conversation title and three lines reserved for the latest received message, with skeletons for missing content. Codex uses its local resume title and the most recent prompt or final assistant reply reported by hooks. Click a row to switch the connected ADE desktop to that worktree and terminal. Tracking currently supports Codex; Claude can be launched but is not listed.
 
 Starting from an empty editor uses the full width. Empty groups are reused, and a second group is created only when ordinary content and chat need to coexist.
 

@@ -218,6 +218,11 @@ exports.run = async () => {
   const previousChat = vscode.window.tabGroups.activeTabGroup
   const previousTerminals = [...vscode.window.terminals]
   const fresh = new TerminalLauncher()
+  assert.equal(
+    fresh.getSelectedTerminal(),
+    undefined,
+    'new activation does not adopt old groups for selection',
+  )
   assert.equal(vscode.window.tabGroups.all.length, 1)
   assert.deepEqual([...vscode.window.terminals], previousTerminals)
   const newChatTerminal = await fresh.open('codex')
@@ -230,7 +235,7 @@ exports.run = async () => {
   )
   assert.equal(newChatTerminal.creationOptions.name, undefined)
   assert.equal(newChatTerminal.creationOptions.isTransient, undefined)
-  await fresh.open('claude')
+  const secondChatTerminal = await fresh.open('claude')
   assert.equal(vscode.window.tabGroups.activeTabGroup, freshChat)
   assert.equal(freshChat.tabs.length, 2)
   // Native ordinary placement must avoid both old and current locked groups.
@@ -241,10 +246,52 @@ exports.run = async () => {
   assert.notEqual(freshNormal, freshChat)
   assert.equal(newNormalTerminal.creationOptions.name, undefined)
   assert.equal(newNormalTerminal.creationOptions.isTransient, undefined)
+  assert.equal(
+    fresh.getSelectedTerminal(),
+    secondChatTerminal,
+    'another terminal group cannot clear selection',
+  )
+  await vscode.commands.executeCommand('vscode.open', file, {
+    viewColumn: freshNormal.viewColumn,
+    preview: false,
+  })
+  assert.equal(
+    fresh.getSelectedTerminal(),
+    secondChatTerminal,
+    'a file in another group keeps selection',
+  )
+  await vscode.commands.executeCommand('vscode.open', file, {
+    viewColumn: freshChat.viewColumn,
+    preview: false,
+  })
+  await eventually(
+    () => freshChat.activeTab?.input instanceof vscode.TabInputText,
+    'file becomes current in chat group',
+  )
+  assert.equal(
+    fresh.getSelectedTerminal(),
+    undefined,
+    'a file in the owned group clears selection',
+  )
+  newChatTerminal.show()
+  await eventually(
+    () => fresh.getSelectedTerminal() === newChatTerminal,
+    'switching terminal tabs changes selection',
+  )
+  secondChatTerminal.show()
+  await eventually(
+    () => fresh.getSelectedTerminal() === secondChatTerminal,
+    'second chat tab selected',
+  )
   await vscode.window.tabGroups.close([freshChat, freshNormal])
   await eventually(
     () => vscode.window.tabGroups.all.length === 1,
     'fresh launcher groups close',
+  )
+  assert.equal(
+    fresh.getSelectedTerminal(),
+    undefined,
+    'closing the owned group clears selection',
   )
 
   // VS Code uses focusLastEditorGroup for column nine, not focusNinthEditorGroup.
@@ -260,8 +307,137 @@ exports.run = async () => {
   await vscode.commands.executeCommand('adeTerminals.terminal')
   assert.equal(vscode.window.tabGroups.activeTabGroup.viewColumn, 9)
   assert.ok(vscode.window.tabGroups.activeTabGroup.tabs.some(isTerminalTab))
+
+  // Exercise the actual bundled extension, reporter, OS process inspection and service.
+  await vscode.workspace
+    .getConfiguration('adeTerminals')
+    .update(
+      'codexCommand',
+      process.env.ADE_CHAT_TEST_PROVIDER_COMMAND,
+      vscode.ConfigurationTarget.Global,
+    )
+  await eventually(
+    () =>
+      vscode.workspace.getConfiguration('adeTerminals').get('codexCommand') ===
+      process.env.ADE_CHAT_TEST_PROVIDER_COMMAND,
+    'tracking command configured',
+  )
+  console.log('ADE live chats: launching provider')
+  const tracked = await Promise.race([
+    vscode.commands.executeCommand('adeTerminals.codex'),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Tracked launch timed out')), 20_000),
+    ),
+  ])
+  console.log('ADE live chats: terminal created')
+  assert.ok(tracked, 'tracked provider terminal is created')
+  assert.equal(tracked.creationOptions.env.ADE_CHAT_EXTENSION_TOKEN, null)
+  const snapshot = () =>
+    fetch(process.env.ADE_CHAT_TEST_CONTROL).then((response) => response.json())
+  const live = await eventually(
+    async () =>
+      (await snapshot()).chats.find(
+        (chat) =>
+          chat.terminalId === tracked.creationOptions.env.ADE_TERMINAL_ID,
+      ),
+    'real hook upserts idle chat',
+  )
+  assert.equal(live.activity, 'idle')
+  assert.equal(live.provider, 'codex')
+  assert.equal(live.terminalId, tracked.creationOptions.env.ADE_TERMINAL_ID)
+  const other = await vscode.commands.executeCommand('adeTerminals.terminal')
+  assert.equal(other.creationOptions.env.ADE_TERMINAL_ID, null)
+  assert.equal(vscode.window.activeTerminal, other)
+  await vscode.commands.executeCommand('adeTerminals.activateChat', live)
+  await eventually(
+    () => vscode.window.activeTerminal === tracked,
+    'chat click focuses exact terminal',
+  )
+  // A new activation must recover by stored process identity, take control from
+  // the stale host and focus the existing terminal without changing its group.
+  const {
+    ChatController,
+  } = require('../../extensions/ade-terminals/out/chats.js')
+  const pid = await tracked.processId
+  let identities = { [pid]: { terminalId: live.terminalId, pid } }
+  const restored = new ChatController({
+    workspaceState: {
+      get: () => identities,
+      update: async (_key, value) => {
+        identities = value
+      },
+    },
+  })
+  try {
+    await eventually(
+      () => identities[pid]?.startedAt,
+      'restored shell identity validated',
+    )
+    await eventually(
+      () => restored.getSnapshot().chats.length === 1,
+      'new activation receives live chats',
+    )
+    assert.equal(
+      restored.getActiveChatId(),
+      undefined,
+      'restored identities alone do not adopt layout selection',
+    )
+    restored.selectTerminal(tracked)
+    await eventually(
+      () => restored.getActiveChatId() === live.id,
+      'restored local chat is selected',
+    )
+    other.show()
+    await eventually(
+      () => vscode.window.activeTerminal === other,
+      'select other terminal',
+    )
+    assert.equal(
+      restored.getActiveChatId(),
+      live.id,
+      'global terminal focus does not change group selection',
+    )
+    restored.selectTerminal(undefined)
+    await eventually(
+      () => restored.getActiveChatId() === undefined,
+      'no terminal selected in the owned group',
+    )
+    restored.selectTerminal(tracked)
+    await restored.activateChat(live)
+    await eventually(
+      () => vscode.window.activeTerminal === tracked,
+      'restored activation focuses same terminal',
+    )
+    await eventually(
+      () => restored.getActiveChatId() === live.id,
+      'navigation updates local selection',
+    )
+  } finally {
+    restored.dispose()
+  }
+  await writeFile(join(workspace, 'finish-provider'), '')
+  await eventually(
+    () => !vscode.window.terminals.includes(tracked),
+    'provider exit closes its terminal',
+  )
+  await eventually(
+    async () => (await snapshot()).chats.length === 0,
+    'reconciliation drops terminated provider',
+  )
+  const failedProvider = await fresh.open('claude')
+  assert.ok(failedProvider, 'provider command launches before testing its exit')
+  await writeFile(join(workspace, 'finish-claude'), '')
+  await eventually(
+    () => !vscode.window.terminals.includes(failedProvider),
+    'failed provider command also closes terminal',
+  )
+  assert.ok(
+    vscode.window.terminals.includes(other),
+    'ordinary terminal remains open',
+  )
   console.log(
-    'ADE extension: provider commands, editor routing, locks, rapid clicks, activation isolation and closed-group recovery passed.',
+    'ADE extension: provider commands, editor routing, locks, activation isolation, live hook reporting, exact chat focus and reconciled removal passed.',
   )
   for (const terminal of vscode.window.terminals) terminal.dispose()
+  fresh.dispose()
 }

@@ -12,6 +12,8 @@ import {
   Button as RadixButton,
   Callout,
   Dialog,
+  DropdownMenu,
+  Skeleton as RadixSkeleton,
   Select,
   ScrollArea as RadixScrollArea,
   Spinner as RadixSpinner,
@@ -66,6 +68,47 @@ export function Button({
 
 export function Spinner() {
   return <RadixSpinner size="2" aria-hidden />
+}
+
+export function ChoiceMenu({
+  value,
+  items,
+  onChange,
+  children,
+}: {
+  value: string
+  items: readonly { id: string; label: string }[]
+  onChange: (value: string) => void
+  children: ReactElement
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>{children}</DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end">
+        <DropdownMenu.RadioGroup value={value}>
+          {items.map((item) => (
+            <DropdownMenu.RadioItem
+              key={item.id}
+              value={item.id}
+              onSelect={() => onChange(item.id)}
+            >
+              {item.label}
+            </DropdownMenu.RadioItem>
+          ))}
+        </DropdownMenu.RadioGroup>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  )
+}
+
+export function SkeletonLine({ label }: { label: string }) {
+  return (
+    <span role="img" aria-label={label}>
+      <RadixSkeleton>
+        <span className="ui-skeleton-line">&nbsp;</span>
+      </RadixSkeleton>
+    </span>
+  )
 }
 
 export function Tooltip({

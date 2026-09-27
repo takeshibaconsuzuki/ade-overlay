@@ -2,11 +2,13 @@ import { DEFAULT_COMPANION_PORT } from '../shared/companion.ts'
 import { startCompanionServer } from './server.ts'
 import { parseServerArgs } from './config.ts'
 import { createServerLogger, serverLogPath } from './logging.ts'
+import { installChatHooks } from './chat-hooks.ts'
 
 const logging = createServerLogger()
 
 async function main(): Promise<void> {
   const args = parseServerArgs(process.argv.slice(2))
+  await installChatHooks()
   const rawPort =
     process.env.ADE_COMPANION_PORT ?? String(DEFAULT_COMPANION_PORT)
   const port = Number(rawPort)

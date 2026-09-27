@@ -1,4 +1,5 @@
 import * as vscode from 'vscode'
+import { providerShellCommand } from './provider-command.js'
 
 export type TerminalKind = 'terminal' | 'codex' | 'claude'
 
@@ -27,15 +28,68 @@ async function waitFor<T>(
   throw new Error(`Timed out waiting for ${description}. Please try again.`)
 }
 
-export class TerminalLauncher {
+export class TerminalLauncher implements vscode.Disposable {
+  private readonly selectionChanges = new vscode.EventEmitter<
+    vscode.Terminal | undefined
+  >()
+  readonly onDidChangeSelection = this.selectionChanges.event
+  private readonly tabs = new Map<vscode.Tab, vscode.Terminal>()
+  private selectedTerminal?: vscode.Terminal
+  private readonly subscriptions: vscode.Disposable[]
+  constructor(
+    private readonly tracking?: {
+      prepare(): { terminalId: string; env: Record<string, string | null> }
+      created(terminal: vscode.Terminal, terminalId: string): Promise<void>
+    },
+  ) {
+    this.subscriptions = [
+      vscode.window.tabGroups.onDidChangeTabs((event) => {
+        for (const tab of event.closed) this.tabs.delete(tab)
+        this.updateSelection()
+      }),
+      vscode.window.tabGroups.onDidChangeTabGroups(() =>
+        this.updateSelection(),
+      ),
+      vscode.window.onDidCloseTerminal(() => this.updateSelection()),
+    ]
+  }
   private queue: Promise<unknown> = Promise.resolve()
   private chatGroup?: vscode.TabGroup
 
+  getSelectedTerminal(): vscode.Terminal | undefined {
+    const tab = this.chatGroup?.activeTab
+    const terminal = tab && this.tabs.get(tab)
+    return this.chatGroup &&
+      vscode.window.tabGroups.all.includes(this.chatGroup) &&
+      terminal &&
+      vscode.window.terminals.includes(terminal)
+      ? terminal
+      : undefined
+  }
+
+  private updateSelection(): void {
+    const terminal = this.getSelectedTerminal()
+    if (terminal !== this.selectedTerminal) {
+      this.selectedTerminal = terminal
+      this.selectionChanges.fire(terminal)
+    }
+  }
+
+  dispose(): void {
+    for (const subscription of this.subscriptions) subscription.dispose()
+    this.selectionChanges.dispose()
+    this.tabs.clear()
+  }
+
   open(kind: TerminalKind): Promise<vscode.Terminal | undefined> {
+    return this.run(() => this.launch(kind))
+  }
+
+  run<T>(operation: () => Promise<T>): Promise<T> {
     // Group creation/focus commands are global workbench operations.
-    const operation = this.queue.then(() => this.launch(kind))
-    this.queue = operation.catch(() => undefined)
-    return operation
+    const result = this.queue.then(operation)
+    this.queue = result.catch(() => undefined)
+    return result
   }
 
   private async focus(group: vscode.TabGroup): Promise<void> {
@@ -111,7 +165,7 @@ export class TerminalLauncher {
       )
 
     // Ownership lasts only for this launcher activation and ends when the group
-    // is removed or emptied. Terminal objects and persisted metadata are unneeded.
+    // is removed or emptied. Placement is independent of saved chat identities.
     if (
       this.chatGroup &&
       (!vscode.window.tabGroups.all.includes(this.chatGroup) ||
@@ -126,8 +180,14 @@ export class TerminalLauncher {
     const previousTabs = new Set(
       vscode.window.tabGroups.all.flatMap((item) => item.tabs),
     )
+    const identity = chat ? this.tracking?.prepare() : undefined
     const terminal = vscode.window.createTerminal({
+      env: identity?.env ?? {
+        ADE_CHAT_EXTENSION_TOKEN: null,
+        ADE_TERMINAL_ID: null,
+      },
       cwd: folder?.uri,
+      ...(chat ? { waitOnExit: false } : {}),
       // Let VS Code route ordinary terminals around locked groups, including
       // groups left behind by earlier activations that we no longer manage.
       location: group
@@ -149,6 +209,10 @@ export class TerminalLauncher {
           ),
         'the terminal editor',
       )
+      if (chat) {
+        this.tabs.set(tab, terminal)
+        this.updateSelection()
+      }
       await this.focus(tab.group)
       // VS Code can auto-lock the first terminal tab in an empty group when
       // another group exists. Ordinary shells leave their group open for files.
@@ -157,7 +221,15 @@ export class TerminalLauncher {
           ? 'workbench.action.lockEditorGroup'
           : 'workbench.action.unlockEditorGroup',
       )
-      if (command) terminal.sendText(command, true)
+      if (identity) await this.tracking?.created(terminal, identity.terminalId)
+      if (command)
+        terminal.sendText(
+          providerShellCommand(
+            command,
+            terminal.state.shell ?? vscode.env.shell,
+          ),
+          true,
+        )
       return terminal
     } catch (error) {
       terminal.dispose()

@@ -86,6 +86,56 @@ const hello = JSON.stringify({
   protocolVersion: 1,
 })
 
+test('cancelled editor requests release capacity and ignore late replies', async (t) => {
+  const requests: string[] = []
+  let socket!: WebSocket
+  const url = await fixture(t, (peer) => {
+    socket = peer
+    peer.send(hello)
+    peer.on('message', (data) => {
+      const message = JSON.parse(data.toString())
+      if (message.type === 'editor:open') requests.push(message.id)
+      if (message.type === 'ping')
+        peer.send(JSON.stringify({ type: 'pong', id: message.id }))
+    })
+  })
+  const client = makeClient(t, url)
+  client.connect()
+  await waitForStatus(client, 'connected')
+  const worktree = { project: '/project', path: '/project/branch' }
+  const stopped = new AbortController()
+  stopped.abort()
+  await assert.rejects(client.openEditor(worktree, stopped.signal), {
+    name: 'AbortError',
+  })
+  for (let i = 0; i < 40; i++) {
+    const controller = new AbortController()
+    const opening = client.openEditor(worktree, controller.signal)
+    controller.abort()
+    await assert.rejects(opening, { name: 'AbortError' })
+  }
+  await client.ping()
+  assert.equal(requests.length, 40)
+  for (const [index, id] of requests.entries())
+    socket.send(
+      JSON.stringify(
+        index % 2
+          ? { type: 'error', id, message: 'Late startup error' }
+          : {
+              type: 'editor',
+              id,
+              session: {
+                id: 'a'.repeat(64),
+                path: `/editors/${'a'.repeat(64)}/`,
+                accessToken: 'b'.repeat(64),
+              },
+            },
+      ),
+    )
+  await client.ping()
+  assert.equal(client.getStatus().state, 'connected')
+})
+
 test(
   'multiple clients exchange correlated pings with the standalone server',
   { timeout: 5_000 },

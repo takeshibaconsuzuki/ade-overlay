@@ -57,6 +57,7 @@ export async function prepareEditorSettings(
   await migrateEditorSettings(userData, dataDir)
   // Remote settings belong to this ADE server, outside User settings sync.
   // Reconnecting a new desktop client must retain the server's live terminals.
+  // Python activation must not inject commands into provider terminals.
   const directory = join(userData, 'Machine')
   const path = join(directory, 'settings.json')
   const before = (await optionalText(path)) ?? '{}\n'
@@ -71,14 +72,20 @@ export async function prepareEditorSettings(
       (!current || typeof current !== 'object' || Array.isArray(current)))
   )
     throw new Error(`Cannot update invalid VS Code Remote settings: ${path}`)
-  const key = 'terminal.integrated.enablePersistentSessions'
-  if (current?.[key] === true) return
-  const after = applyEdits(
-    before,
-    modify(before, [key], true, {
-      formattingOptions: { insertSpaces: true, tabSize: 2 },
-    }),
-  )
+  let after = before
+  for (const [key, value] of Object.entries({
+    'terminal.integrated.enablePersistentSessions': true,
+    'python-envs.terminal.autoActivationType': 'off',
+  })) {
+    if (current?.[key] === value) continue
+    after = applyEdits(
+      after,
+      modify(after, [key], value, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      }),
+    )
+  }
+  if (after === before) return
   await mkdir(directory, { recursive: true, mode: 0o700 })
   await writeFileAtomic(path, after, { mode: 0o600 })
 }

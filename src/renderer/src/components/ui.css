@@ -5,6 +5,12 @@
   --default-font-family: 'Segoe UI', system-ui, sans-serif;
   --cursor-button: pointer;
 }
+.ui-skeleton-line {
+  display: block;
+  width: 100%;
+  height: 12px;
+  border-radius: 3px;
+}
 .ui-field {
   display: grid;
   gap: 8px;

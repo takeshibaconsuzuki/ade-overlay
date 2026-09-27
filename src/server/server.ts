@@ -26,6 +26,7 @@ import {
   type ServerConfig,
 } from './config.ts'
 import { WorktreeStore } from './worktrees.ts'
+import { ChatService } from './chat-service.ts'
 
 export interface ServerOptions {
   editorRuntime?: EditorRuntimeManager
@@ -52,10 +53,12 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     options.config === undefined
       ? await loadServerConfig(options.configPath)
       : serverConfigSchema.parse(options.config)
+  const chats = new ChatService(logger)
   const editors = new EditorManager(
     config.editor,
     logger,
     options.editorRuntime,
+    chats,
   )
   const worktrees = await WorktreeStore.open(config.projects, editors)
   worktrees.on('operationFailed', (worktree, error) => {
@@ -113,6 +116,34 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     maxPayload: MAX_MESSAGE_BYTES,
   })
   const alive = new Set<WebSocket>()
+  const chatRequests = new Map<string, WebSocket>()
+  chats.onNavigate = (id, input) => {
+    const clients = [...sockets.clients].filter(
+      (client) => client.readyState === WebSocket.OPEN,
+    )
+    if (clients.length !== 1)
+      throw new Error(
+        clients.length
+          ? 'Chat navigation requires exactly one connected desktop.'
+          : 'No desktop is connected.',
+      )
+    chatRequests.set(id, clients[0])
+    clients[0].send(
+      JSON.stringify({
+        type: 'chat:activate',
+        id,
+        input,
+      } satisfies ServerMessage),
+    )
+  }
+  chats.onNavigationFinished = (id) => {
+    const owner = chatRequests.get(id)
+    chatRequests.delete(id)
+    if (owner?.readyState === WebSocket.OPEN)
+      owner.send(
+        JSON.stringify({ type: 'chat:finished', id } satisfies ServerMessage),
+      )
+  }
   worktrees.on('update', (update) => {
     const message: ServerMessage = { type: 'worktrees:updated', ...update }
     const data = JSON.stringify(message)
@@ -214,6 +245,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
                     html,
                     profile,
                     `${pathname}ade-settings-sync.js`,
+                    chats.activation(pathname.split('/')[2]),
                   )
                 : html
             for (const [name, value] of upstream.headers)
@@ -301,6 +333,9 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     client.on('pong', () => alive.add(client))
     client.on('close', (code) => {
       alive.delete(client)
+      for (const [id, owner] of chatRequests)
+        if (owner === client)
+          chats.viewReady(id, 'Desktop disconnected. Try again.')
       logger.info({ code }, 'Companion client disconnected')
     })
     client.on('error', () => client.terminate())
@@ -316,6 +351,11 @@ export async function startCompanionServer(options: ServerOptions = {}) {
         return
       }
       if (message.type === 'ping') return send({ type: 'pong', id: message.id })
+      if (message.type === 'chat:view-ready') {
+        if (chatRequests.get(message.id) === client)
+          chats.viewReady(message.id, message.error, message.activationAfter)
+        return
+      }
       const started = performance.now()
       const requestLog = logger.child({
         command: message.type,
@@ -395,13 +435,19 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     })
   })
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, host, () => {
-      server.removeListener('error', reject)
-      resolve()
+  await chats.listen()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(port, host, () => {
+        server.removeListener('error', reject)
+        resolve()
+      })
     })
-  })
+  } catch (error) {
+    await chats.close()
+    throw error
+  }
 
   const heartbeat = setInterval(() => {
     for (const client of sockets.clients) {
@@ -423,6 +469,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     close(): Promise<void> {
       closing ??= (async () => {
         clearInterval(heartbeat)
+        await chats.close()
         for (const socket of editorSockets) socket.destroy()
         for (const client of sockets.clients) client.terminate()
         await new Promise<void>((resolve) => sockets.close(() => resolve()))
