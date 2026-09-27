@@ -28,6 +28,11 @@ import electron from 'electron'
 import pino from 'pino'
 import { load } from 'cheerio'
 import { parseCookie } from 'cookie'
+import { parse } from 'jsonc-parser'
+import {
+  prepareTerminalSerialization,
+  validateTerminalSerialization,
+} from '../src/server/terminal-serialization.ts'
 import { Writable } from 'node:stream'
 import { WebSocket } from 'ws'
 import { CompanionClient } from '../src/main/companion-client.ts'
@@ -1142,7 +1147,12 @@ test(
         ...(await localVSCodeFixture(root)),
       },
     }
-    editorRuntime.runtimeRoot = process.env.ADE_TEST_VSCODE_RUNTIME!
+    // Patch only this test's private copy, never the developer's live runtime.
+    const runtime = join(root, 'mouse-runtime')
+    await cp(process.env.ADE_TEST_VSCODE_RUNTIME!, runtime, { recursive: true })
+    await prepareTerminalSerialization(runtime)
+    await validateTerminalSerialization(runtime)
+    editorRuntime.runtimeRoot = runtime
     const server = await startCompanionServer({
       port: 0,
       config,
@@ -1161,6 +1171,10 @@ test(
       join(project, 'persist.txt'),
       'An editor persistence test.\n',
     )
+    await copyFile(
+      fileURLToPath(new URL('./fixtures/terminal-mouse.cjs', import.meta.url)),
+      join(project, 'terminal-mouse.cjs'),
+    )
     for (const phase of ['first', 'second']) {
       const inputPath = join(root, `${phase}.json`)
       const result = join(root, `${phase}-result.json`)
@@ -1174,6 +1188,7 @@ test(
           screenshot: resolve('out/editor-smoke.png'),
           userData: join(root, 'desktop-data'),
           main: resolve('out/main/index.js'),
+          node: process.execPath,
         }),
       )
       let failure: unknown
@@ -1223,5 +1238,14 @@ test(
         }
       }
     }
+    // The effective Remote override must not flow back through User settings sync.
+    const local = parse(
+      await readFile(
+        join(config.editor.localUserDataDir, 'User', 'settings.json'),
+        'utf8',
+      ),
+    )
+    assert.equal(local['terminal.integrated.enablePersistentSessions'], false)
+    assert.equal(local['editor.fontSize'], 29)
   },
 )

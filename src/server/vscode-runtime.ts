@@ -17,6 +17,11 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import spawn from 'cross-spawn'
 import type { Logger } from 'pino'
+import {
+  prepareTerminalSerialization,
+  terminalSerializationRevision,
+  validateTerminalSerialization,
+} from './terminal-serialization.ts'
 import { silentLogger } from './logging.ts'
 import {
   codeEnvironment,
@@ -104,13 +109,18 @@ export class EditorRuntimeManager extends EventEmitter<{ progress: [string] }> {
     const code = await this.localCode()
     const record = join(this.dataDir, `runtime-${code.channel}.json`)
     const runtimeRoot = (commit: string) =>
-      join(this.dataDir, 'runtimes', `${code.channel}-${commit}`)
+      join(
+        this.dataDir,
+        'runtimes',
+        `${code.channel}-${commit}-${terminalSerializationRevision}`,
+      )
     if (!this.current) {
       try {
         const { commit } = JSON.parse(await readFile(record, 'utf8'))
         if (!commitPattern.test(commit))
           throw new Error('Invalid cached runtime version.')
-        this.current = await validateRuntime(
+        this.current = await retainRuntime(
+          join(this.dataDir, 'runtimes', `${code.channel}-${commit}`),
           runtimeRoot(commit),
           commit,
           this.abort.signal,
@@ -133,35 +143,8 @@ export class EditorRuntimeManager extends EventEmitter<{ progress: [string] }> {
         this.abort.signal,
       )
       const destination = runtimeRoot(commit)
-      // The CLI prunes its download cache. Keep a separate immutable runtime so
-      // an update cannot remove lazy-loaded files belonging to a live editor.
-      try {
-        await access(destination)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        const parent = join(this.dataDir, 'runtimes')
-        await mkdir(parent, { recursive: true, mode: 0o700 })
-        const staging = await mkdtemp(join(parent, '.prepare-'))
-        try {
-          await cp(root, join(staging, 'runtime'), {
-            recursive: true,
-            verbatimSymlinks: true,
-            filter: () => {
-              this.abort.signal.throwIfAborted()
-              return true
-            },
-          })
-          await validateRuntime(
-            join(staging, 'runtime'),
-            commit,
-            this.abort.signal,
-          )
-          await rename(join(staging, 'runtime'), destination)
-        } finally {
-          await removeStaging(parent, staging)
-        }
-      }
-      const runtime = await validateRuntime(
+      const runtime = await retainRuntime(
+        root,
         destination,
         commit,
         this.abort.signal,
@@ -197,6 +180,44 @@ export class EditorRuntimeManager extends EventEmitter<{ progress: [string] }> {
     this.abort.abort(new Error('Companion is shutting down.'))
     await this.checking?.catch(() => {})
   }
+}
+
+// Keep compatibility revisions in separate immutable copies. Existing servers
+// may still lazily load files from the previous copy, even for the same commit.
+async function retainRuntime(
+  root: string,
+  destination: string,
+  commit: string,
+  signal: AbortSignal,
+): Promise<EditorRuntime> {
+  try {
+    await access(destination)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await validateRuntime(root, commit, signal)
+    const parent = join(destination, '..')
+    await mkdir(parent, { recursive: true, mode: 0o700 })
+    const staging = await mkdtemp(join(parent, '.prepare-'))
+    try {
+      const prepared = join(staging, 'runtime')
+      await cp(root, prepared, {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: () => {
+          signal.throwIfAborted()
+          return true
+        },
+      })
+      await prepareTerminalSerialization(prepared)
+      await validateTerminalSerialization(prepared, signal)
+      await rename(prepared, destination)
+    } finally {
+      await removeStaging(parent, staging)
+    }
+  }
+  const runtime = await validateRuntime(destination, commit, signal)
+  await validateTerminalSerialization(destination, signal)
+  return runtime
 }
 
 export async function validateRuntime(

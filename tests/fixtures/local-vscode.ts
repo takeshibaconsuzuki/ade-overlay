@@ -25,6 +25,8 @@ export async function localVSCodeFixture(
     ${terminalSettings}
     "editor.fontSize": 23,
     "editor.accessibilitySupport": "on",
+    "terminal.integrated.enablePersistentSessions": false,
+    "terminal.integrated.persistentSessionReviveProcess": "never",
     "security.workspace.trust.enabled": true,
     "workbench.startupEditor": "none",
   }`,

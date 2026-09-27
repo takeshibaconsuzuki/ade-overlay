@@ -10,7 +10,8 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, join, resolve, sep } from 'node:path'
+import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { codeEnvironment, findLocalCode } from '../src/server/code-cli.ts'
@@ -91,6 +92,10 @@ test(
     await chmod(command, 0o755)
     const supported =
       '--reconnection-grace-time --extensions-dir --user-data-dir --server-data-dir --connection-token-file --server-base-path'
+    const require = createRequire(import.meta.url)
+    const terminalPackages = ['@xterm/headless', '@xterm/addon-serialize'].map(
+      (name) => [name, dirname(require.resolve(`${name}/package.json`))],
+    )
     await writeFile(
       script,
       `
@@ -108,6 +113,8 @@ test(
     else {
       const runtime = path.join(value('--cli-data-dir'), 'serve-web', state.commit);
       fs.mkdirSync(path.join(runtime, 'out'), {recursive:true});
+      for (const [name, source] of ${JSON.stringify(terminalPackages)})
+        fs.cpSync(source, path.join(runtime, 'node_modules', name), {recursive:true});
       const node = path.join(runtime, process.platform === 'win32' ? 'node.exe' : 'node');
       if (!fs.existsSync(node)) fs.copyFileSync(process.execPath, node);
       fs.writeFileSync(path.join(runtime, 'product.json'), JSON.stringify({commit: state.commit}));

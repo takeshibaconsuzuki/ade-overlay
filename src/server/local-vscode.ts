@@ -54,6 +54,39 @@ export async function prepareEditorSettings(
   userData: string,
   dataDir: string,
 ): Promise<void> {
+  await migrateEditorSettings(userData, dataDir)
+  // Remote settings belong to this ADE server, outside User settings sync.
+  // Reconnecting a new desktop client must retain the server's live terminals.
+  const directory = join(userData, 'Machine')
+  const path = join(directory, 'settings.json')
+  const before = (await optionalText(path)) ?? '{}\n'
+  const errors: ParseError[] = []
+  const current = parse(before, errors, {
+    allowTrailingComma: true,
+    allowEmptyContent: true,
+  })
+  if (
+    errors.length ||
+    (current !== undefined &&
+      (!current || typeof current !== 'object' || Array.isArray(current)))
+  )
+    throw new Error(`Cannot update invalid VS Code Remote settings: ${path}`)
+  const key = 'terminal.integrated.enablePersistentSessions'
+  if (current?.[key] === true) return
+  const after = applyEdits(
+    before,
+    modify(before, [key], true, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    }),
+  )
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await writeFileAtomic(path, after, { mode: 0o600 })
+}
+
+async function migrateEditorSettings(
+  userData: string,
+  dataDir: string,
+): Promise<void> {
   await mkdir(join(userData, 'User'), { recursive: true, mode: 0o700 })
   const migrated = join(userData, '.ade-settings-sync-migrated')
   if (await optionalText(migrated)) return

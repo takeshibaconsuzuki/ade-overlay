@@ -6,3 +6,4 @@ out/
 *.tsbuildinfo
 /config.server.yaml
 /.worktrees/
+.vscode-test/

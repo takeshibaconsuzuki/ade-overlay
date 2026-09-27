@@ -46,10 +46,13 @@ test('new profiles import keybindings without copying settings into either serve
   )
   const workspace = join(root, 'workspace')
   await prepareEditorSettings(workspace, dataDir)
-  for (const folder of ['User', 'Machine'])
-    await assert.rejects(readFile(join(workspace, folder, 'settings.json')), {
-      code: 'ENOENT',
-    })
+  await assert.rejects(readFile(join(workspace, 'User', 'settings.json')), {
+    code: 'ENOENT',
+  })
+  assert.deepEqual(
+    parse(await readFile(join(workspace, 'Machine', 'settings.json'), 'utf8')),
+    { 'terminal.integrated.enablePersistentSessions': true },
+  )
   assert.equal(await readFile(source, 'utf8'), original)
   await assert.rejects(readFile(join(dataDir, 'local-import.json')), {
     code: 'ENOENT',
@@ -82,12 +85,19 @@ test('legacy imports are backed up and removed once, preserving edited Remote ov
   await prepareEditorSettings(workspace, dataDir)
   assert.deepEqual(parse(await readFile(path, 'utf8')), {
     'editor.fontSize': 29,
+    'terminal.integrated.enablePersistentSessions': true,
   })
   assert.match(await readFile(path, 'utf8'), /Keep my font override/)
   assert.equal(await readFile(path + '.before-settings-sync', 'utf8'), original)
-  await writeFile(path, '{"editor.fontSize":23}')
+  await writeFile(
+    path,
+    '{"editor.fontSize":23,"terminal.integrated.enablePersistentSessions":false}',
+  )
   await prepareEditorSettings(workspace, dataDir)
-  assert.equal(await readFile(path, 'utf8'), '{"editor.fontSize":23}')
+  assert.deepEqual(parse(await readFile(path, 'utf8')), {
+    'editor.fontSize': 23,
+    'terminal.integrated.enablePersistentSessions': true,
+  })
 })
 
 test('profile import handles missing local data', async (t) => {
@@ -100,6 +110,27 @@ test('profile import handles missing local data', async (t) => {
   assert.deepEqual(JSON.parse(template.settings), { settings: '{}\n' })
   assert.equal(template.keybindings, undefined)
   assert.deepEqual(await importLocalVSCode({}, undefined), {})
+})
+
+test('Remote persistence accepts empty settings and leaves malformed settings untouched', async (t) => {
+  const { root, dataDir } = await fixture(t)
+  const workspace = join(root, 'workspace')
+  await prepareEditorSettings(workspace, dataDir)
+  const path = join(workspace, 'Machine', 'settings.json')
+  await writeFile(path, '// Remote overrides\n')
+  await prepareEditorSettings(workspace, dataDir)
+  const content = await readFile(path, 'utf8')
+  assert.match(content, /Remote overrides/)
+  assert.equal(
+    parse(content)['terminal.integrated.enablePersistentSessions'],
+    true,
+  )
+  await writeFile(path, '{"unfinished":')
+  await assert.rejects(
+    prepareEditorSettings(workspace, dataDir),
+    /invalid VS Code Remote settings/,
+  )
+  assert.equal(await readFile(path, 'utf8'), '{"unfinished":')
 })
 
 test('page injection preserves scripts and CSP nonce while safely encoding profile data', () => {

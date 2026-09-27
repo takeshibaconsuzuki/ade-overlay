@@ -2,6 +2,7 @@ import { app, BrowserWindow, BaseWindow, webContents } from 'electron'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import { commandOrControl, key } from './keyboard.mjs'
 const input = JSON.parse(
   readFileSync(process.env.ADE_EDITOR_TEST_INPUT, 'utf8'),
@@ -92,13 +93,42 @@ async function run() {
   })
   const body = () => editor.executeJavaScript('document.body.innerText')
   const terminalCommand = async (text) => {
-    editor.focus()
-    await editor.executeJavaScript(
-      "document.querySelector('.xterm-helper-textarea').focus()",
-    )
-    for (const char of text)
-      editor.sendInputEvent({ type: 'char', keyCode: char })
-    await key(editor, 'Enter')
+    await editor.executeJavaScript(`void (() => {
+      const read = navigator.clipboard.readText;
+      globalThis.restoreFixtureClipboard = () => { navigator.clipboard.readText = read; };
+      navigator.clipboard.readText = async () => ${JSON.stringify(text)};
+    })()`)
+    try {
+      await command(editor, 'Terminal: Paste into Active Terminal')
+      await delay(200)
+      await key(editor, 'Enter')
+    } finally {
+      await editor.executeJavaScript('globalThis.restoreFixtureClipboard()')
+    }
+  }
+  const mouseReports = () => {
+    try {
+      return readFileSync(join(input.project, 'mouse-events.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+    } catch (error) {
+      if (error.code === 'ENOENT') return []
+      throw error
+    }
+  }
+  const moveMouse = async () => {
+    const point = await editor.executeJavaScript(`(() => {
+      const rect = document.querySelector('.xterm-screen').getBoundingClientRect();
+      return { x: Math.round(rect.left + 40), y: Math.round(rect.top + 40) };
+    })()`)
+    editor.sendInputEvent({ type: 'mouseMove', ...point })
+    editor.sendInputEvent({
+      type: 'mouseMove',
+      x: point.x + 20,
+      y: point.y + 20,
+    })
   }
   try {
     await until(
@@ -140,7 +170,8 @@ async function run() {
           ),
         'edited user setting',
       )
-      await command(editor, 'Terminal: Create New Terminal')
+      // Exercise editor terminals, as used by the ADE launcher, across quit.
+      await command(editor, 'Terminal: Create New Terminal in Editor Area')
       await until(
         () => editor.executeJavaScript("!!document.querySelector('.xterm')"),
         'terminal',
@@ -220,6 +251,25 @@ async function run() {
       assert.equal(BaseWindow.getAllWindows().length, 2)
       await assertEditorFits(editor)
       assert.ok((await body()).includes('ADE_TERMINAL_MARKER'))
+      const executable =
+        "'" +
+        input.node.replaceAll(
+          "'",
+          process.platform === 'win32' ? "''" : "'\\''",
+        ) +
+        "'"
+      await terminalCommand(
+        `${process.platform === 'win32' ? '& ' : ''}${executable} ./terminal-mouse.cjs`,
+      )
+      await until(
+        async () => (await body()).includes('ADE_MOUSE_READY'),
+        'mouse application starts',
+      )
+      await moveMouse()
+      await until(
+        () => mouseReports().some((event) => event.data.startsWith('\x1b[<')),
+        'SGR mouse reports before restart',
+      )
       await delay(2000)
     } else {
       await until(
@@ -231,6 +281,23 @@ async function run() {
           "Array.from(document.querySelectorAll('.tab')).some(tab => tab.textContent.replace(/\\s/g, '').includes('persist.txt'))",
         ),
       )
+      const before = mouseReports()
+      await moveMouse()
+      await until(
+        () => mouseReports().length > before.length,
+        'mouse report after restart',
+      )
+      const after = mouseReports().slice(before.length)
+      assert.ok(
+        after.every((event) => event.pid === before[0].pid),
+        'same mouse application survives restart',
+      )
+      assert.ok(
+        after.every((event) => event.data.startsWith('\x1b[<')),
+        'reconnected mouse reports keep SGR encoding',
+      )
+      await terminalCommand('q')
+      await delay(500)
       await terminalCommand('echo ADE_RESUMED_$adePersistence')
       await until(
         async () => (await body()).includes('ADE_RESUMED_ADE_VARIABLE_OK'),
@@ -238,7 +305,8 @@ async function run() {
       )
     }
     writeFileSync(input.result, JSON.stringify({ ok: true, errors }))
-    app.quit()
+    // Use the user's exit path: closing the picker shuts down all editor pages.
+    BrowserWindow.getAllWindows()[0].close()
   } catch (error) {
     writeFileSync(input.screenshot, (await editor.capturePage()).toPNG())
     writeFileSync(

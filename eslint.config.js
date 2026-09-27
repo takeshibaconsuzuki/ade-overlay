@@ -6,7 +6,13 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**', '.worktrees/**'],
+    ignores: [
+      '**/out/**',
+      'dist/**',
+      'node_modules/**',
+      '.worktrees/**',
+      '.vscode-test/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -23,6 +29,8 @@ export default tseslint.config(
       'src/server/**/*.ts',
       'tests/**/*.ts',
       'tests/**/*.mjs',
+      'tests/**/*.cjs',
+      'extensions/**/*.ts',
       'scripts/**/*.mjs',
     ],
     languageOptions: {

@@ -1,0 +1,91 @@
+{
+  "name": "ade-terminals",
+  "displayName": "ADE Terminals",
+  "description": "Launch worktree shells and keep Codex and Claude terminals in a separate editor group.",
+  "version": "0.1.0",
+  "publisher": "ade-overlay",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "files": [
+    "out/*.js",
+    "media/*.svg",
+    "README.md"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "adeTerminals.terminal",
+        "title": "New Terminal",
+        "category": "ADE"
+      },
+      {
+        "command": "adeTerminals.codex",
+        "title": "New Codex Terminal",
+        "category": "ADE"
+      },
+      {
+        "command": "adeTerminals.claude",
+        "title": "New Claude Terminal",
+        "category": "ADE"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "adeTerminals",
+          "title": "ADE",
+          "icon": "media/terminal.svg"
+        }
+      ]
+    },
+    "views": {
+      "adeTerminals": [
+        {
+          "id": "adeTerminals.launcher",
+          "name": "Terminals"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "adeTerminals.launcher",
+        "contents": "[Terminal](command:adeTerminals.terminal)\n[Codex](command:adeTerminals.codex)\n[Claude](command:adeTerminals.claude)"
+      }
+    ],
+    "configuration": {
+      "title": "ADE Terminals",
+      "properties": {
+        "adeTerminals.codexCommand": {
+          "type": "string",
+          "default": "codex",
+          "scope": "machine",
+          "description": "Shell command to start Codex on the machine hosting the workspace."
+        },
+        "adeTerminals.claudeCommand": {
+          "type": "string",
+          "default": "claude",
+          "scope": "machine",
+          "description": "Shell command to start Claude on the machine hosting the workspace."
+        }
+      }
+    }
+  }
+}

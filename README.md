@@ -58,6 +58,20 @@ The companion writes structured logs to its terminal and `~/.ade-overlay/server.
 
 # App
 
+## Terminal sidebar
+
+Build the optional VS Code extension with `npm run build:extension`, then install it in the companion account's local VS Code:
+
+```powershell
+code --install-extension out/ade-terminals.vsix --force
+```
+
+Reload existing editors with **Developer: Reload Window**, then open **ADE** in the Activity Bar. **Terminal** opens a normal shell alongside files in an editor group. **Codex** and **Claude** open new terminals in a shared locked chat group. Starting from an empty editor uses the full width; another group is created only when ordinary content and chat need to coexist. All terminals start in the current worktree; none open in the terminal panel.
+
+Install and sign in to the provider CLIs on the companion machine separately. Commands default to `codex` and `claude`; customize `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in that machine's User/Remote settings. VS Code controls terminal titles and persistence. Each extension activation starts without adopting existing terminals; new chat launches reuse an empty group or create a new one. Deactivation leaves terminals and groups intact. VS Code still allows manually moving tabs and unlocking groups.
+
+## Worktrees
+
 Run `npm run dev`. Worktrees load on connection and after reconnecting. Closing the worktree picker quits the app, including its editor window; the companion and remote sessions keep running. Closing only the editor window keeps the picker open.
 
 - **Create worktree**: choose a project, base branch, and path. Enter a new branch name to create a branch, or leave it blank to check out the base branch directly. Git refuses branches already checked out elsewhere. Relative worktree paths start at the selected project.
@@ -68,4 +82,4 @@ Run `npm run dev`. Worktrees load on connection and after reconnecting. Closing 
 
 Create and delete dialogs close once the server accepts the request. Creation immediately adds a pending row; deletion shows a spinner on the existing row. Progress and errors appear in every connected app and survive desktop restarts while the companion stays running. Failed creations that never produced a Git worktree keep an error row until its X is cleared. The branch and directory remain available when bootstrap fails. Restarting the companion rescans Git and resets operation/error state.
 
-Files, layout and terminal sessions are restored when you reopen a worktree after restarting the desktop app. Keep the companion running to retain terminal processes; disconnected sessions use the configured reconnection grace period. Restarting the companion or server machine stops running processes. Each worktree keeps its own workspace state, and all editors share installed extensions. Already-open editors may need **Developer: Reload Window** to activate an extension installed elsewhere.
+Files, layout and terminal sessions are restored when you reopen a worktree after restarting the desktop app. ADE enables `terminal.integrated.enablePersistentSessions` in each editor server's Remote settings at startup, leaving synchronized User settings unchanged. Workspace settings can override this value. Keep the companion running to retain terminal processes; disconnected sessions use the configured reconnection grace period. Restarting the companion or server machine stops running processes. Each worktree keeps its own workspace state, and all editors share installed extensions. Already-open editors may need **Developer: Reload Window** to activate an extension installed elsewhere.

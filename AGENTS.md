@@ -5,6 +5,8 @@
 - `npm run server`: build and start the companion in a separate terminal. Append `-- --config path/to/server.yaml` to select a config.
 - `npm run server:dev`: run the companion with file watching; accepts the same config argument.
 - `npm run build` / `npm run build:server`: build everything / just the companion into `out/`.
+- `npm run build:extension`: package the workspace extension as `out/ade-terminals.vsix`.
+- `npm run test:extension`: run isolated VS Code extension-host tests; set `ADE_TEST_VSCODE_EXECUTABLE` to an existing VS Code executable to avoid downloading a test runtime.
 - `npm run typecheck`: check app, companion, and tests.
 - `npm test`: run socket and temporary Git repository integration tests. Git must be on PATH.
 - Set `ADE_TEST_VSCODE_RUNTIME` to a VS Code web server distribution and run `npm run build` followed by `npm test` to also check the real editor window, worktree switching and restoration across desktop restarts.
@@ -51,6 +53,26 @@ The picker window owns the desktop app's lifetime on every platform: closing it 
 Each retained editor page owns its current navigation state throughout its lifetime. Opening reuses ready pages, waits for loading pages, and replaces failed pages; token rotation also replaces the page. Only the current navigation can complete readiness, and disposal belongs to the specific view being removed. Readiness depends on the main document, independently of subresources.
 
 The active editor view and its extension frames may use the clipboard and microphone; clipboard reads require a user gesture. Other browser permission requests remain denied. VS Code and Chromium retain their frame-level policies, and operating-system microphone permissions still apply. The editor proxy replaces only the authentication cookie, preserving browser preferences such as display language.
+
+## Terminal Launcher Extension
+
+The workspace extension in `extensions/ade-terminals` runs on the companion through its shared local extensions directory. Native sidebar buttons launch shells in editor groups. Provider terminals share a locked group remembered only during the current activation; ordinary terminals use VS Code's placement around locked groups and leave their destination unlocked for files. Empty groups are reused, and a single chat group fills the editor until ordinary content needs a separate group. Launches run sequentially because group focus is global workbench state. VS Code owns terminal titles and persistence. Activation does not adopt existing terminals or clean up groups, and deactivation does not dispose terminals. Group locking governs default placement; users can still move tabs, rename terminals, and unlock groups.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Extension as Workspace extension
+    participant VSCode as VS Code workbench
+    participant Shell as Companion shell
+    User->>Extension: Click Terminal, Codex, or Claude
+    Note over Extension: Queue launch and select workspace directory
+    Extension->>VSCode: Reuse an existing or empty group, creating a separate group only when needed
+    Extension->>VSCode: createTerminal in editor area with workspace cwd and explicit chat viewColumn
+    Note over Extension,VSCode: Lock provider group and unlock ordinary terminal group
+    VSCode->>Shell: Start the configured default shell
+    Extension->>Shell: sendText with configured provider command, for chat terminals
+    Note over VSCode,Shell: Workspace session retains terminals independently of extension activation
+```
 
 ## Connections
 
@@ -138,7 +160,7 @@ sequenceDiagram
     Git-->>Server: Current worktrees
     Note over Server: Reconcile editors against Git membership, then finish operation or retain row error
     Server-->>Clients: worktrees:updated (finished or error)
-    Note over Clients: Replace spinner with status or a red X; tooltip shows error
+    Note over Clients: Replace spinner with status or a red X and show error in tooltip
     User->>App: Click red X
     App->>Server: worktrees:set-error without error
     Server-->>Clients: worktrees:updated (error cleared)
@@ -165,14 +187,14 @@ sequenceDiagram
     Note over Server: Stop this worktree's editor process
     Server->>Git: git worktree remove without force
     Git-->>Server: Removed or refused
-    Note over Server: Remove row on success; retain row and error on failure
+    Note over Server: Remove row on success or retain row and error on failure
     Server-->>Clients: worktrees:updated (removed or error)
     Note over Clients: Remove row or replace spinner with red X and error tooltip
 ```
 
 ## Editor Updates
 
-The companion requires an installed VS Code CLI on PATH. Runtime preparation uses Microsoft's downloader; direct editor launch exposes the reconnection grace and avoids the wrapper's idle shutdown. The internal layout, release log and launch arguments are validated before accepting a runtime. Prepared copies live outside the CLI's cache pruning; old copies are retained so live processes keep their files. Preparation runs independently of worktree operations and is cancelled on shutdown.
+The companion requires an installed VS Code CLI on PATH. Runtime preparation uses Microsoft's downloader; direct editor launch exposes the reconnection grace and avoids the wrapper's idle shutdown. The internal layout, release log and launch arguments are validated before accepting a runtime. Prepared copies live outside the CLI's cache pruning; old copies are retained so live processes keep their files. ADE preserves mouse-report encoding in the bundled terminal serializer so interactive apps reconnect correctly. Compatibility revisions use separate runtime copies and must pass round-trip checks against the bundled terminal libraries before use. Preparation runs independently of worktree operations and is cancelled on shutdown.
 
 ```mermaid
 sequenceDiagram
@@ -221,7 +243,7 @@ sequenceDiagram
     Editor-->>Server: Ready or startup failure
     Server-->>App: worktrees:updated with status and progress, broadcast to all apps
     Server-->>App: editor with ID, path and accessToken, or error
-    Note over App: Errors belong to the worktree row; otherwise configure authentication and select editor view
+    Note over App: Retain errors on the worktree row or configure authentication and select editor view
     App->>Page: Load /editors/id/ in the single editor window for a new or replaced view
     Note over Page,Server: Main process adds the editor bearer token to HTTP and WebSocket upgrades
     Page->>Server: GET /editors/id/ and assets
@@ -243,7 +265,7 @@ sequenceDiagram
 
 ## Sync User Settings
 
-Settings move, persist and compare as one immutable `SettingsSnapshot`: content and original modification time. Browser snapshots live in the app's persistent storage, shared by companion origin. Main owns one sync loop per companion origin, using a loaded view to access that storage; workspace query changes remain valid and another view can take over when one is unavailable. Views only observe saves and expose storage operations to main, without a preload or IPC bridge. A browser lock protects snapshots and replacements. Whole-file replacement uses wall-clock save times with approximate ordering across machines; equal times favor the companion. Copies retain the winning snapshot to avoid feedback. A new browser starts with the companion copy; subsequent pending saves survive app restarts. A reply applies only while the full browser snapshot still matches the one sent; intervening saves wait for the next cycle. Remote and Workspace overrides remain separate. Legacy imported Remote values migrate once, preserving edited values and a backup.
+Settings move, persist and compare as one immutable `SettingsSnapshot`: content and original modification time. Browser snapshots live in the app's persistent storage, shared by companion origin. Main owns one sync loop per companion origin, using a loaded view to access that storage; workspace query changes remain valid and another view can take over when one is unavailable. Views only observe saves and expose storage operations to main, without a preload or IPC bridge. A browser lock protects snapshots and replacements. Whole-file replacement uses wall-clock save times with approximate ordering across machines; equal times favor the companion. Copies retain the winning snapshot to avoid feedback. A new browser starts with the companion copy; subsequent pending saves survive app restarts. A reply applies only while the full browser snapshot still matches the one sent; intervening saves wait for the next cycle. Remote and Workspace overrides remain separate. Each editor server starts with terminal persistence enabled in its Remote settings so desktop reconnects can retain live processes, without changing synchronized User settings. Legacy imported Remote values migrate once, preserving edited values and a backup.
 
 The bridge uses VS Code's IndexedDB store and file-change broadcast, checked by the real-editor integration test. These are internal runtime interfaces and must be revalidated when updating the runtime. Editor authentication protects both the script and the sync endpoint; the endpoint can only access the discovered local settings file.
 
