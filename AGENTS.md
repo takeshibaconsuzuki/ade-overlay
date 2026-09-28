@@ -1,6 +1,7 @@
 # Contributor Commands
 
-- `python scripts/bootstrap.py | iex` (PowerShell) or `eval "$(python scripts/bootstrap.py)"` (POSIX): set up the development environment by installing and activating Node.js and installing dependencies and Electron. Add `--force` to replace the vendored Node installation.
+- `python scripts/bootstrap.py | iex` (PowerShell) or `eval "$(python scripts/bootstrap.py)"` (POSIX): set up and activate the development environment. Run this before running any other commands in the repo.
+  - Codex does not have persistent terminals, so the fast path needs to be fast enough to run before every agent command.
 - `npm run dev`: start Electron/Vite.
 - `npm run server`: build and start the companion in a separate terminal. Append `-- --config path/to/server.yaml` to select a config.
 - `npm run server:dev`: run the companion with file watching; accepts the same config argument.
@@ -11,6 +12,7 @@
 - `npm run test:extension`: run isolated VS Code extension-host tests; set `ADE_TEST_VSCODE_EXECUTABLE` to an existing VS Code executable to avoid downloading a test runtime.
 - `npm run typecheck`: check app, companion, and tests.
 - `npm test`: run socket and temporary Git repository integration tests. Git must be on PATH.
+- `python -B -m unittest discover -s tests -p test_bootstrap.py`: check bootstrap caching and setup recovery.
 - Set `ADE_TEST_VSCODE_RUNTIME` to a VS Code web server distribution and run `npm run build` followed by `npm test` to also check the real editor window, worktree switching and restoration across desktop restarts.
 - `npm run lint` / `npm run lint:fix`: check / fix ESLint issues.
 - `npm run format`: format with Prettier.

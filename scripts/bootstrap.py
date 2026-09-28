@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import json
 import logging
 import os
 import platform
@@ -9,10 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
-import urllib.request
-import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +45,8 @@ def node_platform() -> tuple[str, str]:
 
 
 def download(url: str, destination: Path) -> None:
+    import urllib.request
+
     logger.info("Downloading %s", url)
     with urllib.request.urlopen(url) as response:
         with destination.open("wb") as output:
@@ -77,6 +77,8 @@ def existing_node_version(node_binary: Path) -> Optional[str]:
 
 
 def expected_sha256(filename: str) -> str:
+    import urllib.request
+
     shasums_url = f"{NODE_BASE_URL}/v{NODE_VERSION}/SHASUMS256.txt"
     with urllib.request.urlopen(shasums_url) as response:
         for raw_line in response:
@@ -99,6 +101,9 @@ def archive_relative_parts(path: str, root_name: str) -> Optional[tuple[str, ...
 
 
 def extract_archive(archive: Path, destination: Path, root_name: str) -> None:
+    import tarfile
+    import zipfile
+
     destination.mkdir(parents=True, exist_ok=True)
 
     if archive.suffix == ".zip":
@@ -147,12 +152,17 @@ def extract_archive(archive: Path, destination: Path, root_name: str) -> None:
                 target.chmod(tar_member.mode)
 
 
+def node_directory() -> Path:
+    os_name, arch = node_platform()
+    return PROJECT_ROOT / f".node.{os_name}-{arch}"
+
+
 def bootstrap(force: bool) -> Path:
     os_name, arch = node_platform()
     extension = "zip" if os_name == "win" else "tar.xz"
     root_name = f"node-v{NODE_VERSION}-{os_name}-{arch}"
     filename = f"{root_name}.{extension}"
-    node_dir = PROJECT_ROOT / f".node.{os_name}-{arch}"
+    node_dir = node_directory()
     node_binary = node_dir / ("node.exe" if os_name == "win" else "bin/node")
 
     if node_binary.exists() and not force:
@@ -228,6 +238,69 @@ def install_dependencies(node_dir: Path) -> None:
     )
 
 
+def environment_state(node_dir: Path) -> Optional[dict]:
+    """Fingerprint setup inputs and installed entrypoints without starting tools."""
+    os_name, _ = node_platform()
+    modules = PROJECT_ROOT / "node_modules"
+    electron = modules / "electron"
+    try:
+        inputs = {
+            name: sha256(PROJECT_ROOT / name)
+            for name in (
+                ".node-version",
+                "package.json",
+                "package-lock.json",
+                "scripts/bootstrap.py",
+            )
+        }
+        npmrc = PROJECT_ROOT / ".npmrc"
+        inputs[".npmrc"] = sha256(npmrc) if npmrc.exists() else None
+        executable = (electron / "path.txt").read_text().strip()
+        if not executable:
+            return None
+        installed = [
+            node_dir / ("node.exe" if os_name == "win" else "bin/node"),
+            node_dir
+            / (
+                "node_modules/npm/bin/npm-cli.js"
+                if os_name == "win"
+                else "lib/node_modules/npm/bin/npm-cli.js"
+            ),
+            modules / ".package-lock.json",
+            electron / "path.txt",
+            electron / "dist" / executable,
+        ]
+        files = {}
+        for path in installed:
+            stat = path.stat()
+            files[str(path)] = [stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+        return {"inputs": inputs, "installed": files}
+    except (OSError, ValueError):
+        return None
+
+
+def prepare_environment(force: bool) -> Path:
+    node_dir = node_directory()
+    stamp = PROJECT_ROOT / "node_modules" / ".ade-bootstrap.json"
+    if not force:
+        try:
+            cached = json.loads(stamp.read_text())
+            if cached is not None and cached == environment_state(node_dir):
+                return node_dir
+        except (OSError, ValueError):
+            pass
+
+    # A failed or interrupted installation must never leave a valid cache.
+    stamp.unlink(missing_ok=True)
+    node_dir = bootstrap(force)
+    install_dependencies(node_dir)
+    # npm may update the lockfile, so capture the state only after it succeeds.
+    state = environment_state(node_dir)
+    if state is not None:
+        stamp.write_text(json.dumps(state))
+    return node_dir
+
+
 def print_env(node_dir: Path) -> None:
     os_name, _ = node_platform()
     path_dir = node_dir if os_name == "win" else node_dir / "bin"
@@ -268,22 +341,21 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="replace the existing vendored Node directory",
+        help="bypass cached setup, replace vendored Node and reinstall dependencies",
     )
     args = parser.parse_args()
 
     # Stdout is evaluated by the caller's shell; keep diagnostics on stderr.
     logging.basicConfig(format="%(message)s", level=logging.INFO)
 
-    node_dir = bootstrap(force=args.force)
     try:
-        install_dependencies(node_dir)
+        node_dir = prepare_environment(force=args.force)
     except (OSError, subprocess.CalledProcessError) as error:
-        logger.error("Dependency installation failed: %s", error)
+        logger.error("Environment setup failed: %s", error)
         # Preserve failure when the caller evaluates stdout through a shell.
         os_name, _ = node_platform()
         print(
-            "throw 'Dependency installation failed.'" if os_name == "win" else "false"
+            "throw 'Environment setup failed.'" if os_name == "win" else "false"
         )
         raise SystemExit(1) from error
     print_env(node_dir)
