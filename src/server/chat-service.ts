@@ -21,7 +21,6 @@ interface EditorConnection {
   activation?: string
   startedAt: number
   socket?: WebSocket
-  terminals?: Set<string>
 }
 interface Navigation {
   source: WebSocket
@@ -91,7 +90,11 @@ export class ChatService {
         const report = chatReportSchema.parse(
           JSON.parse(Buffer.concat(chunks, length).toString('utf8')),
         )
-        const accepted = await this.store.activity(scope.id, report)
+        const accepted = await this.store.activity(
+          scope.id,
+          scope.worktree,
+          report,
+        )
         response.writeHead(accepted ? 204 : 409).end()
       })().catch(() => {
         if (!response.headersSent) response.writeHead(400)
@@ -133,7 +136,6 @@ export class ChatService {
         scope.activation = identity.activation
         scope.startedAt = identity.startedAt
         scope.socket = client
-        scope.terminals = undefined
         previous?.terminate()
         this.alive.add(client)
         client.on('pong', () => this.alive.add(client))
@@ -159,32 +161,7 @@ export class ChatService {
             client.close(1008)
             return
           }
-          if (message.type === 'inventory') {
-            void this.store
-              .inventory(scope.id, scope.worktree, message.terminals)
-              .then((terminals) => {
-                if (scope.socket !== client) return
-                scope.terminals = new Set(
-                  terminals.map((item) => item.terminalId),
-                )
-                this.send(client, { type: 'result', id: message.id, terminals })
-                for (const [id, navigation] of this.navigations)
-                  if (
-                    navigation.editorId === scope.id &&
-                    terminals.some(
-                      (item) => item.terminalId === navigation.terminalId,
-                    )
-                  )
-                    this.focus(id)
-              })
-              .catch(() =>
-                this.send(client, {
-                  type: 'result',
-                  id: message.id,
-                  error: 'Could not inspect terminal processes. Try again.',
-                }),
-              )
-          } else if (message.type === 'activate')
+          if (message.type === 'activate')
             this.activate(client, message.id, message.chatId)
           else {
             const navigation = this.navigations.get(message.id)
@@ -193,6 +170,8 @@ export class ChatService {
           }
         })
         this.send(client, { type: 'snapshot', snapshot: this.store.list() })
+        for (const [id, navigation] of this.navigations)
+          if (navigation.editorId === scope.id) this.focus(id)
       })
     })
     this.store.on('update', (snapshot) => {
@@ -331,11 +310,7 @@ export class ChatService {
       socket?.readyState !== WebSocket.OPEN
     )
       return
-    if (
-      !scope?.terminals?.has(navigation.terminalId) ||
-      scope.activation === navigation.activationAfter
-    )
-      return
+    if (scope?.activation === navigation.activationAfter) return
     navigation.target = socket
     this.send(socket, { type: 'focus', id, terminalId: navigation.terminalId })
   }

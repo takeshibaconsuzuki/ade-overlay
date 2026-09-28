@@ -3,35 +3,64 @@ const vscode = require('vscode')
 const fs = require('node:fs')
 const path = require('node:path')
 const { randomUUID } = require('node:crypto')
-const { WebSocket } = require(require('./bootstrap-config.json').ws)
+const { ChatController } = require('./chats.cjs')
 
-exports.activate = async (context) => {
+exports.activate = (context) => {
+  void run(context)
+}
+
+async function run(context) {
   const root = vscode.workspace.workspaceFolders[0].uri.fsPath
   try {
-    const token = process.env.ADE_CHAT_EXTENSION_TOKEN
-    delete process.env.ADE_CHAT_EXTENSION_TOKEN
-    if (!token) throw new Error('Extension host did not receive its credential')
-    const activation = randomUUID()
-    const url = new URL('/extension', process.env.ADE_CHAT_ENDPOINT)
-    url.protocol = 'ws:'
-    url.searchParams.set('activation', activation)
-    url.searchParams.set('startedAt', Date.now().toString())
-    const socket = new WebSocket(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    context.subscriptions.push({ dispose: () => socket.terminate() })
-    await new Promise((resolve, reject) => {
-      socket.on('error', reject)
-      socket.on('open', () =>
-        socket.send(
-          JSON.stringify({ type: 'inventory', id: 'ready', terminals: [] }),
-        ),
+    const controller = new ChatController(context)
+    context.subscriptions.push(controller)
+    const activation = controller.activation
+    const until = async (check) => {
+      const deadline = Date.now() + 15000
+      while (!check()) {
+        if (Date.now() >= deadline)
+          throw new Error('Terminal restoration or connection timed out')
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+    await until(() => controller.getSnapshot().revision >= 0)
+    const identityFile = path.join(root, 'terminal-identity.json')
+    if (fs.existsSync(identityFile)) {
+      const expected = JSON.parse(fs.readFileSync(identityFile, 'utf8'))
+      await controller.focus(expected.terminalId, controller.focusGeneration)
+      const restored = vscode.window.activeTerminal
+      if ((await restored.processId) !== expected.pid)
+        throw new Error('Restored terminal changed shell PID')
+      fs.writeFileSync(
+        path.join(root, 'restored-terminal.json'),
+        JSON.stringify({
+          terminalId: expected.terminalId,
+          pid: await restored.processId,
+        }),
       )
-      socket.on('message', (data) => {
-        const message = JSON.parse(data.toString())
-        if (message.type === 'result' && message.id === 'ready') resolve()
+    } else {
+      const terminalId = randomUUID()
+      const terminal = vscode.window.createTerminal({
+        env: { ADE_TERMINAL_ID: terminalId },
+        location: vscode.TerminalLocation.Editor,
       })
+      terminal.show()
+      const pid = await terminal.processId
+      await until(
+        () =>
+          context.workspaceState.get('adeChatTerminals', {})[pid]
+            ?.terminalId === terminalId,
+      )
+      fs.writeFileSync(identityFile, JSON.stringify({ terminalId, pid }))
+    }
+    const reloadFile = path.join(root, 'reload-request')
+    const watcher = fs.watch(root, () => {
+      if (fs.existsSync(reloadFile)) {
+        fs.unlinkSync(reloadFile)
+        void vscode.commands.executeCommand('workbench.action.reloadWindow')
+      }
     })
+    context.subscriptions.push({ dispose: () => watcher.close() })
     const probe = path.join(root, 'environment-probe.cjs')
     fs.writeFileSync(
       probe,

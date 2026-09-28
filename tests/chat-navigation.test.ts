@@ -61,9 +61,6 @@ test(
         activity: 'idle' as const,
       },
     }))
-    t.mock.method(chats.store, 'inventory', async () => [
-      { terminalId: 'terminal', pid: 10, title: 'Chat' },
-    ])
     const extension = async (id: string) => {
       const env = chats.environment(id, worktree)
       const url = new URL('/extension', env.ADE_CHAT_ENDPOINT)
@@ -88,12 +85,16 @@ test(
     for (const pageReady of [false, true]) {
       const request = `timeout-${pageReady}`
       const id = await activate(request)
-      if (pageReady) await ready(id)
+      if (pageReady) {
+        await ready(id)
+        assert.equal((await target.take('focus')).id, id)
+      }
       t.mock.timers.tick(30_000)
       assert.equal((await desktop.take('chat:finished')).id, id)
       const result = await source.take('result')
       assert.equal(result.id, request)
       assert.match(result.error, /did not become ready/)
+      if (pageReady) assert.equal((await target.take('cancel-focus')).id, id)
     }
     t.mock.timers.reset()
 
@@ -103,7 +104,6 @@ test(
     const second = (await desktop.take('chat:activate')).id
     assert.match((await source.take('result')).error, /Superseded/)
     await ready(second)
-    target.send({ type: 'inventory', id: 'inventory', terminals: [] })
     const focus = await target.take('focus')
     assert.equal(focus.id, second)
     target.send({ type: 'focused', id: second })

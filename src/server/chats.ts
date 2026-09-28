@@ -5,33 +5,24 @@ import type {
   ChatReport,
   ChatSnapshot,
   ProcessIdentity,
-  TerminalInventory,
 } from '../shared/chats.ts'
 import type { OpenEditorInput } from '../shared/companion.ts'
 import { chatProvider } from './chat-providers.ts'
 import {
-  processAncestors,
   readChatProcesses,
   sameProcess,
   type ChatProcess,
 } from './chat-processes.ts'
 
-interface TerminalRecord {
-  editorId: string
-  terminalId: string
-  worktree: OpenEditorInput
-  shell: ProcessIdentity
-  observedAt: number
-}
 interface ChatRecord {
   chat: Chat
   process: ProcessIdentity
-  terminal: TerminalRecord
+  editorId: string
+  observedAt: number
   metadataRoot?: string
 }
 
 export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
-  private readonly terminals = new Map<string, TerminalRecord>()
   private readonly records = new Map<string, ChatRecord>()
   private revision = 0
   private queue: Promise<unknown> = Promise.resolve()
@@ -64,53 +55,23 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
 
   get(id: string): { chat: Chat; editorId: string } | undefined {
     const entry = this.records.get(id)
-    return (
-      entry && { chat: { ...entry.chat }, editorId: entry.terminal.editorId }
-    )
+    return entry && { chat: { ...entry.chat }, editorId: entry.editorId }
   }
 
-  inventory(
+  async activity(
     editorId: string,
     worktree: OpenEditorInput,
-    inventory: TerminalInventory,
-  ): Promise<TerminalInventory> {
-    const requestedAt = performance.now()
-    return this.serial(async () => {
-      const processes = await this.processes(requestedAt)
-      const accepted: TerminalInventory = []
-      for (const item of inventory) {
-        const shell = processes.get(item.pid)
-        if (
-          !shell ||
-          (item.startedAt !== undefined && item.startedAt !== shell.startedAt)
-        )
-          continue
-        const key = `${editorId}:${item.terminalId}`
-        let record = this.terminals.get(key)
-        if (record && !sameProcess(record.shell, shell)) continue
-        if (!record) {
-          record = {
-            editorId,
-            terminalId: item.terminalId,
-            worktree,
-            shell,
-            observedAt: -1,
-          }
-          this.terminals.set(key, record)
-        }
-        accepted.push({ ...item, startedAt: shell.startedAt })
-      }
-      return accepted
-    })
-  }
-
-  async activity(editorId: string, report: ChatReport): Promise<boolean> {
+    report: ChatReport,
+  ): Promise<boolean> {
     const requestedAt = performance.now()
     const accepted = await this.serial(async () => {
-      const terminal = this.terminals.get(`${editorId}:${report.terminalId}`)
+      const current = [...this.records.values()].find(
+        (entry) =>
+          entry.editorId === editorId &&
+          entry.chat.terminalId === report.terminalId,
+      )
       if (
-        !terminal ||
-        report.observedAt < terminal.observedAt ||
+        report.observedAt < (current?.observedAt ?? -1) ||
         report.observedAt > Date.now() + 5000
       )
         return false
@@ -121,13 +82,9 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
       if (
         !owner ||
         !sameProcess(report.process, owner) ||
-        !provider.isProcess(owner) ||
-        !processAncestors(owner.pid, processes).some((entry) =>
-          sameProcess(terminal.shell, entry),
-        )
+        !provider.isProcess(owner)
       )
         return false
-      terminal.observedAt = report.observedAt
       const id = createHash('sha256')
         .update(
           `${editorId}\0${report.terminalId}\0${report.provider}\0${report.sessionId}`,
@@ -135,7 +92,7 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
         .digest('hex')
       // One visible conversation per terminal; a later session replaces the old one.
       for (const [previousId, entry] of this.records)
-        if (entry.terminal === terminal && previousId !== id)
+        if (entry === current && previousId !== id)
           this.records.delete(previousId)
       const previous = this.records.get(id)
       const message = report.message || previous?.chat.message
@@ -143,7 +100,8 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
         ? report.observedAt
         : previous?.chat.lastTurnAt
       this.records.set(id, {
-        terminal,
+        editorId,
+        observedAt: report.observedAt,
         process: report.process,
         metadataRoot: report.metadataRoot ?? previous?.metadataRoot,
         chat: {
@@ -151,7 +109,7 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
           provider: report.provider,
           sessionId: report.sessionId,
           terminalId: report.terminalId,
-          ...terminal.worktree,
+          ...worktree,
           title: previous?.chat.title,
           message,
           lastTurnAt,
@@ -174,24 +132,15 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
   async reconcile(): Promise<void> {
     const requestedAt = performance.now()
     await this.serial(async () => {
-      if (!this.terminals.size) return
+      if (!this.records.size) return
       const processes = await this.processes(requestedAt)
       let changed = false
       for (const [id, entry] of this.records) {
-        if (
-          !sameProcess(entry.process, processes.get(entry.process.pid)) ||
-          !sameProcess(
-            entry.terminal.shell,
-            processes.get(entry.terminal.shell.pid),
-          )
-        ) {
+        if (!sameProcess(entry.process, processes.get(entry.process.pid))) {
           this.records.delete(id)
           changed = true
         }
       }
-      for (const [id, terminal] of this.terminals)
-        if (!sameProcess(terminal.shell, processes.get(terminal.shell.pid)))
-          this.terminals.delete(id)
       if (changed) this.publish()
     })
     await this.refreshTitles()

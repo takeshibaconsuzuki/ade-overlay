@@ -1,4 +1,3 @@
-import { processes } from 'systeminformation'
 import { setTimeout as delay } from 'node:timers/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -40,10 +39,13 @@ export function createProcessReader(scan = readFreshProcesses) {
 }
 
 // Share a scan only with requests admitted before it began. In particular, a
-// newly launched terminal must never be checked against an older inventory.
+// newly reported provider must never be checked against an older process snapshot.
 export const readChatProcesses = createProcessReader()
 
 async function readFreshProcesses(): Promise<Map<number, ChatProcess>> {
+  // Windows initialization spawns a shell and captures process.env. Defer it
+  // until callers have consumed and removed extension-host-only credentials.
+  const { processes } = await import('systeminformation')
   const [result, starts] = await Promise.all([
     processes(),
     process.platform === 'win32'

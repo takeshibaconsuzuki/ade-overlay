@@ -60,13 +60,18 @@ async function run() {
       .getAllWebContents()
       .find((contents) => contents.getURL().includes(input.editor.path))
     const loaded = new Promise((resolve) => view.once('dom-ready', resolve))
-    view.reload()
+    writeFileSync(join(input.project, 'reload-request'), '')
     await loaded
     assert.equal(await page.chatActivation(), before.activation)
     await until(
       () => read('bootstrap-extension.json')?.activation !== before.activation,
     )
     assert.notEqual(read('bootstrap-extension.json').pid, before.pid)
+    await until(() => read('restored-terminal.json'))
+    assert.deepEqual(
+      read('restored-terminal.json'),
+      read('terminal-identity.json'),
+    )
     manager.close()
     finish({ ok: true })
   } catch (error) {

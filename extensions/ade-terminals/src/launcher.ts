@@ -1,4 +1,5 @@
 import * as vscode from 'vscode'
+import { randomUUID } from 'node:crypto'
 import { providerShellCommand } from './provider-command.js'
 
 export type TerminalKind = 'terminal' | 'codex' | 'claude'
@@ -36,12 +37,7 @@ export class TerminalLauncher implements vscode.Disposable {
   private readonly tabs = new Map<vscode.Tab, vscode.Terminal>()
   private selectedTerminal?: vscode.Terminal
   private readonly subscriptions: vscode.Disposable[]
-  constructor(
-    private readonly tracking?: {
-      prepare(): { terminalId: string; env: Record<string, string | null> }
-      created(terminal: vscode.Terminal, terminalId: string): Promise<void>
-    },
-  ) {
+  constructor() {
     this.subscriptions = [
       vscode.window.tabGroups.onDidChangeTabs((event) => {
         for (const tab of event.closed) this.tabs.delete(tab)
@@ -180,11 +176,10 @@ export class TerminalLauncher implements vscode.Disposable {
     const previousTabs = new Set(
       vscode.window.tabGroups.all.flatMap((item) => item.tabs),
     )
-    const identity = chat ? this.tracking?.prepare() : undefined
     const terminal = vscode.window.createTerminal({
-      env: identity?.env ?? {
+      env: {
         ADE_CHAT_EXTENSION_TOKEN: null,
-        ADE_TERMINAL_ID: null,
+        ADE_TERMINAL_ID: chat ? randomUUID() : null,
       },
       cwd: folder?.uri,
       ...(chat ? { waitOnExit: false } : {}),
@@ -221,7 +216,6 @@ export class TerminalLauncher implements vscode.Disposable {
           ? 'workbench.action.lockEditorGroup'
           : 'workbench.action.unlockEditorGroup',
       )
-      if (identity) await this.tracking?.created(terminal, identity.terminalId)
       if (command)
         terminal.sendText(
           providerShellCommand(

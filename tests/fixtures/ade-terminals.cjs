@@ -353,26 +353,15 @@ exports.run = async () => {
     () => vscode.window.activeTerminal === tracked,
     'chat click focuses exact terminal',
   )
-  // A new activation must recover by stored process identity, take control from
+  // A new controller must take control from
   // the stale host and focus the existing terminal without changing its group.
   const {
     ChatController,
   } = require('../../extensions/ade-terminals/out/chats.js')
-  const pid = await tracked.processId
-  let identities = { [pid]: { terminalId: live.terminalId, pid } }
   const restored = new ChatController({
-    workspaceState: {
-      get: () => identities,
-      update: async (_key, value) => {
-        identities = value
-      },
-    },
+    workspaceState: { get: () => ({}), update: async () => {} },
   })
   try {
-    await eventually(
-      () => identities[pid]?.startedAt,
-      'restored shell identity validated',
-    )
     await eventually(
       () => restored.getSnapshot().chats.length === 1,
       'new activation receives live chats',
@@ -424,7 +413,26 @@ exports.run = async () => {
     async () => (await snapshot()).chats.length === 0,
     'reconciliation drops terminated provider',
   )
-  const failedProvider = await fresh.open('claude')
+  await fetch(new URL('/disconnect', process.env.ADE_CHAT_TEST_CONTROL), {
+    method: 'POST',
+  })
+  let timer
+  const [failedProvider, disconnectedShell] = await Promise.race([
+    Promise.all([
+      vscode.commands.executeCommand('adeTerminals.claude'),
+      vscode.commands.executeCommand('adeTerminals.terminal'),
+    ]),
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('Disconnected launches were blocked')),
+        5000,
+      )
+    }),
+  ]).finally(() => clearTimeout(timer))
+  assert.ok(
+    disconnectedShell,
+    'ordinary launch also completes while tracking is disconnected',
+  )
   assert.ok(failedProvider, 'provider command launches before testing its exit')
   await writeFile(join(workspace, 'finish-claude'), '')
   await eventually(

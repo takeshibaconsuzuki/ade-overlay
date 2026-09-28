@@ -6,7 +6,7 @@ import type { Chat } from '../../../src/shared/chats.ts'
 
 export function activate(context: vscode.ExtensionContext): void {
   const chats = new ChatController(context)
-  const launcher = new TerminalLauncher(chats)
+  const launcher = new TerminalLauncher()
   chats.coordinateFocus = (operation) => launcher.run(operation)
   const sidebar = new SidebarProvider(context, chats, launcher)
   context.subscriptions.push(

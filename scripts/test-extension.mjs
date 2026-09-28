@@ -12,6 +12,8 @@ import { codexProvider } from '../src/server/chat-providers.ts'
 const root = await mkdtemp(join(tmpdir(), 'ade-extension-'))
 const chats = new ChatService()
 const control = createServer((request, response) => {
+  if (request.method === 'POST' && request.url === '/disconnect')
+    chats.releaseEditor('extension-test')
   response.setHeader('Content-Type', 'application/json')
   response.end(JSON.stringify(chats.store.list()))
 })

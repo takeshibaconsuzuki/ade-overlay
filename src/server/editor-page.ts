@@ -19,7 +19,7 @@ export function withImportedProfile(
   element.attr('data-settings', JSON.stringify(config))
   if (activationAfter !== undefined) {
     // A document keeps the activation it superseded, even when another chat
-    // click arrives after its extension connected but before inventory is ready.
+    // click arrives after its extension connected but before terminals have restored.
     page('head').append(
       page('<meta name="ade-chat-activation-after">').attr(
         'content',

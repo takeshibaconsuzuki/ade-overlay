@@ -81,7 +81,6 @@ test('activity HTTP preserves split UTF-8 previews and bounds raw bytes', async 
   await service.listen()
   t.after(() => service.close())
   const env = service.environment('editor', worktree)
-  await store.inventory('editor', worktree, inventory)
   const message = 'Fix café 中文 🧪'
   const bytes = Buffer.from(JSON.stringify(report({ message })))
   const split = bytes.indexOf(Buffer.from('🧪')) + 1
@@ -140,7 +139,6 @@ function processes() {
     ],
   ])
 }
-const inventory = [{ terminalId: 'terminal', pid: 10, title: 'My chat' }]
 function report(extra: Partial<ChatReport> = {}): ChatReport {
   return {
     provider: 'codex',
@@ -153,7 +151,7 @@ function report(extra: Partial<ChatReport> = {}): ChatReport {
   }
 }
 
-test('activity bursts share process validation with queued terminal inventories', async () => {
+test('activity bursts share process validation and accept newly reported terminals', async () => {
   const entries = processes()
   let scans = 0
   const store = new ChatStore(
@@ -162,12 +160,13 @@ test('activity bursts share process validation with queued terminal inventories'
       return new Map(entries)
     }),
   )
-  await store.inventory('editor', worktree, inventory)
-  entries.set(11, { ...entries.get(10)!, pid: 11 })
+  await store.activity('editor', worktree, report())
+  entries.set(21, { ...entries.get(20)!, pid: 21 })
   const observedAt = Date.now()
   const reports = Array.from({ length: 12 }, (_, i) =>
     store.activity(
       'editor',
+      worktree,
       report({
         observedAt: observedAt + i,
         message: `Prompt ${i}`,
@@ -175,23 +174,35 @@ test('activity bursts share process validation with queued terminal inventories'
       }),
     ),
   )
-  const launched = store.inventory('editor', worktree, [
-    { terminalId: 'new-terminal', pid: 11, title: 'New terminal' },
-  ])
+  const launched = store.activity(
+    'editor',
+    worktree,
+    report({
+      terminalId: 'new-terminal',
+      process: { pid: 21, startedAt: 'codex-start' },
+    }),
+  )
   assert.ok((await Promise.all(reports)).every(Boolean))
-  assert.equal((await launched)[0]?.pid, 11)
+  assert.equal(await launched, true)
   assert.equal(scans, 2, 'the burst and launch need only one additional scan')
   assert.equal(store.list().chats[0].message, 'Prompt 11')
 
   // The next arrival must inspect a new snapshot, even for a familiar PID.
   entries.set(20, { ...entries.get(20)!, startedAt: 'reused-pid' })
   assert.equal(
-    await store.activity('editor', report({ observedAt: observedAt + 12 })),
+    await store.activity(
+      'editor',
+      worktree,
+      report({ observedAt: observedAt + 12 }),
+    ),
     false,
   )
   assert.equal(scans, 3)
   await store.reconcile()
-  assert.equal(store.list().chats.length, 0)
+  assert.deepEqual(
+    store.list().chats.map((chat) => chat.terminalId),
+    ['new-terminal'],
+  )
 })
 
 test('process scans batch arrivals during cooldown but refresh for arrivals after a scan starts', async () => {
@@ -341,42 +352,47 @@ test('hook merge preserves unrelated data, serializes concurrent installs and le
   assert.equal(await readFile(path, 'utf8'), 'invalid user config')
 })
 
-test('activity upserts idle, orders reports, replaces sessions and validates terminal ancestry', async () => {
+test('activity directly upserts idle, orders reports, replaces sessions and validates provider identity', async () => {
   const entries = processes()
   const store = new ChatStore(async () => entries)
-  assert.equal(await store.activity('editor', report()), false)
-  const accepted = await store.inventory('editor', worktree, inventory)
-  assert.equal(accepted[0].startedAt, 'shell-start')
   const start = Date.now() - 1000
   assert.equal(
-    await store.activity('editor', report({ observedAt: start })),
+    await store.activity('editor', worktree, report({ observedAt: start })),
     true,
   )
   assert.equal(store.list().chats[0].activity, 'idle')
   const originalId = store.list().chats[0].id
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start + 2, activity: 'working' }),
   )
   assert.equal(
-    await store.activity('editor', report({ observedAt: start + 1 })),
+    await store.activity('editor', worktree, report({ observedAt: start + 1 })),
     false,
   )
   assert.equal(store.list().chats[0].activity, 'working')
   assert.equal(
     await store.activity(
       'editor',
+      worktree,
       report({ sessionId: 'next', observedAt: start + 3 }),
     ),
     true,
   )
   assert.equal(store.list().chats.length, 1)
   assert.notEqual(store.list().chats[0].id, originalId)
-  assert.equal(await store.activity('other-editor', report()), false)
+  assert.equal(await store.activity('other-editor', worktree, report()), true)
   entries.set(20, { ...entries.get(20)!, parentPid: 99 })
-  assert.equal(await store.activity('editor', report()), false)
+  assert.equal(await store.activity('editor', worktree, report()), true)
+  entries.set(20, { ...entries.get(20)!, name: 'other.exe', command: 'other' })
+  assert.equal(await store.activity('editor', worktree, report()), false)
   assert.equal(
-    await store.activity('editor', report({ observedAt: Date.now() + 60_000 })),
+    await store.activity(
+      'editor',
+      worktree,
+      report({ observedAt: Date.now() + 60_000 }),
+    ),
     false,
   )
 })
@@ -388,9 +404,8 @@ test('only reconciliation removes terminated chats; quiet idle and failed proces
     if (fail) throw new Error('OS failed')
     return entries
   })
-  await store.inventory('editor', worktree, inventory)
-  await store.activity('editor', report({ observedAt: 1 }))
-  await store.inventory('editor', worktree, [])
+  await store.activity('editor', worktree, report({ observedAt: 1 }))
+  entries.delete(10) // Shell lifetime does not control the provider's chat.
   await store.reconcile()
   assert.equal(store.list().chats.length, 1)
   fail = true
@@ -401,13 +416,6 @@ test('only reconciliation removes terminated chats; quiet idle and failed proces
   assert.equal(store.list().chats.length, 1)
   await store.reconcile()
   assert.equal(store.list().chats.length, 0)
-  entries.set(10, { ...entries.get(10)!, startedAt: 'reused-shell' })
-  assert.deepEqual(
-    await store.inventory('editor', worktree, [
-      { ...inventory[0], startedAt: 'shell-start' },
-    ]),
-    [],
-  )
 })
 
 async function connection(
@@ -468,10 +476,6 @@ test(
     targetEnv.ADE_CHAT_EXTENSION_TOKEN = service.extensionToken('target')
     const source = await connection(t, sourceEnv)
     const target = await connection(t, targetEnv, 1)
-    target.send({ type: 'inventory', id: 'inventory', terminals: inventory })
-    await target.take(
-      (message) => message.type === 'result' && message.id === 'inventory',
-    )
     const post = (token: string | undefined, body = report()) =>
       fetch(new URL('/activity', targetEnv.ADE_CHAT_ENDPOINT), {
         method: 'POST',
@@ -479,7 +483,7 @@ test(
         body: JSON.stringify(body),
       })
     assert.equal((await post(targetEnv.ADE_CHAT_EXTENSION_TOKEN)).status, 403)
-    assert.equal((await post(sourceEnv.ADE_CHAT_ACTIVITY_TOKEN)).status, 409)
+    assert.equal((await post('invalid-token')).status, 403)
     assert.equal((await post(targetEnv.ADE_CHAT_ACTIVITY_TOKEN)).status, 204)
     await assert.rejects(
       connection(t, targetEnv, 2, targetEnv.ADE_CHAT_ACTIVITY_TOKEN),
@@ -504,27 +508,12 @@ test(
       (message) => message.type === 'result' && message.id === 'go',
     )
     service.viewReady(navigationId, undefined, baseline)
-    target.send({ type: 'inventory', id: 'still-old', terminals: inventory })
-    await target.take(
-      (message) => message.type === 'result' && message.id === 'still-old',
-    )
+    await delay(30)
     assert.equal(
       target.messages.some((message) => message.type === 'focus'),
       false,
     )
     const fresh = await connection(t, targetEnv, 2)
-    // A second click after connection but before inventory must keep the
-    // document's baseline; capturing the activation again would wait forever.
-    source.send({ type: 'activate', id: 'loading-again', chatId })
-    await source.take(
-      (message) => message.type === 'result' && message.id === 'loading-before',
-    )
-    service.viewReady(navigationId, undefined, baseline)
-    fresh.send({
-      type: 'inventory',
-      id: 'restored',
-      terminals: [{ ...inventory[0], startedAt: 'shell-start' }],
-    })
     const focus = await fresh.take((message) => message.type === 'focus')
     assert.equal(focus.type, 'focus')
     if (focus.type !== 'focus') throw new Error('Expected focus')
@@ -536,7 +525,7 @@ test(
     )
     assert.equal('id' in cancelled && cancelled.id, focus.id)
     const superseded = await source.take(
-      (message) => message.type === 'result' && message.id === 'loading-again',
+      (message) => message.type === 'result' && message.id === 'loading-before',
     )
     assert.ok(
       superseded.type === 'result' && superseded.error?.includes('Superseded'),
@@ -597,18 +586,14 @@ test('chat order follows prompt and turn-end time, including empty replies, with
   entries.set(11, { ...entries.get(10)!, pid: 11 })
   entries.set(21, { ...entries.get(20)!, pid: 21, parentPid: 11 })
   const store = new ChatStore(async () => entries)
-  await store.inventory('editor', worktree, [
-    ...inventory,
-    { ...inventory[0], terminalId: 'second', pid: 11 },
-  ])
-  await store.activity('editor', report({ observedAt: 1 }))
+  await store.activity('editor', worktree, report({ observedAt: 1 }))
   const second = (extra: Partial<ChatReport> = {}) =>
     report({
       terminalId: 'second',
       process: { pid: 21, startedAt: 'codex-start' },
       ...extra,
     })
-  await store.activity('editor', second({ observedAt: 2 }))
+  await store.activity('editor', worktree, second({ observedAt: 2 }))
   const order = () => store.list().chats.map((chat) => chat.terminalId)
   assert.deepEqual(
     order(),
@@ -617,6 +602,7 @@ test('chat order follows prompt and turn-end time, including empty replies, with
   )
   await store.activity(
     'editor',
+    worktree,
     second({
       observedAt: 3,
       turnEvent: true,
@@ -625,10 +611,15 @@ test('chat order follows prompt and turn-end time, including empty replies, with
     }),
   )
   assert.deepEqual(order(), ['second', 'terminal'])
-  await store.activity('editor', report({ observedAt: 4, activity: 'working' }))
+  await store.activity(
+    'editor',
+    worktree,
+    report({ observedAt: 4, activity: 'working' }),
+  )
   assert.deepEqual(order(), ['second', 'terminal'], 'tool hooks do not reorder')
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: 5, turnEvent: true, activity: 'idle' }),
   )
   assert.deepEqual(
@@ -637,12 +628,24 @@ test('chat order follows prompt and turn-end time, including empty replies, with
     'turn end reorders even without message text',
   )
   const revision = store.list().revision
-  await store.activity('editor', second({ observedAt: 6, turnEvent: true }))
-  await store.activity('editor', report({ observedAt: 7, turnEvent: true }))
+  await store.activity(
+    'editor',
+    worktree,
+    second({ observedAt: 6, turnEvent: true }),
+  )
+  await store.activity(
+    'editor',
+    worktree,
+    report({ observedAt: 7, turnEvent: true }),
+  )
   assert.ok(store.list().revision > revision)
   assert.equal(store.list().chats[0].lastTurnAt, 7)
   assert.equal(
-    await store.activity('editor', report({ observedAt: 5, turnEvent: true })),
+    await store.activity(
+      'editor',
+      worktree,
+      report({ observedAt: 5, turnEvent: true }),
+    ),
     false,
   )
   assert.equal(store.list().chats[0].lastTurnAt, 7)
@@ -658,10 +661,10 @@ test('provider titles load from read-only Codex metadata and refresh independent
     database?.close()
     await rm(root, { recursive: true, force: true })
   })
-  await store.inventory('editor', worktree, inventory)
   const start = Date.now() - 1000
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start, metadataRoot: root, message: 'First prompt' }),
   )
   await store.settled()
@@ -685,12 +688,9 @@ test('provider titles load from read-only Codex metadata and refresh independent
   await store.reconcile()
   assert.equal(store.list().chats[0].title, 'Renamed in Codex')
   assert.ok(store.list().revision > revision)
-  await store.inventory('editor', worktree, [
-    { ...inventory[0], title: 'Different terminal title' },
-  ])
-  assert.equal(store.list().chats[0].title, 'Renamed in Codex')
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start + 2, message: 'Final assistant answer' }),
   )
   assert.equal(
@@ -700,11 +700,13 @@ test('provider titles load from read-only Codex metadata and refresh independent
   )
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start + 1, message: 'Late old prompt' }),
   )
   assert.equal(store.list().chats[0].message, 'Final assistant answer')
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start + 3, activity: 'working' }),
   )
   assert.equal(
@@ -714,6 +716,7 @@ test('provider titles load from read-only Codex metadata and refresh independent
   )
   await store.activity(
     'editor',
+    worktree,
     report({ observedAt: start + 4, sessionId: 'other' }),
   )
   await store.settled()

@@ -3,38 +3,33 @@ import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
 import {
   serverChatMessageSchema,
+  processIdentitySchema,
+  chatIdSchema,
   type Chat,
   type ChatSnapshot,
   type ExtensionChatMessage,
-  type TerminalInventory,
 } from '../../../src/shared/chats.ts'
+
+import {
+  readChatProcesses,
+  sameProcess,
+} from '../../../src/server/chat-processes.ts'
+
+const savedTerminalSchema = processIdentitySchema.extend({
+  terminalId: chatIdSchema,
+})
+type SavedTerminal = { pid: number; startedAt: string; terminalId: string }
 
 // Consume the extension-host-only bootstrap once. Keep it out of processes
 // spawned by extensions, while allowing controllers to reconnect/restart.
 const extensionToken = process.env.ADE_CHAT_EXTENSION_TOKEN
 delete process.env.ADE_CHAT_EXTENSION_TOKEN
 
-interface TerminalIdentity {
-  terminalId: string
-  pid: number
-  startedAt?: string
-}
-
-async function terminalPid(
-  terminal: vscode.Terminal,
-  timeout = 1000,
-): Promise<number | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      terminal.processId,
-      new Promise<undefined>((resolve) => {
-        timer = setTimeout(() => resolve(undefined), timeout)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
+function terminalId(terminal: vscode.Terminal): string | undefined {
+  const options = terminal.creationOptions
+  if (!('env' in options)) return undefined
+  const id = options.env?.ADE_TERMINAL_ID
+  return typeof id === 'string' && id.length > 0 ? id : undefined
 }
 
 export class ChatController implements vscode.Disposable {
@@ -43,180 +38,129 @@ export class ChatController implements vscode.Disposable {
   private snapshot: ChatSnapshot = { revision: -1, chats: [] }
   private readonly activation = randomUUID()
   private readonly startedAt = Date.now()
-  private readonly identities: Record<string, TerminalIdentity>
   private socket?: WebSocket
   private retry?: ReturnType<typeof setTimeout>
   private stopped = false
   private readonly pending = new Map<
     string,
     {
-      resolve: (terminals?: TerminalInventory) => void
+      resolve: () => void
       reject: (error: Error) => void
       timeout: ReturnType<typeof setTimeout>
     }
   >()
   private readonly subscriptions: vscode.Disposable[] = []
-  private inventoryQueue?: Promise<void>
-  private inventoryDirty = false
-  private lastInventory?: string
-  private readonly watchedPids = new WeakSet<vscode.Terminal>()
   private focusGeneration = 0
   private focusId?: string
   private activeTerminalId?: string
   private selectedTerminal?: vscode.Terminal
-  private selectionGeneration = 0
   coordinateFocus: <T>(operation: () => Promise<T>) => Promise<T> = (
     operation,
   ) => operation()
 
-  constructor(private readonly context: vscode.ExtensionContext) {
-    this.identities = {
-      ...context.workspaceState.get<Record<string, TerminalIdentity>>(
-        'adeChatTerminals',
-        {},
-      ),
+  private readonly identities = new Map<vscode.Terminal, string>()
+  private readonly saved = new Map<number, SavedTerminal>()
+  private readonly recoveryTimers = new Set<ReturnType<typeof setTimeout>>()
+
+  constructor(
+    private readonly context: Pick<vscode.ExtensionContext, 'workspaceState'>,
+    private readonly readProcesses = readChatProcesses,
+  ) {
+    const stored = context.workspaceState.get<Record<string, unknown>>(
+      'adeChatTerminals',
+      {},
+    )
+    for (const value of Object.values(stored)) {
+      const entry = savedTerminalSchema.safeParse(value).data
+      if (entry) this.saved.set(entry.pid, entry)
     }
     this.subscriptions.push(
-      vscode.window.tabGroups.onDidChangeTabs((event) => {
-        if (
-          event.changed.some(
-            (tab) => tab.input instanceof vscode.TabInputTerminal,
-          )
-        )
-          void this.synchronize().catch(() => {})
-      }),
       vscode.window.onDidOpenTerminal(
-        () => void this.synchronize().catch(() => {}),
+        (terminal) => void this.recover(terminal),
       ),
       vscode.window.onDidCloseTerminal((terminal) => {
-        void terminal.processId.then((pid) => {
-          if (pid) delete this.identities[String(pid)]
-          void this.save()
-          void this.synchronize().catch(() => {})
-        })
+        const id = this.id(terminal)
+        this.identities.delete(terminal)
+        for (const [pid, entry] of this.saved) {
+          if (entry.terminalId === id) this.saved.delete(pid)
+        }
+        void this.save().catch(() => {})
+        this.updateSelection()
       }),
     )
+    for (const terminal of vscode.window.terminals) void this.recover(terminal)
     this.connect()
   }
 
-  prepare(): { terminalId: string; env: Record<string, string | null> } {
-    const terminalId = randomUUID()
-    return {
-      terminalId,
-      env: { ADE_TERMINAL_ID: terminalId, ADE_CHAT_EXTENSION_TOKEN: null },
-    }
+  private id(terminal: vscode.Terminal): string | undefined {
+    return terminalId(terminal) ?? this.identities.get(terminal)
   }
 
-  async created(terminal: vscode.Terminal, terminalId: string): Promise<void> {
-    if (!process.env.ADE_CHAT_ENDPOINT || !extensionToken) return
-    const pid = await terminalPid(terminal, 8000)
-    if (!pid) throw new Error('The terminal process did not start.')
-    this.identities[String(pid)] = { terminalId, pid }
-    await this.save()
-    const deadline = Date.now() + 8000
-    while (
-      this.socket?.readyState !== WebSocket.OPEN &&
-      Date.now() < deadline &&
-      !this.stopped
+  private async save(): Promise<void> {
+    await this.context.workspaceState.update(
+      'adeChatTerminals',
+      Object.fromEntries(this.saved),
     )
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    await this.synchronize()
-    if (!this.identities[String(pid)]?.startedAt)
-      throw new Error(
-        'The terminal process identity could not be verified. Try again.',
-      )
   }
 
-  private save(): Thenable<void> {
-    return this.context.workspaceState.update('adeChatTerminals', {
-      ...this.identities,
-    })
-  }
-
-  private synchronize(): Promise<void> {
-    this.inventoryDirty = true
-    this.inventoryQueue ??= (async () => {
-      while (this.inventoryDirty) {
-        this.inventoryDirty = false
-        await this.synchronizeOnce()
+  private async recover(terminal: vscode.Terminal): Promise<void> {
+    const live = () =>
+      !this.stopped && vscode.window.terminals.includes(terminal)
+    if (!live()) return
+    const id = terminalId(terminal)
+    if (!id && this.saved.size === 0) return
+    try {
+      const pid = await terminal.processId
+      if (!live() || !pid) return
+      const processes = await this.readProcesses()
+      if (!live()) return
+      const process = processes.get(pid)
+      const previous = this.saved.get(pid)
+      for (const [savedPid, entry] of this.saved) {
+        if (!sameProcess(entry, processes.get(savedPid)))
+          this.saved.delete(savedPid)
       }
-    })().finally(() => {
-      this.inventoryQueue = undefined
-    })
-    return this.inventoryQueue
-  }
-
-  private async synchronizeOnce(): Promise<void> {
-    if (this.socket?.readyState !== WebSocket.OPEN)
-      throw new Error('Chat tracking is disconnected from the companion.')
-    const inventory: TerminalInventory = []
-    const terminals = await Promise.all(
-      vscode.window.terminals.map(async (terminal) => {
-        const pid = await terminalPid(terminal)
-        if (!pid) this.synchronizeWhenPidReady(terminal)
-        return { terminal, pid }
-      }),
-    )
-    for (const { terminal, pid } of terminals) {
-      if (!pid || !vscode.window.terminals.includes(terminal)) continue
-      const id = this.identities[String(pid)]
-      if (id) inventory.push({ ...id, title: terminal.name.slice(0, 512) })
-    }
-    const serialized = JSON.stringify(inventory)
-    if (serialized === this.lastInventory) return
-    const accepted = await this.request({
-      type: 'inventory',
-      id: randomUUID(),
-      terminals: inventory,
-    })
-    this.lastInventory = serialized
-    for (const entry of accepted ?? [])
-      this.identities[String(entry.pid)] = {
-        pid: entry.pid,
-        terminalId: entry.terminalId,
-        startedAt: entry.startedAt,
+      const recovered =
+        id ??
+        (previous && sameProcess(previous, process)
+          ? previous.terminalId
+          : undefined)
+      if (process && recovered) {
+        this.identities.set(terminal, recovered)
+        this.saved.set(pid, {
+          pid,
+          startedAt: process.startedAt,
+          terminalId: recovered,
+        })
+        this.updateSelection()
       }
-    // A reused PID must not silently adopt a different terminal after restoration.
-    for (const entry of inventory)
-      if (!accepted?.some((item) => item.terminalId === entry.terminalId))
-        delete this.identities[String(entry.pid)]
-    await this.save()
-    await this.updateSelection()
-  }
-
-  private synchronizeWhenPidReady(terminal: vscode.Terminal): void {
-    if (this.watchedPids.has(terminal)) return
-    this.watchedPids.add(terminal)
-    // Restoring a PID can outlive the bounded inventory scan without another
-    // terminal event. Subscribe once, and let the existing queue coalesce it.
-    void terminal.processId.then(
-      (pid) => {
-        if (pid && !this.stopped && vscode.window.terminals.includes(terminal))
-          void this.synchronize().catch(() => {})
-      },
-      () => {},
-    )
+      await this.save()
+      if (process || !id) return
+    } catch {
+      // Retry local bookkeeping independently of provider launch and transport.
+    }
+    if (live()) {
+      const timer = setTimeout(() => {
+        this.recoveryTimers.delete(timer)
+        void this.recover(terminal)
+      }, 2000)
+      this.recoveryTimers.add(timer)
+    }
   }
 
   selectTerminal(terminal: vscode.Terminal | undefined): void {
     this.selectedTerminal = terminal
-    void this.updateSelection().catch(() => {})
+    this.updateSelection()
   }
 
-  private async updateSelection(): Promise<void> {
-    const generation = ++this.selectionGeneration
+  private updateSelection(): void {
     const terminal = this.selectedTerminal
-    const pid = terminal ? await terminalPid(terminal) : undefined
-    if (generation !== this.selectionGeneration || this.stopped) return
-    const identity = pid ? this.identities[String(pid)] : undefined
-    const terminalId =
-      terminal &&
-      vscode.window.terminals.includes(terminal) &&
-      identity?.startedAt
-        ? identity.terminalId
+    const id =
+      terminal && vscode.window.terminals.includes(terminal)
+        ? this.id(terminal)
         : undefined
-    if (this.activeTerminalId !== terminalId) {
-      this.activeTerminalId = terminalId
+    if (this.activeTerminalId !== id) {
+      this.activeTerminalId = id
       this.changes.fire()
     }
   }
@@ -231,21 +175,16 @@ export class ChatController implements vscode.Disposable {
     await this.request({ type: 'activate', id: randomUUID(), chatId: chat.id })
   }
 
-  private request(
-    message: ExtensionChatMessage,
-  ): Promise<TerminalInventory | undefined> {
+  private request(message: ExtensionChatMessage): Promise<void> {
     if (this.socket?.readyState !== WebSocket.OPEN)
       return Promise.reject(
         new Error('Chat tracking is disconnected from the companion.'),
       )
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(
-        () => {
-          this.pending.delete(message.id)
-          reject(new Error('Chat request timed out. Try again.'))
-        },
-        message.type === 'activate' ? 35_000 : 8000,
-      )
+      const timeout = setTimeout(() => {
+        this.pending.delete(message.id)
+        reject(new Error('Chat request timed out. Try again.'))
+      }, 35_000)
       this.pending.set(message.id, { resolve, reject, timeout })
       this.socket!.send(JSON.stringify(message), (error) => {
         if (error) this.rejectPending(error)
@@ -276,10 +215,6 @@ export class ChatController implements vscode.Disposable {
       maxPayload: 16 * 1024 * 1024,
     })
     this.socket = socket
-    this.lastInventory = undefined
-    socket.on('open', () => {
-      void this.synchronize().catch(() => socket.terminate())
-    })
     socket.on('message', (data) => {
       if (socket !== this.socket) return
       let input: unknown
@@ -305,15 +240,13 @@ export class ChatController implements vscode.Disposable {
         this.pending.delete(message.id)
         clearTimeout(entry.timeout)
         if (message.error) entry.reject(new Error(message.error))
-        else entry.resolve(message.terminals)
+        else entry.resolve()
       } else if (message.type === 'cancel-focus') {
         if (this.focusId === message.id) this.focusGeneration++
       } else {
         this.focusId = message.id
         const generation = ++this.focusGeneration
-        void this.coordinateFocus(() =>
-          this.focus(message.terminalId, generation),
-        )
+        void this.focus(message.terminalId, generation)
           .then(() => {
             if (socket.readyState === WebSocket.OPEN)
               socket.send(
@@ -348,30 +281,32 @@ export class ChatController implements vscode.Disposable {
     })
   }
 
-  private async focus(terminalId: string, generation: number): Promise<void> {
+  private async focus(id: string, generation: number): Promise<void> {
     const deadline = Date.now() + 8000
-    while (
+    const current = () =>
       Date.now() < deadline &&
       generation === this.focusGeneration &&
       !this.stopped
-    ) {
-      for (const terminal of vscode.window.terminals) {
-        const pid = await terminalPid(terminal)
-        if (generation !== this.focusGeneration || this.stopped) break
-        if (pid && this.identities[String(pid)]?.terminalId === terminalId) {
+    // Restoration is local and must not hold the workbench queue. Only showing
+    // a resolved terminal shares the launcher's group/focus serialization.
+    while (current()) {
+      const terminal = vscode.window.terminals.find(
+        (item) => this.id(item) === id,
+      )
+      if (terminal) {
+        const focused = await this.coordinateFocus(async () => {
+          if (!current() || !vscode.window.terminals.includes(terminal))
+            return false
           terminal.show()
-          while (
-            Date.now() < deadline &&
-            generation === this.focusGeneration &&
-            !this.stopped
-          ) {
-            if (vscode.window.activeTerminal === terminal) return
+          while (current() && vscode.window.terminals.includes(terminal)) {
+            if (vscode.window.activeTerminal === terminal) return true
             await new Promise((resolve) => setTimeout(resolve, 50))
           }
-          break
-        }
+          return false
+        })
+        if (focused && current()) return
       }
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      if (current()) await new Promise((resolve) => setTimeout(resolve, 50))
     }
     throw new Error(
       'The chat terminal is no longer available or navigation was superseded.',
@@ -386,6 +321,7 @@ export class ChatController implements vscode.Disposable {
     this.stopped = true
     this.focusGeneration++
     clearTimeout(this.retry)
+    for (const timer of this.recoveryTimers) clearTimeout(timer)
     this.socket?.terminate()
     this.rejectPending(new Error('Extension stopped.'))
     this.changes.dispose()

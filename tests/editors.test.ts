@@ -25,6 +25,8 @@ import { test, type TestContext } from 'node:test'
 import { promisify } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
+import { build } from 'vite'
+import { builtinModules } from 'node:module'
 import pino from 'pino'
 import { load } from 'cheerio'
 import { parseCookie } from 'cookie'
@@ -1044,7 +1046,7 @@ test('server and editor logs identify startup stages without exposing session to
 const idleMs = Number(process.env.ADE_TEST_EDITOR_IDLE_MS ?? 0)
 
 test(
-  'real VS Code keeps extension credentials out of native terminals/tasks and renews document activation on reload',
+  'real VS Code keeps extension credentials out of native terminals/tasks and restores chat focus on reload',
   { skip: !process.env.ADE_TEST_VSCODE_RUNTIME, timeout: 90_000 },
   async (t) => {
     const {
@@ -1075,10 +1077,35 @@ test(
       ),
       join(extension, 'index.cjs'),
     )
-    await writeFile(
-      join(extension, 'bootstrap-config.json'),
-      JSON.stringify({ ws: fileURLToPath(import.meta.resolve('ws')) }),
-    )
+    await build({
+      configFile: false,
+      logLevel: 'silent',
+      resolve: { conditions: ['node'], mainFields: ['module', 'main'] },
+      build: {
+        target: 'node22',
+        outDir: extension,
+        emptyOutDir: false,
+        lib: {
+          entry: fileURLToPath(
+            new URL(
+              '../extensions/ade-terminals/src/chats.ts',
+              import.meta.url,
+            ),
+          ),
+          formats: ['cjs'],
+          fileName: () => 'chats.cjs',
+        },
+        rollupOptions: {
+          external: [
+            'vscode',
+            /^node:/,
+            ...builtinModules,
+            'bufferutil',
+            'utf-8-validate',
+          ],
+        },
+      },
+    })
     const extensionsFile = join(local.localExtensionsDir, 'extensions.json')
     const installed = JSON.parse(await readFile(extensionsFile, 'utf8'))
     installed.push({
