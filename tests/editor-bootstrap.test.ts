@@ -6,8 +6,14 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { codeEnvironment } from '../src/server/code-cli.ts'
 
-test('editor bootstrap limits credentials to extension hosts, including hosts started later', async (t) => {
+test('editor bootstrap under a watched companion limits credentials to extension hosts, including hosts started later', async (t) => {
+  const original = process.env
+  t.after(() => {
+    process.env = original
+  })
+  process.env = { ...original, WATCH_REPORT_DEPENDENCIES: '1' }
   const root = await mkdtemp(join(tmpdir(), 'ade-bootstrap-'))
   t.after(async () => {
     assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep))
@@ -48,7 +54,7 @@ test('editor bootstrap limits credentials to extension hosts, including hosts st
     ],
     {
       env: {
-        ...process.env,
+        ...codeEnvironment(),
         ADE_CHAT_EXTENSION_TOKEN: undefined,
         ADE_CHAT_ACTIVITY_TOKEN: 'activity',
       },

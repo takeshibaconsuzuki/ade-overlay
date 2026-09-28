@@ -31,6 +31,9 @@ export function codeEnvironment(): NodeJS.ProcessEnv {
         'VSCODE_PORTABLE',
         'VSCODE_APPDATA',
         'ELECTRON_RUN_AS_NODE',
+        // The companion's --watch reporter uses its own IPC channel. Editors
+        // close their credential channel before loading the VS Code modules.
+        'WATCH_REPORT_DEPENDENCIES',
       ].includes(name.toUpperCase())
     )
       delete env[name]

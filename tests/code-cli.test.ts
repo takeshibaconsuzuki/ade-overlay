@@ -36,6 +36,8 @@ test('editor child environments remove credentials and profile overrides without
     VSCODE_APPDATA: 'appdata-profile',
     vscode_appdata: 'lowercase-appdata-profile',
     ELECTRON_RUN_AS_NODE: '1',
+    WATCH_REPORT_DEPENDENCIES: '1',
+    watch_report_dependencies: '1',
     ADE_ENV_TEST: 'keep-this',
   }
   const child = codeEnvironment()
@@ -52,11 +54,14 @@ test('editor child environments remove credentials and profile overrides without
     'VSCODE_APPDATA',
     'vscode_appdata',
     'ELECTRON_RUN_AS_NODE',
+    'WATCH_REPORT_DEPENDENCIES',
+    'watch_report_dependencies',
   ])
     assert.equal(child[name], undefined)
   assert.equal(process.env.ADE_COMPANION_TOKEN, 'test-companion-secret')
   assert.equal(process.env.VSCODE_PORTABLE, 'portable-profile')
   assert.equal(process.env.VSCODE_APPDATA, 'appdata-profile')
+  assert.equal(process.env.WATCH_REPORT_DEPENDENCIES, '1')
 })
 
 test(
