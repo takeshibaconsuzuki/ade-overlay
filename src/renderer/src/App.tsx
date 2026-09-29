@@ -29,6 +29,7 @@ export default function App() {
     clearError,
   } = useCompanion()
   const [search, setSearch] = useState('')
+  const [recentPicks, setRecentPicks] = useState<string[]>([])
   const [resetVersion, setResetVersion] = useState(0)
   useEffect(
     () =>
@@ -39,13 +40,25 @@ export default function App() {
     [],
   )
   const query = search.trim().toLowerCase()
-  const worktrees =
+  const matches =
     snapshot?.worktrees.filter(
       (worktree) =>
         basename(worktree.path).toLowerCase().includes(query) ||
         (worktree.branch ?? '').toLowerCase().includes(query),
     ) ?? []
-  // Editor progress updates should not reset the user's place in the results.
+  const pickOrder = new Map(recentPicks.map((key, index) => [key, index]))
+  const worktrees = [...matches].sort((a, b) => {
+    const aOpen = a.editor !== 'stopped'
+    const bOpen = b.editor !== 'stopped'
+    if (aOpen !== bOpen) return aOpen ? -1 : 1
+    if (!aOpen) return 0
+    return (
+      (pickOrder.get(JSON.stringify([a.project, a.path])) ??
+        recentPicks.length) -
+      (pickOrder.get(JSON.stringify([b.project, b.path])) ?? recentPicks.length)
+    )
+  })
+  // Reset selection and scroll when results reorder, but not for progress alone.
   const resultsKey = JSON.stringify([
     query,
     worktrees.map(({ project, path, branch, prunable }) => [
@@ -76,7 +89,13 @@ export default function App() {
         resultsKey={resultsKey}
         resetVersion={resetVersion}
         onActivate={(worktree) => {
-          if (opening !== worktree.path) void openEditor(worktree)
+          if (opening === worktree.path) return
+          const key = JSON.stringify([worktree.project, worktree.path])
+          setRecentPicks((current) => [
+            key,
+            ...current.filter((entry) => entry !== key),
+          ])
+          void openEditor(worktree)
         }}
         search={{
           className: 'worktree-search',

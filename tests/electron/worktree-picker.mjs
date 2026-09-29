@@ -326,6 +326,9 @@ async function run() {
     })),
   )
   assert.deepEqual(await state(), before)
+  // Keep the focus scenarios independent of recency reordering on activation.
+  await update(snapshot.worktrees.map((row) => ({ ...row, editor: 'stopped' })))
+  assert.deepEqual(await state(), before)
   stage = 'window reactivation preserves scrolled selection'
   await focusWindow(false)
   await focusWindow(true)
@@ -1018,6 +1021,99 @@ async function run() {
   assert.equal(opened.length, beforeTooltipOpen + 1)
   await moveMouse('.toolbar button')
   await until(tooltipClosed)
+
+  stage = 'open worktrees precede unopened worktrees in pick order'
+  await update([
+    worktree('C:/demo/order-closed', 'order'),
+    { ...worktree('C:/demo/order-a', 'order'), editor: 'running' },
+    { ...worktree('C:/demo/order-b', 'order'), editor: 'starting' },
+    worktree('C:/demo/order-unpicked', 'order'),
+  ])
+  await search('order')
+  const rowPaths = () =>
+    evaluate(
+      "[...document.querySelectorAll('.worktree-open')].map(button => JSON.parse(button.dataset.pickerKey)[1])",
+    )
+  assert.deepEqual(await rowPaths(), [
+    'C:/demo/order-a',
+    'C:/demo/order-b',
+    'C:/demo/order-closed',
+    'C:/demo/order-unpicked',
+  ])
+  await key('DOWN')
+  await key('ENTER')
+  assert.equal(opened.at(-1), 'C:/demo/order-b')
+  assert.equal((await rowPaths())[0], 'C:/demo/order-b')
+  assert.equal(JSON.parse((await state()).selected)[1], 'C:/demo/order-b')
+  await key('DOWN')
+  await key('ENTER')
+  assert.equal(opened.at(-1), 'C:/demo/order-a')
+  assert.equal((await rowPaths())[0], 'C:/demo/order-a')
+
+  stage = 'status changes reset selection and closed worktrees retain order'
+  await key('DOWN')
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === 'C:/demo/order-a' ? { ...row, editor: 'stopped' } : row,
+    ),
+  )
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+  await assertSelectionInView()
+  assert.deepEqual(await rowPaths(), [
+    'C:/demo/order-b',
+    'C:/demo/order-closed',
+    'C:/demo/order-a',
+    'C:/demo/order-unpicked',
+  ])
+  await update(snapshot.worktrees.map((row) => ({ ...row, editor: 'running' })))
+  window.webContents.send('test:hidden')
+  await until("document.querySelector('input[type=search]').value===''")
+  assert.deepEqual(await rowPaths(), [
+    'C:/demo/order-a',
+    'C:/demo/order-b',
+    'C:/demo/order-closed',
+    'C:/demo/order-unpicked',
+  ])
+  assert.equal((await state()).index, 0)
+
+  stage = 'status reordering keeps the Enter target visible in a long list'
+  await update(
+    Array.from({ length: 40 }, (_, index) => ({
+      ...worktree(`C:/demo/long-${index}`, 'long'),
+      editor: 'running',
+    })),
+  )
+  await search('long')
+  await update(
+    snapshot.worktrees.map((row, index) =>
+      index === 0 ? { ...row, editor: 'stopped' } : row,
+    ),
+  )
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+  await assertSelectionInView()
+  await key('ENTER')
+  assert.equal(opened.at(-1), 'C:/demo/long-1')
+
+  stage = 'reordering resets a scrolled and focused result to the top'
+  for (let i = 0; i < 20; i++) await key('DOWN')
+  assert.ok((await state()).scroll > 0)
+  const selectedLongPath = JSON.parse((await state()).selected)[1]
+  await evaluate(
+    "document.querySelector('.worktree-list li[data-highlighted] .worktree-open').focus({preventScroll:true})",
+  )
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === selectedLongPath ? { ...row, editor: 'stopped' } : row,
+    ),
+  )
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+  assert.equal((await state()).searchFocused, true)
+  await assertSelectionInView()
+  await key('ENTER')
+  assert.equal(opened.at(-1), 'C:/demo/long-1')
 }
 run()
   .then(() => writeFileSync(input.result, JSON.stringify({ ok: true })))
