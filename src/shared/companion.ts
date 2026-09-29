@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { eventSpec, requestSpec } from './rpc.ts'
 import { chatIdSchema, chatSchema } from './chats.ts'
+import { worktreeColorSchema } from './worktree-colors.ts'
 
 export const COMPANION_PROTOCOL_VERSION = 1
 export const DEFAULT_COMPANION_PORT = 4317
@@ -47,6 +48,7 @@ const worktreeSchema = z.object({
   prunable: z.boolean(),
   editor: z.enum(['stopped', 'starting', 'running']),
   editorDetail: z.string().max(512).optional(),
+  color: worktreeColorSchema.optional(),
   operation: z.enum(['creating', 'deleting']).optional(),
   error: z.string().optional(),
   deletionFailure: z

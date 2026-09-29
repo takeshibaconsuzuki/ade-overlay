@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { eventSpec, requestSpec } from './rpc.ts'
+import { worktreeColorSchema } from './worktree-colors.ts'
 
 export const chatIdSchema = z.string().min(1).max(128)
 export const processIdentitySchema = z.object({
@@ -23,6 +24,7 @@ export const chatSchema = z.object({
   id: chatIdSchema,
   terminalId: chatIdSchema,
   path: z.string(),
+  color: worktreeColorSchema.optional(),
   title: z.string().max(512).optional(),
   message: chatTextSchema.optional(),
   activity: chatActivitySchema,

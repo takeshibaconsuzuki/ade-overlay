@@ -4,8 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { Logger } from 'pino'
@@ -15,7 +14,7 @@ import type {
   OpenEditorInput,
   Worktree,
 } from '../../shared/companion.ts'
-import type { ServerConfig } from '../config.ts'
+import { editorDataDir, type ServerConfig } from '../config.ts'
 import type { ChatCommands } from '../../shared/chat-commands.ts'
 import {
   EditorRuntimeManager,
@@ -103,9 +102,7 @@ export class EditorManager
     this.chats = chats
     this.logger = logger
     this.config = config
-    this.dataDir = resolve(
-      config?.dataDir ?? join(homedir(), '.ade-overlay', 'editors'),
-    )
+    this.dataDir = editorDataDir(config)
     this.runtimes = runtimes ?? new EditorRuntimeManager(this.dataDir, logger)
     this.runtimes.on('progress', (message) => this.progress(message))
   }

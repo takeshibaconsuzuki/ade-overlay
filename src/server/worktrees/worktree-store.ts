@@ -16,6 +16,7 @@ import type {
 import { expandHome, type ServerConfig } from '../config.ts'
 import type { EditorLifecycle } from '../editors/editor-manager.ts'
 import { pathKey, worktreeKey } from './worktree-identity.ts'
+import { WorktreeColors } from './worktree-colors.ts'
 
 const execute = promisify(execFile)
 const executeShell = promisify(exec)
@@ -152,16 +153,20 @@ export class WorktreeStore extends EventEmitter<{
   private rows = new Map<string, RowState>()
   private projects = new Map<string, ServerConfig['projects'][number]>()
 
-  private constructor(editors: EditorLifecycle) {
+  private readonly colors: WorktreeColors
+
+  private constructor(editors: EditorLifecycle, colors: WorktreeColors) {
     super()
     this.editors = editors
+    this.colors = colors
   }
 
   static async open(
     projects: ServerConfig['projects'],
     editors: EditorLifecycle,
+    colors = new WorktreeColors(),
   ): Promise<WorktreeStore> {
-    const store = new WorktreeStore(editors)
+    const store = new WorktreeStore(editors, colors)
     editors.on('status', () => store.publish())
     for (const project of projects) {
       const canonical = await realpath(project.mainWorktreePath)
@@ -255,6 +260,10 @@ export class WorktreeStore extends EventEmitter<{
       ...(this.rows.get(key)?.deletionFailure && {
         deletionFailure: this.rows.get(key)!.deletionFailure,
       }),
+      color:
+        this.editors.status(target) === 'stopped'
+          ? undefined
+          : this.colors.get(target),
       editor: this.editors.status(target),
       editorDetail: this.editors.detail(target),
     }))
@@ -355,6 +364,7 @@ export class WorktreeStore extends EventEmitter<{
         if (!current || current.prunable)
           throw new Error('Worktree is unavailable. Refresh the list first.')
         await realpath(current.path)
+        await this.colors.assign(current)
         // Register startup in order, but release the queue during readiness.
         return {
           ready: this.editors.open(

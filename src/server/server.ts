@@ -4,10 +4,13 @@ import type { Logger } from 'pino'
 import { DEFAULT_COMPANION_PORT } from '../shared/companion.ts'
 import {
   loadServerConfig,
+  editorDataDir,
   serverConfigSchema,
   type ServerConfig,
 } from './config.ts'
 import { ChatService } from './chats/chat-service.ts'
+import { ChatStore } from './chats/chat-store.ts'
+import { WorktreeColors } from './worktrees/worktree-colors.ts'
 import { EditorManager } from './editors/editor-manager.ts'
 import type { EditorRuntimeProvider } from './editors/vscode-runtime.ts'
 import { WorktreeStore } from './worktrees/worktree-store.ts'
@@ -35,13 +38,20 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     options.config === undefined
       ? await loadServerConfig(options.configPath)
       : serverConfigSchema.parse(options.config)
-  const chats = new ChatService(logger)
+  const colors = await WorktreeColors.open(editorDataDir(config.editor))
+  const chats: ChatService = new ChatService(
+    logger,
+    new ChatStore(undefined, (worktree) =>
+      editors.status(worktree) === 'stopped' ? undefined : colors.get(worktree),
+    ),
+  )
   const editors = new EditorManager(
     chats,
     config.editor,
     logger,
     options.editorRuntime,
   )
+  editors.on('status', () => chats.store.refreshColors())
   let worktrees: WorktreeStore | undefined
   let editorTransport: ReturnType<typeof createEditorTransport> | undefined
   let companionTransport:
@@ -93,7 +103,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
   }
 
   try {
-    worktrees = await WorktreeStore.open(config.projects, editors)
+    worktrees = await WorktreeStore.open(config.projects, editors, colors)
     worktrees.on('operationFailed', (worktree, error) => {
       logger.error(
         { project: worktree.project, path: worktree.path, err: error },

@@ -239,6 +239,32 @@ async function run() {
   await window.loadFile(join(input.root, 'renderer/index.html'))
   await until("document.querySelectorAll('.worktree-open').length===43")
   await until("document.body.textContent.includes('Latest companion state')")
+  stage = 'worktree name colors'
+  const nameColor = () =>
+    evaluate(
+      "getComputedStyle(document.querySelector('.worktree-name > span')).color",
+    )
+  const grey = await nameColor()
+  await update(
+    snapshot.worktrees.map((row, index) =>
+      index === 0 ? { ...row, editor: 'running', color: 'blue' } : row,
+    ),
+  )
+  const blue = await nameColor()
+  assert.notEqual(blue, grey, 'assigned color replaces grey')
+  assert.notEqual(
+    blue,
+    await evaluate(
+      "getComputedStyle(document.querySelector('.worktree-branch')).color",
+    ),
+  )
+  await update(
+    snapshot.worktrees.map((row, index) =>
+      index === 0 ? { ...row, editor: 'stopped', color: undefined } : row,
+    ),
+  )
+  assert.equal(await nameColor(), grey, 'closed names return to grey')
+
   await update(snapshot.worktrees)
   window.webContents.debugger.attach('1.3')
   await focusWindow(true)

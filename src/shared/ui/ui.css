@@ -1,4 +1,13 @@
 .radix-themes {
+  --app-worktree-unopened: var(--gray-11);
+  --app-worktree-blue: var(--blue-11);
+  --app-worktree-orange: var(--orange-11);
+  --app-worktree-green: var(--green-11);
+  --app-worktree-purple: var(--purple-11);
+  --app-worktree-pink: var(--pink-11);
+  --app-worktree-cyan: var(--cyan-11);
+  --app-worktree-yellow: var(--yellow-11);
+  --app-worktree-red: var(--red-11);
   --app-text: var(--gray-12);
   --app-muted: var(--gray-11);
   --app-border: var(--gray-5);

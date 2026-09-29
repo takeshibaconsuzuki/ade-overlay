@@ -36,6 +36,8 @@ import type { NotificationConstructorOptions } from 'electron'
 import { loadServerConfig, parseServerArgs } from '../../src/server/config.ts'
 import { startCompanionServer } from '../../src/server/server.ts'
 import { WorktreeStore } from '../../src/server/worktrees/worktree-store.ts'
+import { WorktreeColors } from '../../src/server/worktrees/worktree-colors.ts'
+import { worktreeColorSchema } from '../../src/shared/worktree-colors.ts'
 import { WorktreeEditors } from '../fixtures/worktree-editors.ts'
 import {
   companionRequests,
@@ -472,6 +474,7 @@ test('synthetic creation failures stay outside Git membership and disappear when
       project,
       path,
       branch: 'invalid branch',
+      color: undefined,
       main: false,
       locked: false,
       prunable: false,
@@ -1587,5 +1590,80 @@ test('clean submodules are listed before a confirmed force removal', async (t) =
   await assert.rejects(access(path))
   assert.ok(
     await git(project, 'rev-parse', '--verify', 'refs/heads/with-submodule'),
+  )
+})
+
+test('worktree colors persist across concurrent opens, editor stops, refreshes and companion restarts', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('color project')
+  const linked = join(root, 'color branch')
+  await git(project, 'worktree', 'add', '-b', 'color', linked)
+  const dataDir = join(root, 'color-data')
+  const colors = await WorktreeColors.open(dataDir)
+  const editors = new WorktreeEditors()
+  const projects = [{ mainWorktreePath: project }]
+  const store = await WorktreeStore.open(projects, editors, colors)
+  t.after(() => store.close())
+  assert.ok(store.list().worktrees.every((row) => row.color === undefined))
+  const main = { project, path: project }
+  const branch = { project, path: linked }
+  await assert.rejects(
+    store.openEditor({ project, path: join(root, 'missing') }),
+  )
+  assert.equal(colors.get(main), undefined)
+  await Promise.all([
+    store.openEditor(main),
+    store.openEditor(branch),
+    store.openEditor(main),
+  ])
+  const assigned = store.list().worktrees.map((row) => row.color)
+  assert.ok(
+    assigned.every((color) => worktreeColorSchema.safeParse(color).success),
+  )
+  assert.notEqual(assigned[0], assigned[1])
+  await editors.stop(main)
+  assert.equal(store.list().worktrees[0].color, undefined)
+  assert.equal(
+    colors.get(main),
+    assigned[0],
+    'stopping preserves the assignment',
+  )
+  await git(linked, 'branch', '-m', 'renamed')
+  assert.deepEqual(
+    (await store.refresh()).worktrees.map((row) => row.color),
+    [undefined, assigned[1]],
+  )
+  await store.close()
+  const restoredColors = await WorktreeColors.open(dataDir)
+  assert.deepEqual(
+    [restoredColors.get(main), restoredColors.get(branch)],
+    assigned,
+  )
+  const another = { project, path: join(root, 'another') }
+  await restoredColors.assign(another)
+  assert.ok(
+    !assigned.includes(restoredColors.get(another)),
+    'closed worktrees still count toward allocation',
+  )
+  const restarted = await WorktreeStore.open(
+    projects,
+    new WorktreeEditors(),
+    restoredColors,
+  )
+  t.after(() => restarted.close())
+  assert.ok(restarted.list().worktrees.every((row) => row.editor === 'stopped'))
+  assert.deepEqual(
+    restarted.list().worktrees.map((row) => row.color),
+    [undefined, undefined],
+  )
+  await restarted.openEditor(main)
+  assert.deepEqual(
+    restarted.list().worktrees.map((row) => row.color),
+    [assigned[0], undefined],
+  )
+  await restarted.openEditor(branch)
+  assert.deepEqual(
+    restarted.list().worktrees.map((row) => row.color),
+    assigned,
   )
 })

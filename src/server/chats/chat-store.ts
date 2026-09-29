@@ -7,6 +7,7 @@ import type {
   ProcessIdentity,
 } from '../../shared/chats.ts'
 import type { OpenEditorInput } from '../../shared/companion.ts'
+import type { WorktreeColor } from '../../shared/worktree-colors.ts'
 import {
   chatProvider,
   type ChatProvider,
@@ -45,9 +46,18 @@ export class ChatStore extends EventEmitter<{
   private readonly processes: (
     notBefore: number,
   ) => Promise<Map<number, ChatProcess>>
-  constructor(processes = readChatProcesses) {
+  private readonly color: (
+    worktree: OpenEditorInput,
+  ) => WorktreeColor | undefined
+
+  constructor(
+    processes = readChatProcesses,
+    color: (worktree: OpenEditorInput) => WorktreeColor | undefined = () =>
+      undefined,
+  ) {
     super()
     this.processes = processes
+    this.color = color
   }
 
   private serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -139,6 +149,7 @@ export class ChatStore extends EventEmitter<{
           id,
           terminalId: report.terminalId,
           path: worktree.path,
+          color: this.color(worktree),
           title: previous?.chat.title,
           message,
           activity: report.activity,
@@ -157,6 +168,21 @@ export class ChatStore extends EventEmitter<{
       void this.refreshTitles()
     }
     return accepted
+  }
+
+  // Live processes may outlast their editor. Refresh presentation on editor
+  // status changes without changing chat membership or waiting for activity.
+  refreshColors(): void {
+    if (this.closed) return
+    let changed = false
+    for (const entry of this.records.values()) {
+      const color = this.color(entry.worktree)
+      if (entry.chat.color !== color) {
+        entry.chat.color = color
+        changed = true
+      }
+    }
+    if (changed) this.publish()
   }
 
   async reconcile(): Promise<void> {

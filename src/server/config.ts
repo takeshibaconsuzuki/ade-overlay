@@ -140,3 +140,9 @@ export async function loadServerConfig(
   }
   return normalized
 }
+
+export function editorDataDir(config?: ServerConfig['editor']): string {
+  return resolve(
+    config?.dataDir ?? resolve(homedir(), '.ade-overlay', 'editors'),
+  )
+}

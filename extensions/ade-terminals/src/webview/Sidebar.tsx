@@ -5,6 +5,7 @@ import {
   SkeletonLine,
   Spinner,
   UIProvider,
+  WorktreeName,
 } from '../../../../src/shared/ui/components'
 import {
   chatProviderOptions,
@@ -105,9 +106,13 @@ export function Sidebar({
                     )}
                   </span>
                   <span className="chat-content">
-                    <span className="chat-worktree" title={chat.path}>
+                    <WorktreeName
+                      className="chat-worktree"
+                      title={chat.path}
+                      color={chat.color}
+                    >
                       {worktree}
-                    </span>
+                    </WorktreeName>
                     <span className="chat-title" title={chat.title}>
                       {chat.title || (
                         <SkeletonLine label="Loading chat title" />

@@ -12,7 +12,7 @@ sequenceDiagram
     participant Store as Worktree queue
     participant Editors as Editor manager
     Caller->>Store: editor:open
-    Store->>Store: Validate cached worktree
+    Store->>Store: Validate cached worktree and persist its color
     Store->>Editors: Reuse session or start shared editor<br/>preparation
     Editors-->>Store: Opening registered
     Store->>Store: Release the Git queue

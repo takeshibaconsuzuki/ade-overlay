@@ -5,6 +5,7 @@ import {
   Spinner,
   Tooltip,
   UIProvider,
+  WorktreeName,
 } from '../../shared/ui/components'
 import { CreateWorktree, DeleteWorktree } from './components/worktree-actions'
 import { useCompanion } from './use-companion'
@@ -194,7 +195,9 @@ export default function App() {
                       )}
                     </span>
                     <span className="worktree-name">
-                      <span>{basename(worktree.path)}</span>
+                      <WorktreeName color={worktree.color}>
+                        {basename(worktree.path)}
+                      </WorktreeName>
                       <span className="worktree-branch">
                         {worktree.branch ?? 'Detached HEAD'}
                       </span>

@@ -28,6 +28,7 @@ import { Slot, Tooltip as TooltipPrimitive } from 'radix-ui'
 import '@radix-ui/themes/styles.css'
 import './ui.css'
 import { InteractionScope } from './interaction-scope'
+import type { WorktreeColor } from '../worktree-colors.ts'
 
 // Keep library imports, types, theme tokens, and behavior behind this boundary.
 export function UIProvider({ children }: { children: ReactNode }) {
@@ -385,5 +386,25 @@ export function Modal({
         {children}
       </Dialog.Content>
     </Dialog.Root>
+  )
+}
+
+export function WorktreeName({
+  color,
+  children,
+  ...props
+}: Omit<HTMLAttributes<HTMLSpanElement>, 'color'> & {
+  color?: WorktreeColor
+}) {
+  return (
+    <span
+      {...props}
+      style={{
+        ...props.style,
+        color: `var(--app-worktree-${color ?? 'unopened'})`,
+      }}
+    >
+      {children}
+    </span>
   )
 }

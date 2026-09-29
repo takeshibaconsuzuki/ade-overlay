@@ -3,6 +3,7 @@
 - The companion caches Git membership and combines it with operation state, retained errors, and editor status. Synthetic creation rows describe pending or failed work even when Git has no worktree there.
 - Mutations and refreshes run in one ordered queue across clients. Listing reads the cache without running Git; external Git changes appear after a refresh.
 - Presentation prioritizes an operation or opening progress, then a retained error, then editor status. Editor status events publish state without rescanning Git or reconciling membership.
+- Worktree names use their assigned color while the editor is starting or running and grey when it is stopped. The companion saves a color per worktree identity in its data directory before editor startup; it survives editor stops, reconnects, and companion restarts. The picker and extension chat list use the same color. Reopening restores the saved color. New assignments favor the least-used palette color, counting saved assignments for stopped worktrees too.
 - Sources: [worktree store](../src/server/worktrees/worktree-store.ts), [mutation dialogs](../src/renderer/src/components/worktree-actions.tsx).
 
 ## Refresh and apply membership

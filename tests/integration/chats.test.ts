@@ -14,6 +14,8 @@ import { callRpc, sendEvent } from '../../src/shared/rpc.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { readCodexTitles } from '../../src/server/chats/codex-chat-title.ts'
 import { ChatStore } from '../../src/server/chats/chat-store.ts'
+import { WorktreeColors } from '../../src/server/worktrees/worktree-colors.ts'
+import { WorktreeEditors } from '../fixtures/worktree-editors.ts'
 import { ChatService } from '../../src/server/chats/chat-service.ts'
 import { codexProvider } from '../../src/server/chats/chat-providers.ts'
 import { installProviderHooks } from '../../src/server/chats/chat-hooks.ts'
@@ -758,4 +760,45 @@ test('provider titles load from read-only Codex metadata and refresh independent
   )
   assert.equal(titles.get(configHome)?.get('session'), 'Renamed in Codex')
   assert.equal(titles.get(root)?.get('missing'), undefined)
+})
+
+test('chat snapshots carry the companion worktree color through activity changes', async (t) => {
+  const colors = new WorktreeColors()
+  await colors.assign(worktree)
+  const editors = new WorktreeEditors()
+  await editors.open(worktree)
+  const store = new ChatStore(
+    async () => processes(),
+    (target) =>
+      editors.status(target) === 'stopped' ? undefined : colors.get(target),
+  )
+  editors.on('status', () => store.refreshColors())
+  t.after(() => store.close())
+  assert.equal(await store.activity('editor', worktree, report()), true)
+  const first = chatEvents.snapshot.schema.parse(store.list()).chats[0]
+  assert.equal(first.color, colors.get(worktree))
+  assert.ok(first.color)
+  await store.activity('editor', worktree, report({ activity: 'working' }))
+  assert.equal(store.get(first.id)?.chat.color, first.color)
+  assert.equal(store.list().chats[0].color, first.color)
+  const updates: unknown[] = []
+  store.on('update', (snapshot) => updates.push(snapshot))
+  await editors.stop(worktree)
+  assert.equal(
+    store.list().chats.length,
+    1,
+    'editor status does not remove live chats',
+  )
+  assert.equal(store.get(first.id)?.chat.color, undefined)
+  assert.equal(
+    updates.length,
+    1,
+    'closing broadcasts grey without chat activity',
+  )
+  assert.equal(colors.get(worktree), first.color)
+  store.refreshColors()
+  assert.equal(updates.length, 1, 'unchanged colors do not broadcast')
+  await editors.open(worktree)
+  assert.equal(store.list().chats[0].color, first.color)
+  assert.equal(updates.length, 2, 'reopening broadcasts the saved color')
 })

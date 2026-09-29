@@ -80,6 +80,24 @@ app
     await until("window.actions.some(a=>a.type==='ready')")
     await send()
     await until("document.querySelectorAll('.chat-row').length === 3")
+    stage = 'shared worktree colors'
+    const nameColor = () =>
+      run("getComputedStyle(document.querySelector('.chat-worktree')).color")
+    const grey = await nameColor()
+    state.chats[0].color = 'blue'
+    await send()
+    const blue = await nameColor()
+    assert.notEqual(blue, grey, 'assigned color reaches the chat worktree name')
+    assert.notEqual(
+      blue,
+      await run(
+        "getComputedStyle(document.querySelector('.chat-title')).color",
+      ),
+    )
+    state.chats[0].color = undefined
+    await send()
+    assert.equal(await nameColor(), grey)
+
     assert.deepEqual(
       await run(
         "Array.from(document.querySelectorAll('.chat-worktree'),x=>x.textContent)",
