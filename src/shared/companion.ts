@@ -65,6 +65,12 @@ const worktreeSnapshotSchema = z.object({
 })
 
 export const companionRequests = {
+  pasteTarget: requestSpec(
+    'editor:paste-target',
+    editorSessionSchema.shape.id,
+    chatIdSchema.nullable(),
+    8_000,
+  ),
   activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),
   list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
   refresh: requestSpec(

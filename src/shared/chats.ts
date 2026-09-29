@@ -31,6 +31,12 @@ const chatSnapshotSchema = z.object({
   chats: z.array(chatSchema),
 })
 export const chatRequests = {
+  pasteTarget: requestSpec(
+    'paste-target',
+    z.null(),
+    chatIdSchema.nullable(),
+    5_000,
+  ),
   activate: requestSpec('activate', chatIdSchema, z.null(), 35_000),
 }
 export const chatEvents = {

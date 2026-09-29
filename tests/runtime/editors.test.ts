@@ -326,116 +326,132 @@ test(
   },
 )
 
-test(
-  'real VS Code imports local settings and Node extensions, switches worktrees and restores state after an app restart',
-  { skip: !process.env.ADE_TEST_VSCODE_RUNTIME, timeout: 150_000 + idleMs },
-  async (t) => {
-    const {
-      project,
-      config: baseConfig,
-      cleanups,
-      root,
-      editorRuntime,
-    } = await fixture(t)
-    const config = {
-      ...baseConfig,
-      editor: {
-        ...baseConfig.editor,
-        ...(await localVSCodeFixture(root)),
-      },
-    }
-    // The compatibility command prepares the exact immutable runtime used by ADE.
-    editorRuntime.runtimeRoot = process.env.ADE_TEST_VSCODE_RUNTIME!
-    await validateTerminalSerialization(editorRuntime.runtimeRoot)
-    const server = await startCompanionServer({
-      port: 0,
-      config,
-      editorRuntime,
-    })
-    cleanups.push(() => server.close())
-    const client = await connect(t, server.url)
-    const second = join(root, 'second')
-    await completeCreate(client, {
-      project,
-      path: second,
-      baseBranch: 'main',
-      branch: 'feature',
-    })
-    await writeFile(
-      join(project, 'persist.txt'),
-      'An editor persistence test.\n',
-    )
-    await copyFile(
-      fileURLToPath(new URL('../fixtures/terminal-mouse.cjs', import.meta.url)),
-      join(project, 'terminal-mouse.cjs'),
-    )
-    for (const phase of ['first', 'second']) {
-      const inputPath = join(root, `${phase}.json`)
-      const result = join(root, `${phase}-result.json`)
+for (const { name, phases } of [
+  {
+    name: 'real VS Code imports local settings and Node extensions, switches worktrees and restores state after an app restart',
+    phases: ['first', 'second'],
+  },
+  {
+    name: 'real VS Code preserves rich chat paste order and normal terminal input',
+    phases: ['paste'],
+  },
+])
+  test(
+    name,
+    { skip: !process.env.ADE_TEST_VSCODE_RUNTIME, timeout: 150_000 + idleMs },
+    async (t) => {
+      const {
+        project,
+        config: baseConfig,
+        cleanups,
+        root,
+        editorRuntime,
+      } = await fixture(t)
+      const config = {
+        ...baseConfig,
+        editor: {
+          ...baseConfig.editor,
+          ...(await localVSCodeFixture(root)),
+        },
+      }
+      // The compatibility command prepares the exact immutable runtime used by ADE.
+      editorRuntime.runtimeRoot = process.env.ADE_TEST_VSCODE_RUNTIME!
+      await validateTerminalSerialization(editorRuntime.runtimeRoot)
+      const server = await startCompanionServer({
+        port: 0,
+        config,
+        editorRuntime,
+      })
+      cleanups.push(() => server.close())
+      const client = await connect(t, server.url)
+      const second = join(root, 'second')
+      await completeCreate(client, {
+        project,
+        path: second,
+        baseBranch: 'main',
+        branch: 'feature',
+      })
       await writeFile(
-        inputPath,
-        JSON.stringify({
-          project,
-          second,
-          phase,
-          result,
-          screenshot: resolve('out/editor-smoke.png'),
-          userData: join(root, 'desktop-data'),
-          main: resolve('out/main/index.js'),
-          node: process.execPath,
-        }),
+        join(project, 'persist.txt'),
+        'An editor persistence test.\n',
       )
-      let failure: unknown
-      try {
-        await execute(
-          electron as unknown as string,
-          [fileURLToPath(new URL('./editor-window.mjs', import.meta.url))],
-          {
-            env: {
-              ...process.env,
-              ELECTRON_RUN_AS_NODE: undefined,
-              ADE_COMPANION_URL: server.url,
-              ADE_COMPANION_TOKEN: '',
-              ADE_EDITOR_TEST_INPUT: inputPath,
+      await copyFile(
+        fileURLToPath(
+          new URL('../fixtures/terminal-mouse.cjs', import.meta.url),
+        ),
+        join(project, 'terminal-mouse.cjs'),
+      )
+      for (const phase of phases) {
+        const inputPath = join(root, `${phase}.json`)
+        const result = join(root, `${phase}-result.json`)
+        await writeFile(
+          inputPath,
+          JSON.stringify({
+            project,
+            second,
+            phase,
+            result,
+            screenshot: resolve('out/editor-smoke.png'),
+            userData: join(
+              root,
+              phase === 'paste' ? 'paste-desktop-data' : 'desktop-data',
+            ),
+            main: resolve('out/main/index.js'),
+            node: process.execPath,
+          }),
+        )
+        let failure: unknown
+        try {
+          await execute(
+            electron as unknown as string,
+            [fileURLToPath(new URL('./editor-window.mjs', import.meta.url))],
+            {
+              env: {
+                ...process.env,
+                ELECTRON_RUN_AS_NODE: undefined,
+                ADE_COMPANION_URL: server.url,
+                ADE_COMPANION_TOKEN: '',
+                ADE_EDITOR_TEST_INPUT: inputPath,
+              },
+              windowsHide: true,
+              timeout: 55_000,
             },
-            windowsHide: true,
-            timeout: 55_000,
-          },
-        )
-      } catch (error) {
-        failure = error
-      }
-      const outcome = JSON.parse(await readFile(result, 'utf8'))
-      if (!outcome.ok) {
-        await cp(config.editor.dataDir, resolve('out/editor-test-logs'), {
-          recursive: true,
-        })
-        await copyFile(result, resolve('out/editor-test-result.json'))
-      }
-      assert.equal(outcome.ok, true, JSON.stringify(outcome))
-      if (failure) throw failure
-      if (phase === 'first' && idleMs > 0) {
-        client.stop()
-        const started = Date.now()
-        console.log(
-          'Editor soak: desktop exited; no editor requests during the idle period.',
-        )
-        while (Date.now() - started < idleMs) {
-          await delay(Math.min(60_000, idleMs - (Date.now() - started)))
-          console.log(
-            `Editor soak: disconnected for ${Math.round((Date.now() - started) / 60_000)} minutes`,
           )
+        } catch (error) {
+          failure = error
+        }
+        const outcome = JSON.parse(await readFile(result, 'utf8'))
+        if (!outcome.ok) {
+          await cp(config.editor.dataDir, resolve('out/editor-test-logs'), {
+            recursive: true,
+          })
+          await copyFile(result, resolve('out/editor-test-result.json'))
+        }
+        assert.equal(outcome.ok, true, JSON.stringify(outcome))
+        if (failure) throw failure
+        if (phase === 'first' && idleMs > 0) {
+          client.stop()
+          const started = Date.now()
+          console.log(
+            'Editor soak: desktop exited; no editor requests during the idle period.',
+          )
+          while (Date.now() - started < idleMs) {
+            await delay(Math.min(60_000, idleMs - (Date.now() - started)))
+            console.log(
+              `Editor soak: disconnected for ${Math.round((Date.now() - started) / 60_000)} minutes`,
+            )
+          }
         }
       }
-    }
-    // The effective Remote override must not flow back through User settings sync.
-    const local = parse(
-      await readFile(
-        join(config.editor.localUserDataDir, 'User', 'settings.json'),
-        'utf8',
-      ),
-    )
-    assert.equal(local['terminal.integrated.enablePersistentSessions'], false)
-    assert.equal(local['editor.fontSize'], 29)
-  },
-)
+      if (phases[0] === 'paste') return
+      // The effective Remote override must not flow back through User settings sync.
+      const local = parse(
+        await readFile(
+          join(config.editor.localUserDataDir, 'User', 'settings.json'),
+          'utf8',
+        ),
+      )
+      assert.equal(local['terminal.integrated.enablePersistentSessions'], false)
+      assert.equal(local['editor.fontSize'], 29)
+    },
+  )

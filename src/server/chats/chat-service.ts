@@ -5,7 +5,7 @@ import type { Duplex } from 'node:stream'
 import { Server as Engine } from 'engine.io'
 import getRawBody from 'raw-body'
 import { Server as SocketServer, type Socket } from 'socket.io'
-import { handleRpc, listenEvent, sendEvent } from '../../shared/rpc.ts'
+import { callRpc, handleRpc, listenEvent, sendEvent } from '../../shared/rpc.ts'
 import { z } from 'zod'
 import type { Logger } from 'pino'
 import type { OpenEditorInput } from '../../shared/companion.ts'
@@ -196,6 +196,19 @@ export class ChatService {
       for (const scope of this.editors.values())
         if (scope.socket) sendEvent(scope.socket, chatEvents.snapshot, snapshot)
     })
+  }
+
+  async pasteTarget(editorId: string): Promise<string | null> {
+    const scope = this.editors.get(editorId)
+    const socket = scope?.socket
+    if (this.closing || !socket?.connected)
+      throw new Error(
+        'The editor extension is disconnected. Try pasting again.',
+      )
+    const target = await callRpc(socket, chatRequests.pasteTarget, null)
+    if (this.closing || scope?.socket !== socket)
+      throw new Error('The editor connection changed. Try pasting again.')
+    return target
   }
 
   async listen(): Promise<void> {

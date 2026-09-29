@@ -46,7 +46,9 @@ const chatNotifications = new ChatNotifications(
       error instanceof Error ? error.message : String(error),
     ),
 )
-const editorWindow = new EditorWindow(companion.getStatus().url)
+const editorWindow = new EditorWindow(companion.getStatus().url, (id) =>
+  companion.pasteTarget(id),
+)
 const companionState = new CompanionState(companion)
 const editorNavigation = new EditorNavigation(
   companion,

@@ -159,6 +159,10 @@ export class CompanionClient extends EventEmitter<{
     this.update({ state: 'disconnected', url: this.status.url })
   }
 
+  pasteTarget(editorId: string): Promise<string | null> {
+    return this.request(companionRequests.pasteTarget, editorId)
+  }
+
   activateChat(id: string): Promise<null> {
     return this.request(companionRequests.activateChat, id)
   }

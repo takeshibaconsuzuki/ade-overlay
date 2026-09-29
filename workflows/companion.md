@@ -45,7 +45,7 @@ flowchart TD
     click Chat "extension.md#activate-and-connect"
 ```
 
-- Browser pages have no companion command bridge. Main holds the companion credential; editor traffic uses a separate credential per running editor.
+- Editor pages can only reserve and submit terminal pastes through their narrow desktop bridge; main proxies target queries to the companion. Main holds the companion credential; editor traffic uses a separate credential per running editor.
 - Chat reporting and extension control use distinct credentials on the loopback service. Terminal processes receive reporting access, while the extension host receives navigation control.
 - Command admission stops during shutdown. Each transport owns its connections, subscriptions, and timers.
 

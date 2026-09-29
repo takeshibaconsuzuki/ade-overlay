@@ -11,8 +11,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { build } from 'vite'
 import type { Socket } from 'socket.io'
 import { socketServer } from '../helpers/socket.ts'
-import { chatEvents } from '../../src/shared/chats.ts'
-import { sendEvent, listenEvent } from '../../src/shared/rpc.ts'
+import { chatEvents, chatRequests } from '../../src/shared/chats.ts'
+import { callRpc, sendEvent, listenEvent } from '../../src/shared/rpc.ts'
 
 test(
   'focus waits locally for restoration, supersedes pending targets and cancels cleanly',
@@ -159,6 +159,18 @@ test(
     await until(() => !!result('second'))
     assert.deepEqual(result('second'), { id: 'second' })
     assert.equal(vscode.window.activeTerminal, b)
+
+    assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), 'b')
+    const ordinary = terminal()
+    vscode.window.terminals.push(ordinary)
+    vscode.window.activeTerminal = ordinary
+    assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), null)
+    vscode.window.activeTerminal = undefined
+    await assert.rejects(
+      callRpc(peer!, chatRequests.pasteTarget, null),
+      /no active terminal/,
+    )
+    vscode.window.activeTerminal = b
 
     sendEvent(peer!, chatEvents.snapshot, {
       chats: [

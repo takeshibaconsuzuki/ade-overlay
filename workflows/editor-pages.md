@@ -1,7 +1,7 @@
 # Editor pages
 
 - Desktop main owns one editor window and retained pages keyed by editor identity. Selection belongs to the window; document readiness belongs to each page.
-- Pages share persistent browser storage per companion origin. They have no Node access or preload bridge and remain alive when hidden.
+- Pages share persistent browser storage per companion origin. They have no Node access and remain alive when hidden. A narrow preload exposes [terminal paste reservation and submission](terminal-paste.md).
 - Sources: [editor window](../src/main/editor-window.ts), [page readiness](../src/main/editor-page.ts).
 
 ## Select an editor page

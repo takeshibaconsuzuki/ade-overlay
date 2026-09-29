@@ -12,7 +12,7 @@ export function buildSettingsBridge(watch = false) {
       watch: watch ? {} : null,
       lib: {
         entry: fileURLToPath(
-          new URL('../src/editor-browser/settings-sync.ts', import.meta.url),
+          new URL('../src/editor-browser/index.ts', import.meta.url),
         ),
         formats: ['iife'],
         name: 'ADESettingsSync',

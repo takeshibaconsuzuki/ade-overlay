@@ -9,6 +9,8 @@ import {
   type MediaAccessPermissionRequest,
 } from 'electron'
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
+import { installEditorPaste } from './editor-paste.ts'
 import { EditorSettingsSync } from './settings-sync.ts'
 import { EditorPage } from './editor-page.ts'
 import { editorPath } from '../shared/companion.ts'
@@ -40,7 +42,10 @@ export class EditorWindow {
   }
   private readonly origin: URL
 
-  constructor(companionUrl: string) {
+  constructor(
+    companionUrl: string,
+    private readonly pasteTarget?: (editorId: string) => Promise<string | null>,
+  ) {
     this.origin = new URL(companionUrl)
     this.origin.protocol = this.origin.protocol === 'wss:' ? 'https:' : 'http:'
   }
@@ -72,6 +77,9 @@ export class EditorWindow {
       const view = new WebContentsView({
         webPreferences: {
           session: browserSession.browser,
+          preload: this.pasteTarget
+            ? join(import.meta.dirname, '../preload/editor.cjs')
+            : undefined,
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
@@ -105,12 +113,23 @@ export class EditorWindow {
         event.preventDefault()
         openBrowser(next)
       })
+      const forgetPaste = this.pasteTarget
+        ? installEditorPaste(
+            view.webContents,
+            () => this.active?.view === view,
+            isEditorUrl,
+            () => this.pasteTarget!(editor.id),
+          )
+        : () => {}
       entry = {
         view,
         token: editor.accessToken,
         page: new EditorPage(view.webContents, url.href, isEditorUrl),
         worktree,
-        forget: () => browserSession.tokens.delete(path),
+        forget: () => {
+          forgetPaste()
+          browserSession.tokens.delete(path)
+        },
       }
       const created = entry
       view.webContents.once('destroyed', () => this.discard(key, created))

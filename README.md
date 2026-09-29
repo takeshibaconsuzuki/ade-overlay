@@ -117,6 +117,8 @@ After a chat finishes a response, enable ADE in **System Settings > Notification
 
 Check the companion terminal or `~/.ade-overlay/server.log` for errors. Set `ADE_LOG_LEVEL=debug` for detailed output.
 
+Terminal pastes wait for the extension to identify the active terminal. Ordinary terminals then receive the captured text. ADE chat terminals print an ordered `[{ type: 'text' | 'image', data: string | Uint8Array }]` diagnostic in the editor's developer console (`[ADE paste]`) and desktop console, without sending text to the CLI. Image URLs remain in place if the browser cannot download their bytes. Keyboard and context-menu pastes work with hidden tabs or icons; code indentation is preserved. See the [paste workflow](workflows/terminal-paste.md).
+
 ## Upgrade or uninstall
 
 Save your work, stop the companion, and install the desktop and companion from the same release. Run `--setup` again, then restart both. Also rerun setup after moving the companion or changing a provider home directory.

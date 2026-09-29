@@ -71,6 +71,7 @@ test('terminal launches require one folder and use project chat commands or defa
     for (const kind of ['codex', 'claude'] as const) {
       const chat = await launcher.open(kind)
       assert.equal(chat.creationOptions.cwd, folder.uri)
+      assert.equal(chat.creationOptions.iconPath.id, 'comment-discussion')
       const command =
         overrides?.[kind] ?? (kind === 'codex' ? 'codex --no-daemon' : 'claude')
       assert.deepEqual(chat.sentText, [`{\n${command}\n}; exit`])
@@ -78,6 +79,7 @@ test('terminal launches require one folder and use project chat commands or defa
   }
   const terminal = await launcher.open('terminal')
   assert.equal(terminal.creationOptions.cwd, folder.uri)
+  assert.equal(terminal.creationOptions.iconPath.id, 'terminal')
   assert.ok(vscode.effects.includes('createTerminal'))
   assert.deepEqual(terminal.sentText, [])
   process.env.ADE_CHAT_COMMANDS = '{"codex":" "}'

@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import type { Socket } from 'socket.io-client'
 import { createSocket } from '../../../src/shared/node/socket-client.ts'
-import { callRpc, listenEvent, sendEvent } from '../../../src/shared/rpc.ts'
+import { callRpc, handleRpc, listenEvent, sendEvent } from '../../../src/shared/rpc.ts'
 import {
   chatRequests,
   chatEvents,
@@ -89,6 +89,15 @@ export class ChatController implements vscode.Disposable {
       maxReconnectDelay: 2000,
     })
     this.socket = socket
+    handleRpc(socket, chatRequests.pasteTarget, () => {
+      const terminal = vscode.window.activeTerminal
+      if (!terminal || !vscode.window.terminals.includes(terminal))
+        throw new Error('There is no active terminal.')
+      // Accepted limitation: after an extension-host restart, identity recovery
+      // is asynchronous. Until recovery finishes, a restored ADE chat can look
+      // ordinary here, allowing intercepted clipboard text through to its CLI.
+      return this.identities.id(terminal) ?? null
+    })
     const invalid = () => socket.io.engine.close()
     listenEvent(
       socket,

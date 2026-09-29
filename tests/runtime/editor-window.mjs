@@ -144,11 +144,121 @@ async function run() {
       // again instead of waiting for a notification's old snapshot to change.
       await command(editor, 'ADE: Check Imported Extension')
       return (await body()).includes(
-        input.phase === 'first'
-          ? 'ADE_IMPORTED_23_NODE_TRUSTED'
-          : 'ADE_IMPORTED_29_NODE_TRUSTED',
+        input.phase === 'second'
+          ? 'ADE_IMPORTED_29_NODE_TRUSTED'
+          : 'ADE_IMPORTED_23_NODE_TRUSTED',
       )
     }, 'imported Node extension and settings')
+    if (input.phase === 'paste') {
+      // Exercise the actual workbench DOM and paste action without touching
+      // the user's OS clipboard or launching either provider.
+      await editor.executeJavaScript(`(() => {
+        const read = navigator.clipboard.read;
+        const info = console.info;
+        globalThis.pasteResults = [];
+        console.info = (...args) => { if (args[0] === '[ADE paste]') pasteResults.push(args); else info(...args); };
+        navigator.clipboard.read = async () => [new ClipboardItem({
+          'text/plain': new Blob(['ADE_PASTE_TEXT'], { type: 'text/plain' }),
+          'text/html': new Blob(['<p>First</p><img src="data:image/png;base64,AQID"><p>Middle</p><img src="data:image/png;base64,BAUG"><p>Last</p>'], { type: 'text/html' }),
+        })];
+        globalThis.restorePasteFixture = () => { navigator.clipboard.read = read; console.info = info; };
+      })()`)
+      try {
+        let count = 0
+        for (const setting of ['default', 'hiddenIcons', 'hiddenTabs']) {
+          if (setting !== 'default')
+            await command(editor, `ADE: Paste Fixture ${setting}`)
+          for (const provider of ['codex', 'claude', 'ordinary']) {
+            await command(editor, `ADE: Paste Fixture ${provider}`)
+            await until(
+              () =>
+                editor.executeJavaScript(
+                  `!!document.querySelector('.editor-group-container.active .xterm textarea')`,
+                ),
+              'terminal input',
+            )
+            await editor.executeJavaScript(
+              `document.querySelector('.editor-group-container.active .xterm textarea').focus()`,
+            )
+            if (setting === 'hiddenIcons')
+              assert.equal(
+                await editor.executeJavaScript(
+                  `document.querySelectorAll('.tab.active .codicon-terminal').length`,
+                ),
+                0,
+              )
+            if (setting === 'hiddenTabs')
+              assert.equal(
+                await editor.executeJavaScript(
+                  `document.querySelectorAll('.tab').length`,
+                ),
+                0,
+              )
+            for (const mechanism of ['command', 'event']) {
+              if (mechanism === 'command')
+                await command(editor, 'Terminal: Paste into Active Terminal')
+              else
+                await editor.executeJavaScript(
+                  `(() => {
+                const data = new DataTransfer();
+                data.setData('text/plain', 'ADE_NATIVE_TEXT');
+                data.setData('text/html', '<p>First</p><img src="data:image/png;base64,AQID"><p>Middle</p><img src="data:image/png;base64,BAUG"><p>Last</p>');
+                document.querySelector('.editor-group-container.active .xterm textarea').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+              })()`,
+                  true,
+                )
+              const marker =
+                mechanism === 'command' ? 'ADE_PASTE_TEXT' : 'ADE_NATIVE_TEXT'
+              if (provider === 'ordinary') {
+                await until(
+                  () =>
+                    editor.executeJavaScript(
+                      `document.querySelector('.editor-group-container.active .xterm-accessibility-tree')?.textContent.includes('${marker}')`,
+                    ),
+                  'ordinary terminal receives text',
+                )
+                assert.equal(
+                  await editor.executeJavaScript('pasteResults.length'),
+                  count,
+                )
+              } else {
+                count++
+                await until(
+                  () =>
+                    editor.executeJavaScript(
+                      `pasteResults.length === ${count}`,
+                    ),
+                  'structured paste preview',
+                )
+                const result = await editor.executeJavaScript(
+                  `pasteResults.at(-1)[1].map(part => ({ ...part, data: typeof part.data === 'string' ? part.data : Array.from(part.data) }))`,
+                )
+                assert.deepEqual(result, [
+                  { type: 'text', data: 'First' },
+                  { type: 'image', data: [1, 2, 3] },
+                  { type: 'text', data: 'Middle' },
+                  { type: 'image', data: [4, 5, 6] },
+                  { type: 'text', data: 'Last' },
+                ])
+                assert.equal(
+                  await editor.executeJavaScript(
+                    `document.querySelector('.editor-group-container.active .xterm-accessibility-tree')?.textContent.includes('${marker}')`,
+                  ),
+                  false,
+                )
+              }
+            }
+            await command(editor, 'ADE: Paste Fixture close')
+          }
+        }
+      } finally {
+        await editor.executeJavaScript('restorePasteFixture()')
+        await command(editor, 'ADE: Paste Fixture close')
+      }
+      writeFileSync(input.result, JSON.stringify({ ok: true, errors }))
+      BrowserWindow.getAllWindows()[0].close()
+      return
+    }
     if (input.phase === 'first') {
       await key(editor, 'P', [commandOrControl])
       await delay(300)

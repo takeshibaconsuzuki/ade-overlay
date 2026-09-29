@@ -1,5 +1,9 @@
 export { EventEmitter } from './chat-vscode.mjs'
-export class ThemeIcon {}
+export class ThemeIcon {
+  constructor(id) {
+    this.id = id
+  }
+}
 export class TabInputTerminal {}
 export const TerminalLocation = { Editor: 1 }
 const disposable = () => ({ dispose() {} })

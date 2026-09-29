@@ -23,6 +23,8 @@
 - [Select a live chat](chats.md#navigate-to-a-chat) selects the worktree in the desktop, waits for the destination extension, and completes after terminal focus.
 - [Change User settings](settings.md#observe-a-browser-save) records a save locally; the next [synchronization pass](settings.md#synchronize-one-snapshot) reconciles the browser and companion copies.
 
+- [Terminal paste](terminal-paste.md): reserve the active terminal before releasing text or printing ordered chat content.
+
 ## Resource boundaries
 
 - Closing the picker quits the desktop. Closing only the editor window retains its pages. Neither action stops companion editor processes.

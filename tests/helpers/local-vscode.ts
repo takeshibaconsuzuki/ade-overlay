@@ -1,6 +1,8 @@
+import { build } from 'vite'
+import { builtinModules } from 'node:module'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export async function localVSCodeFixture(
   root: string,
@@ -58,15 +60,68 @@ export async function localVSCodeFixture(
             command: 'ade.editSettings',
             title: 'ADE: Change Imported Settings',
           },
+          ...[
+            'codex',
+            'claude',
+            'ordinary',
+            'hiddenIcons',
+            'hiddenTabs',
+            'close',
+          ].map((kind) => ({
+            command: `ade.pasteFixture.${kind}`,
+            title: `ADE: Paste Fixture ${kind}`,
+          })),
         ],
       },
     }),
   )
+  await build({
+    configFile: false,
+    logLevel: 'silent',
+    resolve: { conditions: ['node'], mainFields: ['module', 'main'] },
+    build: {
+      target: 'node22',
+      outDir: join(localExtensionsDir, folder),
+      emptyOutDir: false,
+      lib: {
+        entry: fileURLToPath(
+          new URL(
+            '../../extensions/ade-terminals/src/chats.ts',
+            import.meta.url,
+          ),
+        ),
+        formats: ['cjs'],
+        fileName: () => 'chats.js',
+      },
+      rollupOptions: {
+        external: [
+          'vscode',
+          /^node:/,
+          ...builtinModules,
+          'bufferutil',
+          'utf-8-validate',
+        ],
+      },
+    },
+  })
   await writeFile(
     join(localExtensionsDir, folder, 'index.js'),
     `
     const vscode = require('vscode');
     exports.activate = context => {
+      const pasteTerminals = [];
+      const ids = new Map();
+      const changes = new vscode.EventEmitter();
+      const { ChatController } = require('./chats.js');
+      context.subscriptions.push(changes, new ChatController({ id: terminal => ids.get(terminal), find: id => [...ids].find(entry => entry[1] === id)?.[0], onDidChange: changes.event }, operation => operation()));
+      for (const [name, setting, value] of [['hiddenIcons', 'showIcons', false], ['hiddenTabs', 'showTabs', 'none']]) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + name, () => vscode.workspace.getConfiguration('workbench.editor').update(setting, value, vscode.ConfigurationTarget.Global)));
+      for (const provider of ['codex', 'claude', 'ordinary']) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + provider, () => {
+        const terminal = vscode.window.createTerminal({ name: 'ADE paste fixture ' + provider, location: vscode.TerminalLocation.Editor, iconPath: new vscode.ThemeIcon('terminal') });
+        if (provider !== 'ordinary') ids.set(terminal, 'fixture-' + provider);
+        pasteTerminals.push(terminal);
+        terminal.show();
+      }));
+      context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.close', () => { for (const terminal of pasteTerminals) terminal.dispose(); }));
       if (${observeSettings}) {
         const fs = require('node:fs');
         const path = require('node:path');

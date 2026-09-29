@@ -133,6 +133,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
       )
     }
     register(companionRequests.activateChat, (id) => chats.activate(id, client))
+    register(companionRequests.pasteTarget, (id) => chats.pasteTarget(id))
     register(companionRequests.list, () => worktrees.list())
     register(companionRequests.refresh, () => worktrees.refresh())
     register(companionRequests.create, (input) => worktrees.startCreate(input))
