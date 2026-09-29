@@ -235,8 +235,8 @@ exports.run = async () => {
     },
   }
   const freshIdentities = new TerminalIdentities(identityStorage)
-  const fresh = new TerminalLauncher((terminal, id) =>
-    freshIdentities.register(terminal, id),
+  const fresh = new TerminalLauncher((terminal, id, provider) =>
+    freshIdentities.register(terminal, id, provider),
   )
   assert.equal(
     fresh.getSelectedTerminal(),

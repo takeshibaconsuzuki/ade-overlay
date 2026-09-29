@@ -7,6 +7,8 @@ import { Server as Engine } from 'engine.io'
 import getRawBody from 'raw-body'
 import { Server as SocketServer, type Socket } from 'socket.io'
 import { editorDataDir } from '../config.ts'
+import { chatProvider, type ChatProvider } from './chat-providers.ts'
+import type { PasteTarget } from '../../shared/paste-schema.ts'
 import { materializePaste } from './chat-paste.ts'
 import type { PastePart } from '../../shared/paste.ts'
 import { callRpc, handleRpc, listenEvent, sendEvent } from '../../shared/rpc.ts'
@@ -51,6 +53,16 @@ const handshakeSchema = z.object({
   activation: z.uuid(),
   startedAt: z.coerce.number().finite().nonnegative(),
 })
+interface PasteReservation {
+  editorId: string
+  documentId: string
+  owner: Socket
+  socket: Socket
+  target: PasteTarget
+  provider: ChatProvider
+  expires: number
+}
+
 export class ChatService {
   readonly store: ChatStore
   private readonly editors = new Map<string, EditorConnection>()
@@ -67,6 +79,8 @@ export class ChatService {
   private readonly upgrades = new Set<Duplex>()
   private closing = false
   private readonly pastes = new Set<Promise<null>>()
+  private readonly pasteReservations = new Map<string, PasteReservation>()
+  private readonly pendingReservations = new Map<Socket, number>()
   private readonly pasteQueues = new Map<string, Promise<void>>()
   private readonly server: Server
   private timer?: ReturnType<typeof setInterval>
@@ -210,27 +224,83 @@ export class ChatService {
     })
   }
 
-  async pasteTarget(editorId: string): Promise<string | null> {
-    const scope = this.editors.get(editorId)
-    const socket = scope?.socket
-    if (this.closing || !socket?.connected)
+  forgetPastes(owner: Socket): void {
+    for (const [id, reservation] of this.pasteReservations)
+      if (reservation.owner === owner) this.pasteReservations.delete(id)
+  }
+
+  async reservePaste(
+    owner: Socket,
+    editorId: string,
+    documentId: string,
+  ): Promise<string | null> {
+    for (const [id, reservation] of this.pasteReservations)
+      if (
+        reservation.expires <= Date.now() ||
+        !reservation.owner.connected ||
+        this.editors.get(reservation.editorId)?.socket !== reservation.socket
+      )
+        this.pasteReservations.delete(id)
+    const pending = this.pendingReservations.get(owner) ?? 0
+    const reserved = [...this.pasteReservations.values()].filter(
+      (reservation) => reservation.owner === owner,
+    ).length
+    if (pending + reserved >= 32) throw new Error('Too many pending pastes.')
+    const socket = this.editors.get(editorId)?.socket
+    if (this.closing || !owner.connected || !socket?.connected)
       throw new Error(
         'The editor extension is disconnected. Try pasting again.',
       )
-    const target = await callRpc(socket, chatRequests.pasteTarget, null)
-    if (this.closing || scope?.socket !== socket)
-      throw new Error('The editor connection changed. Try pasting again.')
-    return target
+    this.pendingReservations.set(owner, pending + 1)
+    try {
+      const target = await callRpc(socket, chatRequests.pasteTarget, null)
+      if (
+        this.closing ||
+        !owner.connected ||
+        this.editors.get(editorId)?.socket !== socket
+      )
+        throw new Error('The editor connection changed. Try pasting again.')
+      if (!target) return null
+      const provider = chatProvider(target.provider)
+      if (!provider) throw new Error('Unsupported chat provider.')
+      const id = randomUUID()
+      this.pasteReservations.set(id, {
+        editorId,
+        documentId,
+        owner,
+        socket,
+        target,
+        provider,
+        expires: Date.now() + 30_000,
+      })
+      return id
+    } finally {
+      const remaining = (this.pendingReservations.get(owner) ?? 1) - 1
+      if (remaining) this.pendingReservations.set(owner, remaining)
+      else this.pendingReservations.delete(owner)
+    }
   }
 
-  paste(
+  async paste(
+    owner: Socket,
     editorId: string,
-    terminalId: string,
+    documentId: string,
+    reservationId: string,
     items: PastePart[],
   ): Promise<null> {
-    const key = JSON.stringify([editorId, terminalId])
+    const reservation = this.pasteReservations.get(reservationId)
+    if (
+      !reservation ||
+      reservation.owner !== owner ||
+      reservation.editorId !== editorId ||
+      reservation.documentId !== documentId ||
+      reservation.expires <= Date.now()
+    )
+      throw new Error('The paste reservation is invalid or expired.')
+    this.pasteReservations.delete(reservationId)
+    const key = JSON.stringify([editorId, reservation.target.terminalId])
     const previous = this.pasteQueues.get(key) ?? Promise.resolve()
-    const request = this.deliverPaste(editorId, terminalId, items, previous)
+    const request = this.deliverPaste(reservation, items, previous)
     const tail = Promise.allSettled([previous, request]).then(() => {})
     this.pasteQueues.set(key, tail)
     void tail.then(() => {
@@ -242,36 +312,28 @@ export class ChatService {
   }
 
   private async deliverPaste(
-    editorId: string,
-    terminalId: string,
+    reservation: PasteReservation,
     items: PastePart[],
     previous: Promise<void>,
   ): Promise<null> {
-    const scope = this.editors.get(editorId)
-    const socket = scope?.socket
-    if (this.closing || !socket?.connected)
-      throw new Error(
-        'The editor extension is disconnected. Try pasting again.',
+    const { owner, socket, editorId, target, provider } = reservation
+    const assertCurrent = () => {
+      if (
+        this.closing ||
+        !owner.connected ||
+        !socket.connected ||
+        this.editors.get(editorId)?.socket !== socket
       )
-    await this.store.reconcile()
-    const chat = this.store.getTerminal(editorId, terminalId)
-    if (!chat)
-      throw new Error(
-        'The chat is not running or has not finished starting. Try pasting again.',
-      )
+        throw new Error('The editor connection changed. Try pasting again.')
+    }
+    assertCurrent()
+    // Terminal identity and provider come from the extension, before any CLI
+    // lifecycle hook runs. Activity tracking must never be a prerequisite to paste.
     const parts = await materializePaste(items, this.pasteDirectory)
-    const text = chat.provider.preparePaste(parts)
+    const text = provider.preparePaste(parts)
     await previous
-    await this.store.reconcile()
-    if (
-      this.closing ||
-      scope?.socket !== socket ||
-      this.store.getTerminal(editorId, terminalId)?.chatId !== chat.chatId
-    )
-      throw new Error(
-        'The chat changed while preparing the paste. Try pasting again.',
-      )
-    return callRpc(socket, chatRequests.paste, { terminalId, text })
+    assertCurrent()
+    return callRpc(socket, chatRequests.paste, { ...target, text })
   }
 
   async listen(): Promise<void> {
@@ -411,6 +473,7 @@ export class ChatService {
 
   async close(): Promise<void> {
     this.closing = true
+    this.pasteReservations.clear()
     clearInterval(this.timer)
     clearInterval(this.titleTimer)
     const titlesClosed = this.store.close()

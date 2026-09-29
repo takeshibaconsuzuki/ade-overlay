@@ -54,7 +54,7 @@ async function run(context) {
         env: { ADE_TERMINAL_ID: terminalId },
         location: vscode.TerminalLocation.Editor,
       })
-      identities.register(terminal, terminalId)
+      identities.register(terminal, terminalId, 'codex')
       terminal.show()
       const pid = await terminal.processId
       await until(

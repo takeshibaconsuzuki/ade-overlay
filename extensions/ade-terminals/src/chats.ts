@@ -37,7 +37,7 @@ export class ChatController implements vscode.Disposable {
   constructor(
     private readonly identities: Pick<
       TerminalIdentities,
-      'id' | 'find' | 'onDidChange'
+      'id' | 'provider' | 'find' | 'onDidChange'
     >,
     private readonly coordinateFocus: <T>(
       operation: () => Promise<T>,
@@ -94,23 +94,38 @@ export class ChatController implements vscode.Disposable {
       maxReconnectDelay: 2000,
     })
     this.socket = socket
-    handleRpc(socket, chatRequests.paste, ({ terminalId, text }) => {
+    handleRpc(socket, chatRequests.paste, ({ terminalId, provider, text }) => {
       if (this.stopped || !socket.connected)
         throw new Error('Editor connection closed.')
       const terminal = this.identities.find(terminalId)
       if (!terminal || !vscode.window.terminals.includes(terminal))
         throw new Error('The chat terminal is no longer available.')
+      if (this.identities.provider(terminal) !== provider)
+        throw new Error('The chat provider changed. Try pasting again.')
       terminal.sendText(text, false)
       return null
     })
     handleRpc(socket, chatRequests.pasteTarget, () => {
       const terminal = vscode.window.activeTerminal
-      if (!terminal || !vscode.window.terminals.includes(terminal))
-        throw new Error('There is no active terminal.')
-      // Accepted limitation: after an extension-host restart, identity recovery
-      // is asynchronous. Until recovery finishes, a restored ADE chat can look
-      // ordinary here, allowing intercepted clipboard text through to its CLI.
-      return this.identities.id(terminal) ?? null
+      // Pin the target now, but wait for launch to dispatch its command before
+      // releasing a reservation. A queued query timing out cannot write input.
+      return this.coordinateFocus(async () => {
+        if (this.stopped || !socket.connected)
+          throw new Error('Editor connection closed.')
+        if (!terminal || !vscode.window.terminals.includes(terminal))
+          throw new Error('There is no active terminal.')
+        // Accepted limitation: after an extension-host restart, identity recovery
+        // is asynchronous. Until recovery finishes, a restored ADE chat can look
+        // ordinary here, allowing intercepted clipboard text through to its CLI.
+        const terminalId = this.identities.id(terminal)
+        if (!terminalId) return null
+        const provider = this.identities.provider(terminal)
+        if (!provider)
+          throw new Error(
+            'The chat provider is unavailable. Reopen this chat terminal.',
+          )
+        return { terminalId, provider }
+      })
     })
     const invalid = () => socket.io.engine.close()
     listenEvent(

@@ -160,18 +160,23 @@ export class CompanionClient extends EventEmitter<{
     this.update({ state: 'disconnected', url: this.status.url })
   }
 
-  pasteTarget(editorId: string): Promise<string | null> {
-    return this.request(companionRequests.pasteTarget, editorId)
+  reservePaste(editorId: string, documentId: string): Promise<string | null> {
+    return this.request(companionRequests.reservePaste, {
+      editorId,
+      documentId,
+    })
   }
 
   paste(
     editorId: string,
-    terminalId: string,
+    documentId: string,
+    reservationId: string,
     items: PastePart[],
   ): Promise<null> {
     return this.request(companionRequests.paste, {
       editorId,
-      terminalId,
+      documentId,
+      reservationId,
       items,
     })
   }

@@ -4,20 +4,19 @@ import { pasteItemsSchema } from '../shared/paste-schema.ts'
 import type { PastePart } from '../shared/paste.ts'
 import { pasteChannels } from '../shared/paste.ts'
 
-// Reservations belong to one document. They never re-query focus on submission.
+// Main supplies document identity; the companion owns reservations and targets.
 export function installEditorPaste(
   contents: WebContents,
   isActive: () => boolean,
   isEditorUrl: (url: URL | null) => boolean,
-  target: () => Promise<string | null>,
-  submit: (terminalId: string, items: PastePart[]) => Promise<unknown>,
+  reserve: (documentId: string) => Promise<string | null>,
+  submit: (
+    documentId: string,
+    reservationId: string,
+    items: PastePart[],
+  ) => Promise<unknown>,
 ): () => void {
-  let generation = 0
-  let pending = 0
-  const reservations = new Map<
-    string,
-    { terminalId: string; expires: number }
-  >()
+  let documentId = randomUUID()
   const assertSender = (event: IpcMainInvokeEvent) => {
     if (
       contents.isDestroyed() ||
@@ -28,52 +27,32 @@ export function installEditorPaste(
     )
       throw new Error('Untrusted paste caller.')
   }
-  const expire = () => {
-    for (const [id, reservation] of reservations)
-      if (reservation.expires <= Date.now()) reservations.delete(id)
-  }
   contents.ipc.handle(
     pasteChannels.reserve,
     async (event, trustedPaste: unknown) => {
       assertSender(event)
-      expire()
-      if (pending + reservations.size >= 32)
-        throw new Error('Too many pending pastes.')
-      const document = generation
-      pending++
-      try {
-        if (
-          trustedPaste !== true &&
-          (await contents.executeJavaScript(
-            'navigator.userActivation.isActive',
-          )) !== true
-        )
-          throw new Error('Paste requires a user gesture.')
-        const terminalId = await target()
-        assertSender(event)
-        if (generation !== document)
-          throw new Error('The editor document changed.')
-        if (terminalId === null) return null
-        const id = randomUUID()
-        reservations.set(id, { terminalId, expires: Date.now() + 30_000 })
-        return id
-      } finally {
-        pending--
-      }
+      const document = documentId
+      if (
+        trustedPaste !== true &&
+        (await contents.executeJavaScript(
+          'navigator.userActivation.isActive',
+        )) !== true
+      )
+        throw new Error('Paste requires a user gesture.')
+      const id = await reserve(document)
+      assertSender(event)
+      if (documentId !== document)
+        throw new Error('The editor document changed.')
+      return id
     },
   )
   contents.ipc.handle(
     pasteChannels.paste,
     async (event, id: unknown, input: unknown) => {
       assertSender(event)
-      expire()
-      const reservation =
-        typeof id === 'string' ? reservations.get(id) : undefined
-      if (!reservation)
-        throw new Error('The paste reservation is invalid or expired.')
-      reservations.delete(id as string)
-      const items = pasteItemsSchema.parse(input)
-      await submit(reservation.terminalId, items)
+      if (typeof id !== 'string' || id.length > 128)
+        throw new Error('Invalid paste reservation.')
+      await submit(documentId, id, pasteItemsSchema.parse(input))
     },
   )
   const navigate = (
@@ -83,14 +62,12 @@ export function installEditorPaste(
     mainFrame: boolean,
   ) => {
     if (mainFrame && !inPlace) {
-      generation++
-      reservations.clear()
+      documentId = randomUUID()
     }
   }
   contents.on('did-start-navigation', navigate)
   return () => {
-    generation++
-    reservations.clear()
+    documentId = randomUUID()
     contents.removeListener('did-start-navigation', navigate)
     if (!contents.isDestroyed()) {
       contents.ipc.removeHandler(pasteChannels.reserve)

@@ -1,5 +1,9 @@
 import * as vscode from 'vscode'
 import {
+  pasteTargetSchema,
+  type PasteTarget,
+} from '../../../src/shared/paste-schema.ts'
+import {
   processIdentitySchema,
   chatIdSchema,
 } from '../../../src/shared/chats.ts'
@@ -10,10 +14,17 @@ import {
 
 const savedTerminalSchema = processIdentitySchema.extend({
   terminalId: chatIdSchema,
+  provider: pasteTargetSchema.shape.provider.optional(),
 })
-type SavedTerminal = { pid: number; startedAt: string; terminalId: string }
+type SavedTerminal = {
+  pid: number
+  startedAt: string
+  terminalId: string
+  provider?: PasteTarget['provider']
+}
 interface TerminalEntry {
   id?: string
+  provider?: PasteTarget['provider']
   retry?: ReturnType<typeof setTimeout>
 }
 
@@ -51,12 +62,16 @@ export class TerminalIdentities implements vscode.Disposable {
     for (const terminal of vscode.window.terminals) this.track(terminal)
   }
 
-  register(terminal: vscode.Terminal, id: string): void {
+  register(
+    terminal: vscode.Terminal,
+    id: string,
+    provider: PasteTarget['provider'],
+  ): void {
     if (this.stopped) return
     clearTimeout(this.terminals.get(terminal)?.retry)
     // Replace any recovery started by onDidOpenTerminal. Its pending scan must
     // never overwrite an explicit registration or prune newer saved identities.
-    const entry = { id }
+    const entry = { id, provider }
     this.terminals.set(terminal, entry)
     this.changes.fire()
     void this.recover(terminal, entry)
@@ -64,6 +79,10 @@ export class TerminalIdentities implements vscode.Disposable {
 
   id(terminal: vscode.Terminal): string | undefined {
     return this.terminals.get(terminal)?.id
+  }
+
+  provider(terminal: vscode.Terminal): PasteTarget['provider'] | undefined {
+    return this.terminals.get(terminal)?.provider
   }
 
   find(id: string): vscode.Terminal | undefined {
@@ -123,10 +142,12 @@ export class TerminalIdentities implements vscode.Disposable {
         if (process && recovered) {
           const changed = entry.id !== recovered
           entry.id = recovered
+          entry.provider ??= previous?.provider
           this.saved.set(pid, {
             pid,
             startedAt: process.startedAt,
             terminalId: recovered,
+            ...(entry.provider ? { provider: entry.provider } : {}),
           })
           if (changed) this.changes.fire()
         }

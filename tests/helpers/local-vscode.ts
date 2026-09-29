@@ -113,7 +113,7 @@ export async function localVSCodeFixture(
       const ids = new Map();
       const changes = new vscode.EventEmitter();
       const { ChatController } = require('./chats.js');
-      context.subscriptions.push(changes, new ChatController({ id: terminal => ids.get(terminal), find: id => [...ids].find(entry => entry[1] === id)?.[0], onDidChange: changes.event }, operation => operation()));
+      context.subscriptions.push(changes, new ChatController({ id: terminal => ids.get(terminal), provider: terminal => ids.get(terminal)?.replace('fixture-', ''), find: id => [...ids].find(entry => entry[1] === id)?.[0], onDidChange: changes.event }, operation => operation()));
       for (const [name, setting, value] of [['hiddenIcons', 'showIcons', false], ['hiddenTabs', 'showTabs', 'none']]) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + name, () => vscode.workspace.getConfiguration('workbench.editor').update(setting, value, vscode.ConfigurationTarget.Global)));
       for (const provider of ['codex', 'claude', 'ordinary']) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + provider, () => {
         const options = { name: 'ADE paste fixture ' + provider, location: vscode.TerminalLocation.Editor, iconPath: new vscode.ThemeIcon('terminal') };

@@ -7,8 +7,8 @@ import { launchKindSchema } from '../../../src/shared/sidebar.ts'
 
 export function activate(context: vscode.ExtensionContext): void {
   const identities = new TerminalIdentities(context.workspaceState)
-  const launcher = new TerminalLauncher((terminal, id) =>
-    identities.register(terminal, id),
+  const launcher = new TerminalLauncher((terminal, id, provider) =>
+    identities.register(terminal, id, provider),
   )
   const chats = new ChatController(identities, (operation) =>
     launcher.run(operation),

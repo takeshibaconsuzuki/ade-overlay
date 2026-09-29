@@ -55,7 +55,7 @@ async function run() {
       phase = nextPhase
       const terminal = { processId: Promise.resolve(process.pid) }
       vscode.window.terminals.push(terminal)
-      identities.register(terminal, phase)
+      identities.register(terminal, phase, 'codex')
       const deadline = Date.now() + 5000
       while (saved[process.pid]?.terminalId !== phase) {
         assert.ok(

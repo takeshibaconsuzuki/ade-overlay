@@ -6,7 +6,7 @@ import {
   defaultChatCommands,
 } from '../../../src/shared/chat-commands.ts'
 
-import type { LaunchKind } from '../../../src/shared/sidebar.ts'
+import type { LaunchKind, LaunchProvider } from '../../../src/shared/sidebar.ts'
 
 const groupOrdinals = [
   'First',
@@ -45,6 +45,7 @@ export class TerminalLauncher implements vscode.Disposable {
     private readonly registerTerminal: (
       terminal: vscode.Terminal,
       terminalId: string,
+      provider: LaunchProvider,
     ) => void,
   ) {
     this.subscriptions = [
@@ -192,7 +193,8 @@ export class TerminalLauncher implements vscode.Disposable {
         : vscode.TerminalLocation.Editor,
       iconPath: new vscode.ThemeIcon(chat ? 'comment-discussion' : 'terminal'),
     })
-    if (terminalId) this.registerTerminal(terminal, terminalId)
+    if (terminalId && kind !== 'terminal')
+      this.registerTerminal(terminal, terminalId, kind)
     try {
       terminal.show()
       const tab = await waitFor(

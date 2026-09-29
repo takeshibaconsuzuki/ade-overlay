@@ -46,10 +46,11 @@ export class EditorWindow {
   constructor(
     companionUrl: string,
     private readonly pasteBridge?: {
-      pasteTarget(editorId: string): Promise<string | null>
+      reservePaste(editorId: string, documentId: string): Promise<string | null>
       paste(
         editorId: string,
-        terminalId: string,
+        documentId: string,
+        reservationId: string,
         items: PastePart[],
       ): Promise<unknown>
     },
@@ -126,9 +127,15 @@ export class EditorWindow {
             view.webContents,
             () => this.active?.view === view,
             isEditorUrl,
-            () => this.pasteBridge!.pasteTarget(editor.id),
-            (terminalId, items) =>
-              this.pasteBridge!.paste(editor.id, terminalId, items),
+            (documentId) =>
+              this.pasteBridge!.reservePaste(editor.id, documentId),
+            (documentId, reservationId, items) =>
+              this.pasteBridge!.paste(
+                editor.id,
+                documentId,
+                reservationId,
+                items,
+              ),
           )
         : () => {}
       entry = {

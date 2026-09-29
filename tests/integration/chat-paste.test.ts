@@ -10,13 +10,14 @@ import { randomUUID } from 'node:crypto'
 import { materializePaste } from '../../src/server/chats/chat-paste.ts'
 import { chatProviders } from '../../src/server/chats/chat-providers.ts'
 import { ChatService } from '../../src/server/chats/chat-service.ts'
-import { ChatStore } from '../../src/server/chats/chat-store.ts'
 import { createCompanionTransport } from '../../src/server/companion-transport.ts'
 import type { WorktreeStore } from '../../src/server/worktrees/worktree-store.ts'
 import { silentLogger } from '../../src/server/logging.ts'
 import { callRpc, handleRpc } from '../../src/shared/rpc.ts'
 import { companionRequests } from '../../src/shared/companion.ts'
 import { chatRequests } from '../../src/shared/chats.ts'
+import type { PasteTarget } from '../../src/shared/paste-schema.ts'
+import type { PastePart } from '../../src/shared/paste.ts'
 import { socketPeer } from '../helpers/socket.ts'
 
 const png = Buffer.from(
@@ -93,21 +94,12 @@ test('providers prepare ordered bracketed text and image paths without Enter', a
 })
 
 test(
-  'companion accepts binary pastes, prepares provider payloads and delivers only to the reserved editor',
+  'companion owns scoped reservations and pastes before any activity hook, preserving target and delivery order',
   { timeout: 15_000 },
   async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'ade-paste-service-'))
     t.after(() => rm(root, { recursive: true, force: true }))
-    const process = {
-      pid: 20,
-      parentPid: 1,
-      startedAt: 'provider-start',
-      name: 'codex',
-      command: 'codex',
-    }
-    const processes = new Map([[20, process]])
-    const store = new ChatStore(async () => processes)
-    const chats = new ChatService(undefined, store, root)
+    const chats = new ChatService(undefined, undefined, root)
     await chats.listen()
     t.after(() => chats.close())
     const worktree = { project: root, path: root }
@@ -124,19 +116,22 @@ test(
       extensionUrl,
       registration.controlToken,
     )
-    const deliveries: { terminalId: string; text: string }[] = []
+    let target: PasteTarget | null = {
+      terminalId: 'reserved',
+      provider: 'codex',
+    }
+    handleRpc(extension.socket, chatRequests.pasteTarget, () => target)
+    const deliveries: { terminalId: string; text: string; provider: string }[] =
+      []
     handleRpc(extension.socket, chatRequests.paste, (payload) => {
       deliveries.push(payload)
       return null
     })
-    await store.activity(editorId, worktree, {
-      provider: 'codex',
-      sessionId: 'session',
-      terminalId: 'reserved',
-      process,
-      observedAt: 1,
-      activity: 'idle',
-    })
+    assert.deepEqual(
+      chats.store.list().chats,
+      [],
+      'no hook has registered a chat',
+    )
     let releaseImage!: () => void
     let imageStarted!: () => void
     let downloading = new Promise<void>((resolve) => {
@@ -169,91 +164,135 @@ test(
     const address = http.address()
     assert.ok(address && typeof address !== 'string')
     const peer = await socketPeer(t, `ws://127.0.0.1:${address.port}/companion`)
+    const documentId = randomUUID()
+    const reserve = async () => {
+      const id = await callRpc(peer.socket, companionRequests.reservePaste, {
+        editorId,
+        documentId,
+      })
+      assert.ok(id)
+      return id
+    }
+    const paste = (reservationId: string, items: PastePart[]) =>
+      callRpc(peer.socket, companionRequests.paste, {
+        editorId,
+        documentId,
+        reservationId,
+        items,
+      })
+    const id = await reserve()
+    target = { terminalId: 'different-focus', provider: 'claude' }
     const largeImage = Buffer.concat([png, Buffer.alloc(24 * 1024)])
     assert.equal(
-      await callRpc(peer.socket, companionRequests.paste, {
-        editorId,
-        terminalId: 'reserved',
-        items: [
-          { type: 'text', data: 'before\n  indent' },
-          { type: 'image', data: largeImage },
-          { type: 'text', data: 'after' },
-        ],
-      }),
+      await paste(id, [
+        { type: 'text', data: 'before\n  indent' },
+        { type: 'image', data: largeImage },
+        { type: 'text', data: 'after' },
+      ]),
       null,
     )
     assert.equal(deliveries.length, 1)
     assert.equal(deliveries[0].terminalId, 'reserved')
+    assert.equal(
+      deliveries[0].provider,
+      'codex',
+      'reserved provider survives focus changes too',
+    )
     const parts = frames(deliveries[0].text)
     assert.deepEqual([parts[0], parts[2]], ['before\n  indent', 'after'])
     assert.deepEqual(await readFile(fileURLToPath(parts[1])), largeImage)
     await assert.rejects(
-      callRpc(peer.socket, companionRequests.paste, {
-        editorId: 'b'.repeat(64),
-        terminalId: 'reserved',
-        items: [],
-      }),
-      /disconnected/,
+      paste(id, []),
+      /invalid or expired/,
+      'one-use reservation',
     )
-    await assert.rejects(
-      callRpc(peer.socket, companionRequests.paste, {
-        editorId,
-        terminalId: 'other',
-        items: [],
-      }),
-      /not running/,
+    await assert.rejects(paste(randomUUID(), []), /invalid or expired/)
+    const scoped = await reserve()
+    const other = await socketPeer(
+      t,
+      `ws://127.0.0.1:${address.port}/companion`,
     )
-    await assert.rejects(
-      callRpc(peer.socket, companionRequests.paste, {
-        editorId,
-        terminalId: 'reserved',
-        items: [
-          { type: 'text', data: 'do not partially paste' },
-          { type: 'image', data: new Uint8Array([0]) },
-        ],
-      }),
+    for (const [socket, overrides] of [
+      [other.socket, {}],
+      [peer.socket, { editorId: 'b'.repeat(64) }],
+      [peer.socket, { documentId: randomUUID() }],
+    ] as const) {
+      await assert.rejects(
+        callRpc(socket, companionRequests.paste, {
+          editorId,
+          documentId,
+          reservationId: scoped,
+          items: [],
+          ...overrides,
+        }),
+        /invalid or expired/,
+      )
+    }
+    assert.equal(
+      await paste(scoped, [{ type: 'text', data: 'text before first prompt' }]),
+      null,
     )
-    assert.equal(deliveries.length, 1)
+    assert.equal(deliveries[1].provider, 'claude')
+    assert.deepEqual(frames(deliveries[1].text), ['text before first prompt'])
+    assert.deepEqual(
+      chats.store.list().chats,
+      [],
+      'paste does not synthesize activity records',
+    )
 
-    const orderedFirst = callRpc(peer.socket, companionRequests.paste, {
-      editorId,
-      terminalId: 'reserved',
-      items: [
-        { type: 'image', data: `http://127.0.0.1:${address.port}/image` },
-      ],
-    })
+    target = null
+    assert.equal(
+      await callRpc(peer.socket, companionRequests.reservePaste, {
+        editorId,
+        documentId,
+      }),
+      null,
+    )
+    target = { terminalId: 'reserved', provider: 'codex' }
+    const expired = await reserve()
+    const now = Date.now()
+    const clock = t.mock.method(Date, 'now', () => now + 30_001)
+    await assert.rejects(paste(expired, []), /invalid or expired/)
+    clock.mock.restore()
+
+    await assert.rejects(
+      paste(await reserve(), [
+        { type: 'text', data: 'do not partially paste' },
+        { type: 'image', data: new Uint8Array([0]) },
+      ]),
+    )
+    assert.equal(deliveries.length, 2)
+    const first = await reserve()
+    const second = await reserve()
+    const orderedFirst = paste(first, [
+      { type: 'image', data: `http://127.0.0.1:${address.port}/image` },
+    ])
     await downloading
-    const orderedSecond = callRpc(peer.socket, companionRequests.paste, {
-      editorId,
-      terminalId: 'reserved',
-      items: [{ type: 'text', data: 'second paste' }],
-    })
-    // The second preparation must finish independently, but cannot deliver yet.
+    const orderedSecond = paste(second, [
+      { type: 'text', data: 'second paste' },
+    ])
     await new Promise((resolve) => setTimeout(resolve, 30))
-    assert.equal(deliveries.length, 1)
+    assert.equal(deliveries.length, 2)
     releaseImage()
     await Promise.all([orderedFirst, orderedSecond])
-    assert.equal(deliveries.length, 3)
-    assert.deepEqual(frames(deliveries[2].text), ['second paste'])
+    assert.equal(deliveries.length, 4)
+    assert.deepEqual(frames(deliveries[3].text), ['second paste'])
+
     downloading = new Promise<void>((resolve) => {
       imageStarted = resolve
     })
-    const pending = callRpc(peer.socket, companionRequests.paste, {
-      editorId,
-      terminalId: 'reserved',
-      items: [
-        { type: 'image', data: `http://127.0.0.1:${address.port}/image` },
-      ],
-    })
-    const rejected = assert.rejects(pending, /chat changed/)
+    const pending = paste(await reserve(), [
+      { type: 'image', data: `http://127.0.0.1:${address.port}/image` },
+    ])
+    const rejected = assert.rejects(pending, /connection changed/)
     await downloading
     chats.releaseEditor(editorId)
     releaseImage()
     await rejected
     assert.equal(
       deliveries.length,
-      3,
-      'reconnect/closure never redirects a prepared paste',
+      4,
+      'closure never redirects a prepared paste',
     )
   },
 )

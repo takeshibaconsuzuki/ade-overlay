@@ -28,7 +28,12 @@ export const pasteItemsSchema: z.ZodType<PastePart[]> = z
     'Paste exceeds 32 MiB.',
   )
 
-export const terminalPasteSchema = z.object({
+export const pasteTargetSchema = z.object({
   terminalId: z.string().min(1).max(128),
+  provider: z.enum(['codex', 'claude']),
+})
+export type PasteTarget = z.infer<typeof pasteTargetSchema>
+
+export const terminalPasteSchema = pasteTargetSchema.extend({
   text: z.string().max(MAX_PASTE_BYTES),
 })

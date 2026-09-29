@@ -10,7 +10,12 @@ import { build } from 'vite'
 
 type Saved = Record<
   string,
-  { pid: number; startedAt: string; terminalId: string }
+  {
+    pid: number
+    startedAt: string
+    terminalId: string
+    provider?: 'codex' | 'claude'
+  }
 >
 const vscode = await import(
   new URL('../fixtures/chat-vscode.mjs', import.meta.url).href
@@ -135,8 +140,9 @@ test('explicit registration is immediate, ignores creation env and persists inde
     'opening never discovers identity from env',
   )
   assert.equal(identities.find('environment-only'), undefined)
-  identities.register(created, 'registered')
+  identities.register(created, 'registered', 'codex')
   assert.equal(identities.id(created), 'registered')
+  assert.equal(identities.provider(created), 'codex')
   assert.equal(identities.find('registered'), created)
   assert.equal(scans, 0)
   assert.deepEqual(saved.writes, [])
@@ -144,7 +150,12 @@ test('explicit registration is immediate, ignores creation env and persists inde
   await until(() => saved.writes.length === 1)
   assert.equal(scans, 1)
   assert.deepEqual(saved.read(), {
-    101: { pid: 101, startedAt: 'shell-start', terminalId: 'registered' },
+    101: {
+      pid: 101,
+      startedAt: 'shell-start',
+      terminalId: 'registered',
+      provider: 'codex',
+    },
   })
 })
 
@@ -153,7 +164,12 @@ test('restored terminals match persisted PID and start identity without adopting
   const restored = terminal(101)
   const reused = terminal(102)
   const saved = storage({
-    101: { pid: 101, startedAt: 'original', terminalId: 'restored' },
+    101: {
+      pid: 101,
+      startedAt: 'original',
+      terminalId: 'restored',
+      provider: 'claude',
+    },
     102: { pid: 102, startedAt: 'old', terminalId: 'reused' },
     103: { pid: 103, startedAt: 'gone', terminalId: 'exited' },
   })
@@ -165,6 +181,7 @@ test('restored terminals match persisted PID and start identity without adopting
   t.after(() => identities.dispose())
   await until(() => !!identities.id(restored))
   assert.equal(identities.find('restored'), restored)
+  assert.equal(identities.provider(restored), 'claude')
   assert.equal(identities.id(reused), undefined)
   assert.equal(identities.find('reused'), undefined)
   assert.equal(changes, 1)
@@ -186,7 +203,7 @@ test('explicit registration supersedes recovery already started by the open even
   const created = terminal(101)
   vscode.opened.fire(created)
   await until(() => scans.length === 1)
-  identities.register(created, 'explicit')
+  identities.register(created, 'explicit', 'codex')
   await until(() => scans.length === 2)
   scans[1].resolve(processes([101, 'same-shell']))
   await until(() => saved.writes.length === 1)
@@ -209,9 +226,9 @@ test('an older scan cannot prune an identity saved by a newer registration', asy
     return scan.promise
   })
   t.after(() => identities.dispose())
-  identities.register(terminal(101), 'first')
+  identities.register(terminal(101), 'first', 'codex')
   await until(() => scans.length === 1)
-  identities.register(terminal(102), 'second')
+  identities.register(terminal(102), 'second', 'codex')
   await until(() => scans.length === 2)
   scans[1].resolve(processes([101, 'first-start'], [102, 'new-start']))
   await until(() => saved.writes.length === 1)
@@ -222,6 +239,7 @@ test('an older scan cannot prune an identity saved by a newer registration', asy
     pid: 102,
     startedAt: 'new-start',
     terminalId: 'second',
+    provider: 'codex',
   })
 })
 
@@ -238,7 +256,7 @@ test('closing a terminal clears identity and saved state while late discovery is
   })
   t.after(() => identities.dispose())
   const created = terminal(101)
-  identities.register(created, 'registered')
+  identities.register(created, 'registered', 'codex')
   await until(() => scanning)
   vscode.window.terminals = []
   vscode.closed.fire(created)
@@ -260,7 +278,7 @@ test('disposal cancels discovery and retry without disposing terminals or deleti
     return scan.promise
   })
   const created = terminal(101)
-  identities.register(created, 'registered')
+  identities.register(created, 'registered', 'codex')
   await until(() => scanning)
   identities.dispose()
   scan.resolve(processes([101, 'original']))
@@ -279,7 +297,7 @@ test('temporarily unavailable process identity retries outside registration', as
   )
   t.after(() => identities.dispose())
   const created = terminal(101)
-  identities.register(created, 'registered')
+  identities.register(created, 'registered', 'codex')
   assert.equal(identities.id(created), 'registered')
   await until(() => saved.read()[101]?.startedAt === 'available')
   assert.equal(scans, 2)

@@ -72,16 +72,17 @@ export const companionRequests = {
     'editor:paste',
     z.object({
       editorId: editorSessionSchema.shape.id,
-      terminalId: chatIdSchema,
+      documentId: z.uuid(),
+      reservationId: z.uuid(),
       items: pasteItemsSchema,
     }),
     z.null(),
     25_000,
   ),
-  pasteTarget: requestSpec(
-    'editor:paste-target',
-    editorSessionSchema.shape.id,
-    chatIdSchema.nullable(),
+  reservePaste: requestSpec(
+    'editor:reserve-paste',
+    z.object({ editorId: editorSessionSchema.shape.id, documentId: z.uuid() }),
+    z.uuid().nullable(),
     8_000,
   ),
   activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),

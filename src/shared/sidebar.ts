@@ -1,13 +1,12 @@
 import { z } from 'zod'
+import { pasteTargetSchema } from './paste-schema.ts'
 import { chatIdSchema, chatSchema } from './chats.ts'
 
 export const chatProviderOptions = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
 ] as const
-export const launchProviderSchema = z.enum(
-  chatProviderOptions.map(({ id }) => id),
-)
+export const launchProviderSchema = pasteTargetSchema.shape.provider
 export const launchKindSchema = z.enum([
   'terminal',
   ...launchProviderSchema.options,

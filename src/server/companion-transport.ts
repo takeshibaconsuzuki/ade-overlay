@@ -94,6 +94,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
         acknowledge({ ok: false, error: 'Unsupported companion command.' })
     })
     client.on('disconnect', (reason) => {
+      chats.forgetPastes(client)
       if (chatRequest?.owner === client)
         chats.viewReady(chatRequest.id, 'Desktop disconnected. Try again.')
       logger.info({ reason }, 'Companion client disconnected')
@@ -146,10 +147,14 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
       )
     }
     register(companionRequests.activateChat, (id) => chats.activate(id, client))
-    register(companionRequests.paste, ({ editorId, terminalId, items }) =>
-      chats.paste(editorId, terminalId, items),
+    register(
+      companionRequests.paste,
+      ({ editorId, documentId, reservationId, items }) =>
+        chats.paste(client, editorId, documentId, reservationId, items),
     )
-    register(companionRequests.pasteTarget, (id) => chats.pasteTarget(id))
+    register(companionRequests.reservePaste, ({ editorId, documentId }) =>
+      chats.reservePaste(client, editorId, documentId),
+    )
     register(companionRequests.list, () => worktrees.list())
     register(companionRequests.refresh, () => worktrees.refresh())
     register(companionRequests.create, (input) => worktrees.startCreate(input))

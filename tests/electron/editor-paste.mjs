@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron'
+import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -26,16 +27,26 @@ async function run() {
     let target = 'chat-first'
     let calls = 0
     const logs = []
+    const reservations = new Map()
+    const documents = []
     const dispose = installEditorPaste(
       contents,
       () => active,
       (url) => url?.protocol === 'file:',
-      async () => {
+      async (documentId) => {
         calls++
-        return target
+        documents.push(documentId)
+        if (target === null) return null
+        const id = randomUUID()
+        reservations.set(id, { documentId, target })
+        return id
       },
-      async (terminalId, items) => {
-        logs.push([terminalId, items])
+      async (documentId, id, items) => {
+        const reservation = reservations.get(id)
+        if (!reservation || reservation.documentId !== documentId)
+          throw new Error('The paste reservation is invalid or expired.')
+        reservations.delete(id)
+        logs.push([reservation.target, items])
       },
     )
     await window.loadFile(join(root, 'index.html'))
@@ -96,6 +107,17 @@ async function run() {
         `adePaste.paste(${JSON.stringify(stale)}, [])`,
       ),
       /invalid or expired/,
+    )
+    assert.equal(
+      documents[0],
+      documents[1],
+      'document scope stays stable between pastes',
+    )
+    await contents.executeJavaScript('adePaste.reservePaste()', true)
+    assert.notEqual(
+      documents.at(-1),
+      documents[0],
+      'navigation changes the document scope supplied to the server',
     )
     active = false
     await assert.rejects(

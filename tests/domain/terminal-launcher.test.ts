@@ -44,7 +44,10 @@ test('terminal launches require one folder and use project chat commands or defa
   const { TerminalLauncher } = await import(
     pathToFileURL(join(root, 'launcher.mjs')).href
   )
-  const launcher = new TerminalLauncher(() => {})
+  const registrations: unknown[][] = []
+  const launcher = new TerminalLauncher((...args: unknown[]) => {
+    registrations.push(args)
+  })
   t.after(() => launcher.dispose())
   const folder = { uri: { fsPath: '/worktree' } }
   for (const folders of [undefined, [], [folder, folder]]) {
@@ -70,6 +73,8 @@ test('terminal launches require one folder and use project chat commands or defa
     else process.env.ADE_CHAT_COMMANDS = JSON.stringify(overrides)
     for (const kind of ['codex', 'claude'] as const) {
       const chat = await launcher.open(kind)
+      assert.equal(registrations.at(-1)?.[0], chat)
+      assert.equal(registrations.at(-1)?.[2], kind)
       assert.equal(chat.creationOptions.cwd, folder.uri)
       assert.equal(chat.creationOptions.iconPath.id, 'comment-discussion')
       const command =

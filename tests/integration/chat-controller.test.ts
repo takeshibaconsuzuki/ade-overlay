@@ -113,6 +113,8 @@ test(
     const identities = {
       onDidChange: identityChanges.event,
       id: (terminal: unknown) => terminalIds.get(terminal),
+      provider: (terminal: unknown) =>
+        terminalIds.has(terminal) ? 'codex' : undefined,
       find: (id: string) =>
         vscode.window.terminals.find(
           (terminal: unknown) => terminalIds.get(terminal) === id,
@@ -164,14 +166,57 @@ test(
     assert.deepEqual(result('second'), { id: 'second' })
     assert.equal(vscode.window.activeTerminal, b)
 
-    assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), 'b')
+    // A terminal is registered before launch's tab/focus work completes.
+    // Hold that work and model command dispatch at the end of the launcher queue.
+    let releaseLaunch!: () => void
+    const command = '{\ncodex --no-daemon\n}; exit'
+    const earlyText = '\x1b[200~early draft\x1b[201~'
+    placementReady = new Promise<void>((resolve) => {
+      releaseLaunch = resolve
+    }).then(() => b.sendText(command, true))
+    let reserved = false
+    const earlyPaste = callRpc(peer!, chatRequests.pasteTarget, null).then(
+      (target) => {
+        reserved = true
+        assert.deepEqual(target, { terminalId: 'b', provider: 'codex' })
+        return callRpc(peer!, chatRequests.paste, {
+          ...target!,
+          text: earlyText,
+        })
+      },
+    )
+    await delay(30)
+    assert.equal(reserved, false, 'reservation waits for command dispatch')
+    assert.deepEqual(
+      b.sent,
+      [],
+      'clipboard never reaches the shell during launch',
+    )
+    vscode.window.activeTerminal = a
+    releaseLaunch()
+    await earlyPaste
+    assert.deepEqual(b.sent, [
+      { text: command, execute: true },
+      { text: earlyText, execute: false },
+    ])
+    b.sent.length = 0
+    vscode.window.activeTerminal = b
+
+    assert.deepEqual(await callRpc(peer!, chatRequests.pasteTarget, null), {
+      terminalId: 'b',
+      provider: 'codex',
+    })
     const ordinary = terminal()
     vscode.window.terminals.push(ordinary)
     vscode.window.activeTerminal = ordinary
     assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), null)
     const text = '\x1b[200~first\n  second\x1b[201~'
     assert.equal(
-      await callRpc(peer!, chatRequests.paste, { terminalId: 'b', text }),
+      await callRpc(peer!, chatRequests.paste, {
+        terminalId: 'b',
+        provider: 'codex',
+        text,
+      }),
       null,
     )
     assert.deepEqual(b.sent, [{ text, execute: false }])
@@ -182,7 +227,11 @@ test(
       'paste does not change focus',
     )
     await assert.rejects(
-      callRpc(peer!, chatRequests.paste, { terminalId: 'missing', text }),
+      callRpc(peer!, chatRequests.paste, {
+        terminalId: 'missing',
+        provider: 'codex',
+        text,
+      }),
       /no longer available/,
     )
     vscode.window.activeTerminal = undefined

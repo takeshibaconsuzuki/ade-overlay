@@ -1,5 +1,3 @@
-import { ChatStore } from '../../src/server/chats/chat-store.ts'
-import { chatProvider } from '../../src/server/chats/chat-providers.ts'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { completeCreate } from '../helpers/worktree-operations.ts'
@@ -355,18 +353,6 @@ for (const { name, phases } of [
           ...baseConfig.editor,
           ...(await localVSCodeFixture(root)),
         },
-      }
-      if (phases[0] === 'paste') {
-        // Fixture chat terminals record stdin without starting paid providers.
-        // Exercise the real transport/formatter/delivery with a known live chat.
-        t.mock.method(
-          ChatStore.prototype,
-          'getTerminal',
-          (_editorId: string, terminalId: string) => {
-            const provider = chatProvider(terminalId.replace('fixture-', ''))
-            return provider ? { chatId: terminalId, provider } : undefined
-          },
-        )
       }
       // The compatibility command prepares the exact immutable runtime used by ADE.
       editorRuntime.runtimeRoot = process.env.ADE_TEST_VSCODE_RUNTIME!
