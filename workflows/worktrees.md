@@ -73,6 +73,7 @@ flowchart TD
     click Inspect "worktrees.md#refresh-and-apply-membership"
 ```
 
+- Connected desktops [notify when creation finishes](desktop.md#notify-when-worktree-creation-finishes), after the configured bootstrap and membership refresh succeed or fail. Clicking opens the worktree if it remains available.
 - Paths are on the companion machine; relative paths start at the selected project. Creation resolves physical path identity before reserving the row.
 - A failing Git hook or project bootstrap can leave a real worktree. The row remains usable after the operation ends; a failure with no worktree remains as a synthetic error row.
 

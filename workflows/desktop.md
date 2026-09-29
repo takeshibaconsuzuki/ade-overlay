@@ -91,6 +91,31 @@ sequenceDiagram
 - Create and delete dialogs suspend picker interaction and invoke [worktree mutations](worktrees.md#schedule-a-mutation). Dismissing a dialog does not cancel an accepted server operation.
 - An opening failure becomes a companion row error; if main cannot store it there, the picker retains a local error. Opening an editor does not clear an existing error.
 
+## Notify when worktree creation finishes
+
+```mermaid
+sequenceDiagram
+    participant State as Desktop accepted state
+    participant Main as Desktop notifications
+    participant OS as Desktop notifications UI
+    actor User
+    State->>Main: Creating row finishes, after bootstrap and membership refresh
+    Main->>OS: Show creation success or failure with path and any error
+    User->>OS: Click notification
+    OS->>Main: Activate the worktree
+    Main->>State: Check current membership and availability
+    alt Worktree exists and is available
+        Main->>Main: Open through shared editor navigation
+        Main-->>User: Worktree editor is visible
+    else Missing, prunable, or mutating
+        Note over Main: No action
+    end
+```
+
+- Each connected desktop notifies for observed creation completion, including bootstrap failure. A partially created worktree can still be opened.
+- Initial snapshots, repeated updates, and deletion completion do not notify. Disconnecting or quitting clears notifications and tracked creation state; completions while disconnected are not replayed.
+- A later completion for the same worktree replaces its notification. Clicking checks the latest accepted state, so a removed worktree does nothing. Notifications are subject to operating-system settings.
+
 ## Notify when a chat becomes idle
 
 ```mermaid

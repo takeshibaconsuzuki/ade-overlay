@@ -30,6 +30,9 @@ import { socketPeer } from '../helpers/socket.ts'
 import { stringify } from 'yaml'
 import which from 'which'
 import { CompanionClient } from '../../src/main/companion-client.ts'
+import { CompanionState } from '../../src/main/companion-state.ts'
+import { WorktreeNotifications } from '../../src/main/worktree-notifications.ts'
+import type { NotificationConstructorOptions } from 'electron'
 import { loadServerConfig, parseServerArgs } from '../../src/server/config.ts'
 import { startCompanionServer } from '../../src/server/server.ts'
 import { WorktreeStore } from '../../src/server/worktrees/worktree-store.ts'
@@ -1016,6 +1019,17 @@ test(
     try {
       const creator = await connectClient(t, server.url)
       const observer = await connectClient(t, server.url)
+      const notices: NotificationConstructorOptions[] = []
+      const notifications = new WorktreeNotifications(
+        (options) => {
+          notices.push(options)
+          return undefined
+        },
+        async () => assert.fail('No notification clicked'),
+        (error) => assert.fail(String(error)),
+      )
+      const state = new CompanionState(observer)
+      state.on('snapshot', (snapshot) => notifications.update(snapshot))
       const path = join(root, 'new')
       const created = await creator.createWorktree({
         project,
@@ -1058,6 +1072,7 @@ test(
         restarted,
         (snapshot) => !snapshot.worktrees.some((row) => row.path === existing),
       )
+      assert.equal(notices.length, 0, 'Bootstrap is still running')
       await writeFile(gate, '')
       await finished
       assert.equal(
@@ -1076,6 +1091,15 @@ test(
         ),
       )
 
+      assert.equal(notices.length, 1)
+      assert.equal(notices[0].title, 'Worktree creation completed')
+      assert.equal(notices[0].body, path)
+
+      const failureNotice = nextSnapshot(observer, (snapshot) =>
+        snapshot.worktrees.some((row) =>
+          row.error?.includes('bootstrap exploded'),
+        ),
+      )
       await writeFile(gate, 'bootstrap exploded')
       const failedPath = join(root, 'failed-bootstrap')
       await assert.rejects(
@@ -1087,6 +1111,10 @@ test(
         }),
         /Bootstrap command failed:.*bootstrap exploded/s,
       )
+      await failureNotice
+      assert.equal(notices.length, 2)
+      assert.equal(notices[1].title, 'Worktree creation failed')
+      assert.match(notices[1].body!, /bootstrap exploded/)
       restarted.stop()
       const afterFailure = await connectClient(t, server.url)
       const row = (await afterFailure.listWorktrees()).worktrees.find(

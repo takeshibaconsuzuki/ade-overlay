@@ -18,6 +18,7 @@ import { loadDesktopConfig } from './config.ts'
 import { PickerWindow } from './picker-window.ts'
 import { createWindowFocus } from './window-focus.ts'
 import { ChatNotifications } from './chat-notifications.ts'
+import { WorktreeNotifications } from './worktree-notifications.ts'
 
 // Keep Chromium storage at the original location when the installer changes the
 // visible product name. Editor cookies and settings must survive an upgrade.
@@ -51,6 +52,17 @@ const editorNavigation = new EditorNavigation(
   companion,
   editorWindow,
   companionState,
+)
+
+const worktreeNotifications = new WorktreeNotifications(
+  (options) =>
+    Notification.isSupported() ? new Notification(options) : undefined,
+  (input) => editorNavigation.openWorktree(input),
+  (error) =>
+    dialog.showErrorBox(
+      'Could not open worktree',
+      error instanceof Error ? error.message : String(error),
+    ),
 )
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
@@ -150,6 +162,9 @@ app.whenReady().then(() => {
     return editorNavigation.openWorktree(input)
   })
   companionState.on('snapshot', (snapshot) => editorWindow.reconcile(snapshot))
+  companionState.on('snapshot', (snapshot) =>
+    worktreeNotifications.update(snapshot),
+  )
   companionState.on('changed', (state) => {
     for (const renderer of trustedRenderers) {
       if (!renderer.isDestroyed()) renderer.send(companionChannels.state, state)
@@ -165,6 +180,7 @@ app.whenReady().then(() => {
   companion.on('status', (status) => {
     if (status.state !== 'connected') {
       chatNotifications.clear()
+      worktreeNotifications.clear()
       editorNavigation.cancelSelectionRequest()
     } else editorWindow.reconnectSettings()
   })
@@ -175,6 +191,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   globalShortcut.unregisterAll()
   chatNotifications.clear()
+  worktreeNotifications.clear()
   editorWindow.close()
   companion.stop()
 })
