@@ -49,7 +49,7 @@ flowchart TD
     Queue --> Kind{Terminal kind?}
     Kind -->|Provider| Group[Prepare a locked provider group]
     Group --> Provider[Create and focus terminal, persist its identity in the background]
-    Provider --> Command[Run the configured provider command]
+    Provider --> Command[Run the project’s provider command]
     Command --> ProviderDone([Provider terminal launched])
     Kind -->|Ordinary shell| Shell[Create and focus terminal using normal editor placement]
     Shell --> ShellDone([Ordinary shell ready in an unlocked group])
@@ -59,6 +59,7 @@ flowchart TD
 
 - Launches and resolved chat focus share one queue because group changes affect the whole workbench. Process discovery and identity recovery run outside that queue.
 - A terminal uses the single workspace folder as its working directory. Provider terminals receive a new terminal ID and immediately start [identity persistence](#restore-terminal-identities).
+- The companion supplies the project’s `chatCommands` from `server.yaml` to every worktree editor. Omitted commands use `codex --no-daemon` and `claude`; extension settings do not configure launches.
 - The shell runs the configured command on the workspace machine. If placement fails after terminal creation, the new terminal is disposed.
 
 ## Prepare a provider group

@@ -329,19 +329,10 @@ exports.run = async () => {
   assert.ok(vscode.window.tabGroups.activeTabGroup.tabs.some(isTerminalTab))
 
   // Exercise the extension, reporter, OS process inspection and service.
-  await vscode.workspace
-    .getConfiguration('adeTerminals')
-    .update(
-      'codexCommand',
-      process.env.ADE_CHAT_TEST_PROVIDER_COMMAND,
-      vscode.ConfigurationTarget.Global,
-    )
-  await eventually(
-    () =>
-      vscode.workspace.getConfiguration('adeTerminals').get('codexCommand') ===
-      process.env.ADE_CHAT_TEST_PROVIDER_COMMAND,
-    'tracking command configured',
-  )
+  process.env.ADE_CHAT_COMMANDS = JSON.stringify({
+    ...JSON.parse(process.env.ADE_CHAT_COMMANDS),
+    codex: process.env.ADE_CHAT_TEST_PROVIDER_COMMAND,
+  })
   console.log('ADE live chats: launching provider')
   const tracked = await Promise.race([
     vscode.commands.executeCommand('adeTerminals.codex'),

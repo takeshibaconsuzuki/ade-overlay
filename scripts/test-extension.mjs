@@ -137,8 +137,6 @@ try {
   await writeFile(
     join(root, 'user-data', 'User', 'settings.json'),
     JSON.stringify({
-      'adeTerminals.codexCommand': holdCommand('codex'),
-      'adeTerminals.claudeCommand': holdCommand('claude'),
       'terminal.integrated.tabs.title': '${process}',
       'security.workspace.trust.enabled': false,
       'workbench.startupEditor': 'none',
@@ -169,6 +167,10 @@ try {
     extensionTestsEnv: {
       ELECTRON_RUN_AS_NODE: undefined,
       ...chatEnvironment,
+      ADE_CHAT_COMMANDS: JSON.stringify({
+        codex: holdCommand('codex'),
+        claude: holdCommand('claude'),
+      }),
       ADE_CHAT_TEST_CONTROL: `http://127.0.0.1:${control.address().port}`,
       ADE_CHAT_TEST_HOOKS: hookFile,
       ADE_CHAT_TEST_PROVIDER_COMMAND: command,

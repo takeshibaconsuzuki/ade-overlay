@@ -1,6 +1,10 @@
 import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import { providerShellCommand } from './provider-command.js'
+import {
+  chatCommandsSchema,
+  defaultChatCommands,
+} from '../../../src/shared/chat-commands.ts'
 
 import type { LaunchKind } from '../../../src/shared/sidebar.ts'
 
@@ -149,18 +153,13 @@ export class TerminalLauncher implements vscode.Disposable {
 
     const chat = kind !== 'terminal'
     const command = chat
-      ? vscode.workspace
-          .getConfiguration('adeTerminals')
-          .get<string>(
-            `${kind}Command`,
-            kind === 'codex' ? 'codex --no-daemon' : kind,
-          )
-          .trim()
+      ? {
+          ...defaultChatCommands,
+          ...chatCommandsSchema.parse(
+            JSON.parse(process.env.ADE_CHAT_COMMANDS ?? '{}'),
+          ),
+        }[kind]
       : undefined
-    if (chat && !command)
-      throw new Error(
-        `Configure adeTerminals.${kind}Command before launching it.`,
-      )
 
     // Ownership lasts only for this launcher activation and ends when the group
     // is removed or emptied. Placement is independent of saved chat identities.

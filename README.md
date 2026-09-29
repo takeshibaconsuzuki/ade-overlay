@@ -14,6 +14,9 @@ Create `~/.ade-overlay/server.yaml` on the companion computer:
 projects:
   - mainWorktreePath: ~/code/my-project
     bootstrapCommand: npm install
+    chatCommands:
+      codex: codex --no-daemon
+      claude: claude
 ```
 
 Each `mainWorktreePath` points to a repository's main worktree. Relative paths resolve from the configuration file. The optional `bootstrapCommand` runs in new worktrees; failures leave the worktree available for inspection. Restart the companion after configuration changes.
@@ -62,7 +65,7 @@ For Codex and Claude activity tracking, start a new chat after setup and trust t
 
 Use a current Claude Code CLI with [exec-form command hooks](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) that support `args`. Setup preserves existing provider settings and hooks.
 
-Customize commands through `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in the companion computer's VS Code User/Remote settings. Keep `--no-daemon` in the Codex command and run both commands in the foreground.
+Customize commands with each project’s `chatCommands.codex` and `chatCommands.claude` in `server.yaml`. They apply to every worktree in that project; omitted commands default to `codex --no-daemon` and `claude`. Restart the companion after changes. Keep `--no-daemon` in the Codex command and run both commands in the foreground.
 
 ## VS Code settings and extensions
 

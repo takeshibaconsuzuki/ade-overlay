@@ -52,7 +52,7 @@ export async function fixture(t: TestContext, startupDelayMs = 0) {
         return;
       }
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ args, pid: process.pid, cookie: req.headers.cookie, authorization: req.headers.authorization, runtime: process.argv[1], companionCredentialPresent: Object.keys(process.env).some(name => name.toUpperCase() === 'ADE_COMPANION_TOKEN'), profileOverridePresent: Object.keys(process.env).some(name => ['VSCODE_PORTABLE', 'VSCODE_APPDATA'].includes(name.toUpperCase())) }));
+      res.end(JSON.stringify({ args, chatCommands: JSON.parse(process.env.ADE_CHAT_COMMANDS), pid: process.pid, cookie: req.headers.cookie, authorization: req.headers.authorization, runtime: process.argv[1], companionCredentialPresent: Object.keys(process.env).some(name => name.toUpperCase() === 'ADE_COMPANION_TOKEN'), profileOverridePresent: Object.keys(process.env).some(name => ['VSCODE_PORTABLE', 'VSCODE_APPDATA'].includes(name.toUpperCase())) }));
     });
     const sockets = new WebSocketServer({ noServer: true });
     server.on('upgrade', (req, socket, head) => sockets.handleUpgrade(req, socket, head, ws => {

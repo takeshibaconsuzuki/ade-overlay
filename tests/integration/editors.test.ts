@@ -76,6 +76,65 @@ test('editor config paths resolve relative to YAML and reject invalid fields', a
   await assert.rejects(loadServerConfig(file), /Unrecognized key/)
 })
 
+test('project chat commands reach all its editors and reset after companion configuration changes', async (t) => {
+  const { project, config, root, cleanups, editorRuntime } = await fixture(t)
+  const second = await fixture(t)
+  const linked = join(root, 'linked')
+  await execute('git', [
+    '-C',
+    project,
+    'worktree',
+    'add',
+    '-b',
+    'linked',
+    linked,
+  ])
+  const configPath = join(root, 'server.yaml')
+  const commands = {
+    codex: "custom-codex --no-daemon --profile 'my project'",
+    claude: 'custom-claude',
+  }
+  for (const chatCommands of [commands, undefined]) {
+    // JSON is valid YAML and preserves command quoting verbatim.
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        projects: [
+          { mainWorktreePath: project, chatCommands },
+          {
+            mainWorktreePath: second.project,
+            chatCommands: { claude: 'second-claude' },
+          },
+        ],
+      }),
+    )
+    const server = await startCompanionServer({
+      port: 0,
+      configPath,
+      editorRuntime,
+    })
+    cleanups.push(() => server.close())
+    const client = await connect(t, server.url)
+    for (const [owner, path, expected] of [
+      [project, project, chatCommands ?? {}],
+      [project, linked, chatCommands ?? {}],
+      [second.project, second.project, { claude: 'second-claude' }],
+    ] as const) {
+      const session = await client.openEditor({ project: owner, path })
+      const response = await fetch(
+        new URL('runtime-info', editorUrl(server.url, session)),
+        {
+          headers: { Authorization: `Bearer ${session.accessToken}` },
+        },
+      )
+      assert.deepEqual((await response.json()).chatCommands, expected)
+    }
+    client.stop()
+    await server.close()
+  }
+})
+
 test('imported root pages retain authentication, public authority and VS Code cookies', async (t) => {
   const {
     project,

@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { parse } from 'yaml'
 import { z } from 'zod'
+import { chatCommandsSchema } from '../shared/chat-commands.ts'
 
 export const serverConfigSchema = z.object({
   editor: z
@@ -43,6 +44,7 @@ export const serverConfigSchema = z.object({
             (path) => !path.includes('\0'),
             'Project paths must not contain a null byte.',
           ),
+        chatCommands: chatCommandsSchema.optional(),
         bootstrapCommand: z
           .string()
           .refine((value) => !value.includes('\0'))

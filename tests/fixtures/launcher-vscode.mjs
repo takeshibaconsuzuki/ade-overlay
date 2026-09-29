@@ -7,7 +7,6 @@ export const effects = []
 const group = { viewColumn: 1, tabs: [] }
 export const workspace = {
   workspaceFolders: undefined,
-  getConfiguration: () => ({ get: (_key, fallback) => fallback }),
 }
 export const env = { shell: 'bash' }
 export const commands = {
@@ -30,7 +29,10 @@ export const window = {
       creationOptions: options,
       state: {},
       show() {},
-      sendText() {},
+      sentText: [],
+      sendText(text) {
+        this.sentText.push(text)
+      },
       dispose() {},
     }
     group.tabs.push({ input: new TabInputTerminal(), group })

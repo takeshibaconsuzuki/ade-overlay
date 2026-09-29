@@ -214,6 +214,10 @@ test('config arguments and YAML validate projects and resolve home/relative path
         {
           mainWorktreePath: './relative repo',
           bootstrapCommand: 'npm install',
+          chatCommands: {
+            codex: 'custom-codex --no-daemon',
+            claude: 'custom-claude',
+          },
         },
         { mainWorktreePath: '~/project' },
       ],
@@ -224,6 +228,10 @@ test('config arguments and YAML validate projects and resolve home/relative path
       {
         mainWorktreePath: join(root, 'relative repo'),
         bootstrapCommand: 'npm install',
+        chatCommands: {
+          codex: 'custom-codex --no-daemon',
+          claude: 'custom-claude',
+        },
       },
       { mainWorktreePath: join(homedir(), 'project') },
     ],
@@ -239,6 +247,36 @@ test('config arguments and YAML validate projects and resolve home/relative path
   ]) {
     await writeFile(path, source)
     await assert.rejects(loadServerConfig(path), /Invalid config/)
+  }
+  for (const chatCommands of [
+    'codex',
+    null,
+    [],
+    { unknown: 'command' },
+    { codex: 42 },
+    { codex: '' },
+    { claude: ' \n' },
+    { codex: 'codex\0' },
+  ]) {
+    await writeFile(
+      path,
+      stringify({ projects: [{ mainWorktreePath: '.', chatCommands }] }),
+    )
+    await assert.rejects(loadServerConfig(path), /Invalid config/)
+  }
+  for (const chatCommands of [
+    {},
+    { codex: 'codex --no-daemon' },
+    { claude: 'claude' },
+  ]) {
+    await writeFile(
+      path,
+      stringify({ projects: [{ mainWorktreePath: '.', chatCommands }] }),
+    )
+    assert.deepEqual(
+      (await loadServerConfig(path)).projects[0].chatCommands,
+      chatCommands,
+    )
   }
   await assert.rejects(
     loadServerConfig(join(root, 'missing.yaml')),

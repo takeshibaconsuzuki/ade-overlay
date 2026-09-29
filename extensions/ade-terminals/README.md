@@ -6,7 +6,7 @@ Live chats appear below the buttons, newest prompt or turn end first. Tool activ
 
 Starting from an empty editor uses the full width. Empty groups are reused, and a second group is created only when ordinary content and chat need to coexist.
 
-Install the VSIX in the companion account's local VS Code, then reload existing ADE editors. Install and sign in to the provider CLIs on that machine separately. Commands default to `codex --no-daemon` and `claude`; change `adeTerminals.codexCommand` or `adeTerminals.claudeCommand` in that machine's User/Remote settings to customize them.
+Install the VSIX in the companion account's local VS Code, then reload existing ADE editors. Install and sign in to the provider CLIs on that machine separately. Commands default to `codex --no-daemon` and `claude`; customize them through the project’s `chatCommands.codex` and `chatCommands.claude` in the companion’s `server.yaml`. Commands apply to all worktrees in the project after restarting the companion.
 
 Keep `--no-daemon` in customized Codex commands so hooks run with the ADE terminal’s reporting context. A shared Codex daemon cannot report activity for these terminals.
 

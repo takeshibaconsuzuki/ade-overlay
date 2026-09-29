@@ -315,7 +315,12 @@ export class WorktreeStore extends EventEmitter<{
           throw new Error('Worktree is unavailable. Refresh the list first.')
         await realpath(current.path)
         // Register startup in order, but release the queue during readiness.
-        return { ready: this.editors.open(current) }
+        return {
+          ready: this.editors.open(
+            current,
+            this.projects.get(pathKey(current.project))?.chatCommands,
+          ),
+        }
       }).then(({ ready }) => ready)
     } catch (error) {
       if (state && this.rows.get(key) === state && this.find(input)) {

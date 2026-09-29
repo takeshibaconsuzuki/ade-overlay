@@ -16,6 +16,7 @@ import type {
   Worktree,
 } from '../../shared/companion.ts'
 import type { ServerConfig } from '../config.ts'
+import type { ChatCommands } from '../../shared/chat-commands.ts'
 import {
   EditorRuntimeManager,
   type EditorRuntimeProvider,
@@ -33,7 +34,10 @@ import { editorId } from '../worktrees/worktree-identity.ts'
 import { editorPath } from '../../shared/companion.ts'
 
 export interface EditorLifecycle {
-  open(worktree: OpenEditorInput): Promise<EditorSession>
+  open(
+    worktree: OpenEditorInput,
+    chatCommands?: ChatCommands,
+  ): Promise<EditorSession>
   stop(worktree: OpenEditorInput): Promise<void>
   retain(worktrees: OpenEditorInput[]): Promise<void>
   status(worktree: OpenEditorInput): Worktree['editor']
@@ -139,7 +143,10 @@ export class EditorManager
       : undefined
   }
 
-  open(worktree: OpenEditorInput): Promise<EditorSession> {
+  open(
+    worktree: OpenEditorInput,
+    chatCommands?: ChatCommands,
+  ): Promise<EditorSession> {
     if (this.closing)
       return Promise.reject(new Error('The companion is shutting down.'))
     const id = editorId(worktree)
@@ -161,17 +168,20 @@ export class EditorManager
     }
     this.entries.set(id, entry)
     this.emit('status')
-    entry.ready = this.start(entry, worktree).catch(async (error: unknown) => {
-      this.logger.error({ editorId: id, err: error }, 'Editor startup failed')
-      await this.dispose(entry)
-      throw error
-    })
+    entry.ready = this.start(entry, worktree, chatCommands).catch(
+      async (error: unknown) => {
+        this.logger.error({ editorId: id, err: error }, 'Editor startup failed')
+        await this.dispose(entry)
+        throw error
+      },
+    )
     return entry.ready
   }
 
   private async start(
     entry: RunningEditor,
     worktree: OpenEditorInput,
+    chatCommands: ChatCommands = {},
   ): Promise<EditorSession> {
     this.environment ??= (async () => {
       const code = await this.runtimes.localCode()
@@ -261,6 +271,7 @@ export class EditorManager
         env: {
           ...codeEnvironment(),
           ...activityEnvironment,
+          ADE_CHAT_COMMANDS: JSON.stringify(chatCommands),
         },
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       },

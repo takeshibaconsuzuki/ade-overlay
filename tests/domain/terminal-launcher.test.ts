@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
 
-test('terminal launch requires one folder before any workbench change and uses it as cwd', async (t) => {
+test('terminal launches require one folder and use project chat commands or defaults', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'ade-launcher-'))
   t.after(async () => {
     assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep))
@@ -55,7 +55,36 @@ test('terminal launch requires one folder before any workbench change and uses i
     }
   }
   vscode.workspace.workspaceFolders = [folder]
+  const previous = process.env.ADE_CHAT_COMMANDS
+  t.after(() => {
+    if (previous === undefined) delete process.env.ADE_CHAT_COMMANDS
+    else process.env.ADE_CHAT_COMMANDS = previous
+  })
+  for (const overrides of [
+    undefined,
+    {},
+    { codex: "custom-codex --no-daemon --profile 'my project'" },
+    { claude: 'custom-claude --verbose' },
+  ]) {
+    if (overrides === undefined) delete process.env.ADE_CHAT_COMMANDS
+    else process.env.ADE_CHAT_COMMANDS = JSON.stringify(overrides)
+    for (const kind of ['codex', 'claude'] as const) {
+      const chat = await launcher.open(kind)
+      assert.equal(chat.creationOptions.cwd, folder.uri)
+      const command =
+        overrides?.[kind] ?? (kind === 'codex' ? 'codex --no-daemon' : 'claude')
+      assert.deepEqual(chat.sentText, [`{\n${command}\n}; exit`])
+    }
+  }
   const terminal = await launcher.open('terminal')
   assert.equal(terminal.creationOptions.cwd, folder.uri)
   assert.ok(vscode.effects.includes('createTerminal'))
+  assert.deepEqual(terminal.sentText, [])
+  process.env.ADE_CHAT_COMMANDS = '{"codex":" "}'
+  const effects = vscode.effects.length
+  await assert.rejects(
+    launcher.open('codex'),
+    /Chat commands must not be blank/,
+  )
+  assert.equal(vscode.effects.length, effects)
 })
