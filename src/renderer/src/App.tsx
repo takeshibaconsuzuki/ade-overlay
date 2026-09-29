@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Button,
   Notice,
@@ -28,6 +28,15 @@ export default function App() {
     clearError,
   } = useCompanion()
   const [search, setSearch] = useState('')
+  const [resetVersion, setResetVersion] = useState(0)
+  useEffect(
+    () =>
+      window.pickerWindow.onHidden(() => {
+        setSearch('')
+        setResetVersion((version) => version + 1)
+      }),
+    [],
+  )
   const query = search.trim().toLowerCase()
   const worktrees =
     snapshot?.worktrees.filter(
@@ -64,6 +73,7 @@ export default function App() {
           )
         }
         resultsKey={resultsKey}
+        resetVersion={resetVersion}
         onActivate={(worktree) => {
           if (opening !== worktree.path) void openEditor(worktree)
         }}
@@ -74,6 +84,12 @@ export default function App() {
           placeholder: 'Search worktrees by basename or branch',
           value: search,
           onChange: (event) => setSearch(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void window.pickerWindow.hide()
+            }
+          },
           autoFocus: true,
         }}
         header={

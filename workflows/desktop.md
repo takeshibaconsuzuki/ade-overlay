@@ -8,7 +8,10 @@
 ```mermaid
 flowchart TD
     Launch([Desktop launched]) --> Config[Load desktop connection configuration]
-    Config --> Start[Show picker and start connection]
+    Config --> Shortcut{Register global picker shortcut}
+    Shortcut -->|Succeeded| Start[Show picker and start connection]
+    Shortcut -->|Failed| Normal[Keep picker as a normal window]
+    Normal --> Start
     Retry([User selects Reconnect]) --> Reset[Cancel current navigation and replace connection]
     Lost([Connection lost]) --> ResetState[Clear displayed snapshot and cancel navigation]
     ResetState --> Automatic[Automatically retry connection]
@@ -42,6 +45,25 @@ flowchart TD
 - Connection and refresh requests read through main; command completion does not return snapshots to the renderer.
 - Reconciliation removes pages for absent worktrees. A stopped editor status alone does not dispose its page.
 - Shared row state survives desktop reconnection because the companion owns it. [Worktree membership](worktrees.md#refresh-and-apply-membership) remains separate from operation and editor status.
+
+## Toggle the worktree picker
+
+```mermaid
+flowchart TD
+    Shortcut([User presses Ctrl/Cmd+Shift+Space in any application]) --> Focused{Picker has keyboard focus?}
+    Focused -->|Yes| Hidden[Main hides the picker without minimizing it]
+    Blur([Picker window loses focus]) --> Registered{Global shortcut registered?}
+    Escape([User presses Escape in the search field]) --> Registered
+    Registered -->|Yes| Hidden
+    Registered -->|No| Visible([Keep picker visible])
+    Hidden --> Cleared([Renderer clears the search and resets results])
+    Focused -->|No| Focus[Main restores the picker if minimized, then shows and focuses it]
+    Focus --> Ready([Worktree picker has keyboard focus])
+```
+
+- Main registers the global shortcut before showing the picker or connecting to the companion and releases it on quit. If registration fails, startup continues with a normal window that stays visible on blur and Escape and can be minimized and restored through the desktop.
+- Dismissal clears search and resets selection and scrolling, including when the search is already empty.
+- Explicit dismissal returns focus to the window used before opening the picker. Hiding after focus moves elsewhere preserves that destination. Windows and Linux/X11 capture a native window identity before showing the picker; macOS uses a nonactivating panel, and Wayland delegates the handoff to its compositor. Closed targets and denied activation requests fall back to the operating system's normal hide behavior.
 
 ## Open a worktree
 

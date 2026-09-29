@@ -237,6 +237,8 @@ try {
     '/node_modules/socket.io-client/package.json',
     '/node_modules/ws/package.json',
     '/node_modules/zod/package.json',
+    '/node_modules/koffi/package.json',
+    `/node_modules/@koromix/koffi-${platform}-${process.arch}/package.json`,
   ])
     assert.ok(files.includes(path), `Missing desktop asset: ${path}`)
   assert.ok(

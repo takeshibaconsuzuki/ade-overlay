@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   companionChannels,
+  pickerChannels,
   type CompanionAPI,
   type CompanionState,
+  type PickerWindowAPI,
 } from '../shared/ipc.ts'
 
 const companion: CompanionAPI = {
@@ -29,3 +31,14 @@ const companion: CompanionAPI = {
 }
 
 contextBridge.exposeInMainWorld('companion', companion)
+
+const pickerWindow: PickerWindowAPI = {
+  hide: () => ipcRenderer.invoke(pickerChannels.hide),
+  onHidden: (callback) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(pickerChannels.hidden, listener)
+    return () => ipcRenderer.removeListener(pickerChannels.hidden, listener)
+  },
+}
+
+contextBridge.exposeInMainWorld('pickerWindow', pickerWindow)

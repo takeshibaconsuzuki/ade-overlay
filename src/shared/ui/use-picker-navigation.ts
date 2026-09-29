@@ -11,6 +11,7 @@ export function usePickerNavigation(
   items: readonly { key: string; available: boolean }[],
   resultsKey: string,
   search: string,
+  resetVersion: number,
 ) {
   const rootRef = useRef<HTMLElement>(null)
   const entries = useRef(
@@ -127,7 +128,7 @@ export function usePickerNavigation(
     )
       searchRef.current?.focus({ preventScroll: true })
     selectFirst()
-  }, [resultsKey, search, selectFirst])
+  }, [resultsKey, search, resetVersion, selectFirst])
 
   useLayoutEffect(() => {
     const buttons = targets()

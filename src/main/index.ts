@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  globalShortcut,
   ipcMain,
   dialog,
   type IpcMainInvokeEvent,
@@ -9,10 +10,12 @@ import {
 import { join } from 'node:path'
 import { CompanionClient } from './companion-client.ts'
 import { CompanionState } from './companion-state.ts'
-import { companionChannels } from '../shared/ipc.ts'
+import { companionChannels, pickerChannels } from '../shared/ipc.ts'
 import { EditorWindow } from './editor-window.ts'
 import { EditorNavigation } from './editor-navigation.ts'
 import { loadDesktopConfig } from './config.ts'
+import { PickerWindow } from './picker-window.ts'
+import { createWindowFocus } from './window-focus.ts'
 
 // Keep Chromium storage at the original location when the installer changes the
 // visible product name. Editor cookies and settings must survive an upgrade.
@@ -26,6 +29,7 @@ try {
 }
 
 const trustedRenderers = new Set<WebContents>()
+let pickerWindow: PickerWindow | undefined
 const companion = new CompanionClient(configuration)
 const editorWindow = new EditorWindow(companion.getStatus().url)
 const companionState = new CompanionState(companion)
@@ -44,10 +48,14 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-function createWindow(): void {
+function createWindow(canHide: boolean): PickerWindow {
   const window = new BrowserWindow({
     width: 900,
     height: 600,
+    show: false,
+    // A macOS panel borrows keyboard focus without activating ADE, so hiding
+    // it returns focus to the previous app/window through the native system.
+    type: canHide && process.platform === 'darwin' ? 'panel' : undefined,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -55,12 +63,16 @@ function createWindow(): void {
       sandbox: true,
     },
   })
+  const picker = new PickerWindow(window, createWindowFocus(window), canHide)
 
   const renderer = window.webContents
   trustedRenderers.add(renderer)
   renderer.once('destroyed', () => trustedRenderers.delete(renderer))
   // The picker owns the desktop app's lifetime, including on macOS.
   window.once('closed', () => app.quit())
+  window.on('hide', () => {
+    if (!renderer.isDestroyed()) renderer.send(pickerChannels.hidden)
+  })
   renderer.setWindowOpenHandler(() => ({ action: 'deny' }))
   renderer.on('will-navigate', (event) => event.preventDefault())
 
@@ -71,6 +83,8 @@ function createWindow(): void {
   } else {
     window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
+  picker.show()
+  return picker
 }
 
 app.whenReady().then(() => {
@@ -84,6 +98,14 @@ app.whenReady().then(() => {
     app.quit()
     return
   }
+  const shortcut = 'CommandOrControl+Shift+Space'
+  const registered = globalShortcut.register(shortcut, () => {
+    pickerWindow?.toggle()
+  })
+  ipcMain.handle(pickerChannels.hide, (event) => {
+    assertTrustedSender(event)
+    pickerWindow?.hide()
+  })
   ipcMain.handle(companionChannels.getState, (event) => {
     assertTrustedSender(event)
     return companionState.getCurrent()
@@ -130,10 +152,11 @@ app.whenReady().then(() => {
     else editorWindow.reconnectSettings()
   })
   companion.connect()
-  createWindow()
+  pickerWindow = createWindow(registered)
 })
 
 app.on('before-quit', () => {
+  globalShortcut.unregisterAll()
   editorWindow.close()
   companion.stop()
 })

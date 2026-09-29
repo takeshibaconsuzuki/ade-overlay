@@ -79,6 +79,7 @@ export function Picker<T>({
   itemKey,
   available,
   resultsKey,
+  resetVersion = 0,
   onActivate,
   renderItem,
   search,
@@ -95,6 +96,8 @@ export function Picker<T>({
   itemKey: (item: T) => string
   available: (item: T) => boolean
   resultsKey: string
+  // Change to reset navigation even when search and results are unchanged.
+  resetVersion?: number
   onActivate: (item: T) => void
   renderItem: (
     item: T,
@@ -123,7 +126,7 @@ export function Picker<T>({
     highlight,
     register,
     tooltipDismissVersion,
-  } = usePickerNavigation(entries, resultsKey, search.value)
+  } = usePickerNavigation(entries, resultsKey, search.value, resetVersion)
   return (
     <InteractionScope.Provider value={suspend}>
       <main className={className} aria-label={label} {...rootProps}>

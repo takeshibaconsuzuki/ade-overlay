@@ -11,6 +11,7 @@ const input = JSON.parse(
 app.setPath('userData', join(input.root, 'profile'))
 let window
 let stage = 'startup'
+let hideRequests = 0
 const opened = []
 let holdOpen = false
 let finishOpen
@@ -142,6 +143,10 @@ async function assertSelectionInView() {
 }
 async function run() {
   await app.whenReady()
+  ipcMain.handle('test:hide', () => {
+    hideRequests++
+    window.webContents.send('test:hidden')
+  })
   ipcMain.handle('test:state', () => {
     // A pushed state can arrive before the initial IPC read finishes.
     window.webContents.send('test:update', {
@@ -389,7 +394,47 @@ async function run() {
     'worktree-1',
   )
 
+  stage = 'hiding the picker clears search and resets results'
+  window.webContents.send('test:hidden')
+  await until("document.querySelector('input[type=search]').value===''")
+  assert.equal((await state()).count, snapshot.worktrees.length)
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+
+  stage = 'hiding with an empty search resets navigation on reactivation'
+  for (let i = 0; i < 12; i++) await key('DOWN')
+  assert.equal((await state()).index, 12)
+  assert.ok((await state()).scroll > 0)
+  await evaluate(
+    "document.querySelector('.worktree-list li[data-highlighted] .worktree-open').focus({preventScroll:true})",
+  )
+  await focusWindow(false)
+  window.webContents.send('test:hidden')
+  await delay(60)
+  await focusWindow(true)
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+  assert.equal((await state()).searchFocused, true)
+  await assertSelectionInView()
+  await key('ENTER')
+  assert.equal(opened.at(-1), snapshot.worktrees[0].path)
+
+  stage = 'Escape in search hides with either a nonempty or empty query'
+  const hidesBeforeEscape = hideRequests
+  await search('worktree-1')
+  await key('ESCAPE')
+  await until("document.querySelector('input[type=search]').value===''")
+  assert.equal(hideRequests, hidesBeforeEscape + 1)
+  for (let i = 0; i < 12; i++) await key('DOWN')
+  assert.equal((await state()).index, 12)
+  assert.ok((await state()).scroll > 0)
+  await key('ESCAPE')
+  assert.equal(hideRequests, hidesBeforeEscape + 2)
+  assert.equal((await state()).index, 0)
+  assert.equal((await state()).scroll, 0)
+
   stage = 'window reactivation does not steal dialog focus'
+  const hidesBeforeDialog = hideRequests
   await evaluate("document.querySelectorAll('.toolbar button')[2].click()")
   await until("!!document.querySelector('[role=dialog] input')")
   await evaluate("document.querySelector('[role=dialog] input').focus()")
@@ -408,6 +453,11 @@ async function run() {
   )
   await key('ESCAPE')
   await until("!document.querySelector('[role=dialog]')")
+  assert.equal(
+    hideRequests,
+    hidesBeforeDialog,
+    'dialog Escape keeps the picker open',
+  )
 
   stage = 'dismissed submissions cannot mutate a reopened dialog'
   await search('')

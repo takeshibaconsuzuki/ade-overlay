@@ -6,6 +6,16 @@ import type {
   WorktreeSnapshot,
 } from './companion.ts'
 
+export const pickerChannels = {
+  hide: 'picker:hide',
+  hidden: 'picker:hidden',
+} as const
+
+export interface PickerWindowAPI {
+  hide(): Promise<void>
+  onHidden(callback: () => void): () => void
+}
+
 export const companionChannels = {
   state: 'companion:state',
   getState: 'companion:get-state',

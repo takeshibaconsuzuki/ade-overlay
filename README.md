@@ -84,6 +84,12 @@ The companion writes structured logs to its terminal and `~/.ade-overlay/server.
 
 # App
 
+Press **Ctrl+Shift+Space** on Windows/Linux or **Cmd+Shift+Space** on macOS to toggle the worktree window from any application while ADE is running. The shortcut hides the window when focused; otherwise, it shows and focuses it. The window also hides when it loses focus or you press **Esc** in the search bar. Hiding clears the search, keeps the window open, and avoids the Dock minimize animation.
+
+If the shortcut cannot be registered, ADE opens a normal window that stays visible when it loses focus or you press **Esc**. You can minimize and restore it using your desktop's window controls.
+
+Dismissing the picker returns keyboard focus to the previous window, including windows in other applications. Clicking another window leaves that window focused. On Linux/Wayland, the desktop compositor controls which window receives focus after the picker hides.
+
 ## Terminal sidebar
 
 Install the bundled VS Code extension and activity hooks with the companion launcher's `--setup` command. Pass the same `--config` argument used by the server if you configured a different extensions directory.

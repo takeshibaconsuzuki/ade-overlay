@@ -83,9 +83,17 @@ const desktop = await stage('desktop', {
   private: true,
   type: 'module',
   main: app.main,
-  dependencies: Object.fromEntries(
-    ['socket.io-client', 'zod'].map((name) => [name, app.dependencies[name]]),
-  ),
+  dependencies: {
+    ...Object.fromEntries(
+      ['koffi', 'socket.io-client', 'zod'].map((name) => [
+        name,
+        app.dependencies[name],
+      ]),
+    ),
+    // Staging omits optional dependencies; the native runtime is required.
+    [`@koromix/koffi-${process.platform}-${process.arch}`]:
+      app.dependencies.koffi,
+  },
 })
 for (const directory of ['main', 'preload', 'renderer'])
   await cp(join(root, 'out', directory), join(desktop, 'out', directory), {

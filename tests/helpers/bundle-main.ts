@@ -26,8 +26,13 @@ export async function bundleMain(
         fileName: () => `${name}.${extension}`,
       },
       rollupOptions: {
-        external: ['electron', 'ws', /^node:/, ...builtinModules],
-        output: { paths: { ws: import.meta.resolve('ws') } },
+        external: ['electron', 'koffi', 'ws', /^node:/, ...builtinModules],
+        output: {
+          paths: {
+            ws: import.meta.resolve('ws'),
+            koffi: import.meta.resolve('koffi'),
+          },
+        },
       },
     },
   })

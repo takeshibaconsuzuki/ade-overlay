@@ -198,6 +198,7 @@ export function SearchField(
     | 'placeholder'
     | 'onChange'
     | 'onFocus'
+    | 'onKeyDown'
     | 'autoFocus'
   > & { value: string },
 ) {
