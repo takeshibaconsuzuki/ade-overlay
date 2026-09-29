@@ -117,7 +117,7 @@ After a chat finishes a response, enable ADE in **System Settings > Notification
 
 Check the companion terminal or `~/.ade-overlay/server.log` for errors. Set `ADE_LOG_LEVEL=debug` for detailed output.
 
-Terminal pastes wait for the extension to identify the active terminal. Ordinary terminals then receive the captured text. ADE chat terminals print an ordered `[{ type: 'text' | 'image', data: string | Uint8Array }]` diagnostic in the editor's developer console (`[ADE paste]`) and desktop console, without sending text to the CLI. Image URLs remain in place if the browser cannot download their bytes. Keyboard and context-menu pastes work with hidden tabs or icons; code indentation is preserved. See the [paste workflow](workflows/terminal-paste.md).
+Terminal pastes wait for the extension to identify the active terminal. Ordinary terminals receive the captured text. ADE chats receive text and images in their draft, without pressing Enter: Codex gets native image attachments; Claude gets inline `@file` references at the original image positions, which it reads on submission. Keyboard and context-menu pastes work with hidden tabs or icons; code indentation is preserved. The companion accepts PNG, JPEG, GIF and WebP, downloads image URLs that the browser could not read, and stores images under its editor data directory's `paste-images/` folder. These files persist so unfinished drafts remain usable; remove them only when their drafts are no longer needed. Failed preparation leaves the draft untouched and reports an error in the editor's developer console. See the [paste workflow](workflows/terminal-paste.md).
 
 ## Upgrade or uninstall
 

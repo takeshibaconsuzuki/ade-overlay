@@ -26,8 +26,6 @@ async function run() {
     let target = 'chat-first'
     let calls = 0
     const logs = []
-    const originalInfo = console.info
-    console.info = (...args) => logs.push(args)
     const dispose = installEditorPaste(
       contents,
       () => active,
@@ -35,6 +33,9 @@ async function run() {
       async () => {
         calls++
         return target
+      },
+      async (terminalId, items) => {
+        logs.push([terminalId, items])
       },
     )
     await window.loadFile(join(root, 'index.html'))
@@ -59,7 +60,7 @@ async function run() {
     )
     assert.equal(
       logs[0][0],
-      '[ADE paste: chat-first]',
+      'chat-first',
       'submission keeps the reserved target after focus changes',
     )
     assert.deepEqual(logs[0][1], [
@@ -108,7 +109,6 @@ async function run() {
       null,
     )
     dispose()
-    console.info = originalInfo
     window.destroy()
     writeFileSync(join(root, 'result.json'), JSON.stringify({ ok: true }))
     app.exit(0)

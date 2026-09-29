@@ -5,7 +5,7 @@ function terminalTarget(target: EventTarget | null): target is Element {
   return target instanceof Element && !!target.closest('.xterm')
 }
 
-export function installChatPastePreview(
+export function installChatPaste(
   bridge: PasteBridge | undefined = window.adePaste,
 ): () => void {
   if (!bridge) return () => {}
@@ -33,8 +33,11 @@ export function installChatPastePreview(
       if (closed) return
       if (id === null) ordinary(text)
       else if (parts) {
-        await bridge.paste(id, parts)
-        console.info('[ADE paste]', parts)
+        // Submit in source order, consuming each reservation promptly. The
+        // companion prepares images concurrently and orders terminal delivery.
+        void bridge
+          .paste(id, parts)
+          .catch((error: unknown) => console.warn('[ADE paste]', error))
       }
     })
     queue = operation.catch((error: unknown) =>

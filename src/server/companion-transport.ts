@@ -1,3 +1,4 @@
+import { MAX_PASTE_MESSAGE_BYTES } from '../shared/paste-schema.ts'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { Server as Engine } from 'engine.io'
@@ -35,7 +36,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
   const interval = options.heartbeatIntervalMs ?? 30_000
   const engine = new Engine({
     transports: ['websocket'],
-    maxHttpBufferSize: MAX_MESSAGE_BYTES,
+    maxHttpBufferSize: MAX_PASTE_MESSAGE_BYTES,
     pingInterval: interval,
     pingTimeout: interval,
   })
@@ -70,6 +71,18 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
   chats.store.on('idle', notifyIdle)
   worktrees.on('update', broadcast)
   sockets.on('connection', (client) => {
+    // Rich pastes carry binary images; all other commands retain the small
+    // control-message limit even though the websocket admits larger frames.
+    client.use(([event, input], next) => {
+      if (
+        event !== companionRequests.paste.event &&
+        Buffer.byteLength(JSON.stringify(input) ?? '') > MAX_MESSAGE_BYTES
+      ) {
+        client.conn.close()
+        return
+      }
+      next()
+    })
     logger.info('Companion client connected')
     const events = new Set([
       ...Object.values(companionRequests).map((spec) => spec.event),
@@ -133,6 +146,9 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
       )
     }
     register(companionRequests.activateChat, (id) => chats.activate(id, client))
+    register(companionRequests.paste, ({ editorId, terminalId, items }) =>
+      chats.paste(editorId, terminalId, items),
+    )
     register(companionRequests.pasteTarget, (id) => chats.pasteTarget(id))
     register(companionRequests.list, () => worktrees.list())
     register(companionRequests.refresh, () => worktrees.refresh())

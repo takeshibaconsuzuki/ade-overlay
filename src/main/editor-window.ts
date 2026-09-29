@@ -1,3 +1,4 @@
+import type { PastePart } from '../shared/paste.ts'
 import {
   BaseWindow,
   WebContentsView,
@@ -44,7 +45,14 @@ export class EditorWindow {
 
   constructor(
     companionUrl: string,
-    private readonly pasteTarget?: (editorId: string) => Promise<string | null>,
+    private readonly pasteBridge?: {
+      pasteTarget(editorId: string): Promise<string | null>
+      paste(
+        editorId: string,
+        terminalId: string,
+        items: PastePart[],
+      ): Promise<unknown>
+    },
   ) {
     this.origin = new URL(companionUrl)
     this.origin.protocol = this.origin.protocol === 'wss:' ? 'https:' : 'http:'
@@ -77,7 +85,7 @@ export class EditorWindow {
       const view = new WebContentsView({
         webPreferences: {
           session: browserSession.browser,
-          preload: this.pasteTarget
+          preload: this.pasteBridge
             ? join(import.meta.dirname, '../preload/editor.cjs')
             : undefined,
           sandbox: true,
@@ -113,12 +121,14 @@ export class EditorWindow {
         event.preventDefault()
         openBrowser(next)
       })
-      const forgetPaste = this.pasteTarget
+      const forgetPaste = this.pasteBridge
         ? installEditorPaste(
             view.webContents,
             () => this.active?.view === view,
             isEditorUrl,
-            () => this.pasteTarget!(editor.id),
+            () => this.pasteBridge!.pasteTarget(editor.id),
+            (terminalId, items) =>
+              this.pasteBridge!.paste(editor.id, terminalId, items),
           )
         : () => {}
       entry = {

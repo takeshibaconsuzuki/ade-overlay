@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { eventSpec, requestSpec } from './rpc.ts'
+import { terminalPasteSchema } from './paste-schema.ts'
 import { worktreeColorSchema } from './worktree-colors.ts'
 
 export const chatIdSchema = z.string().min(1).max(128)
@@ -33,6 +34,7 @@ const chatSnapshotSchema = z.object({
   chats: z.array(chatSchema),
 })
 export const chatRequests = {
+  paste: requestSpec('paste', terminalPasteSchema, z.null(), 5_000),
   pasteTarget: requestSpec(
     'paste-target',
     z.null(),

@@ -98,6 +98,10 @@ test(
     }
     const terminal = () => ({
       shows: 0,
+      sent: [] as { text: string; execute: boolean }[],
+      sendText(text: string, execute: boolean) {
+        this.sent.push({ text, execute })
+      },
       show() {
         this.shows++
         vscode.window.activeTerminal = this
@@ -165,6 +169,22 @@ test(
     vscode.window.terminals.push(ordinary)
     vscode.window.activeTerminal = ordinary
     assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), null)
+    const text = '\x1b[200~first\n  second\x1b[201~'
+    assert.equal(
+      await callRpc(peer!, chatRequests.paste, { terminalId: 'b', text }),
+      null,
+    )
+    assert.deepEqual(b.sent, [{ text, execute: false }])
+    assert.deepEqual(ordinary.sent, [])
+    assert.equal(
+      vscode.window.activeTerminal,
+      ordinary,
+      'paste does not change focus',
+    )
+    await assert.rejects(
+      callRpc(peer!, chatRequests.paste, { terminalId: 'missing', text }),
+      /no longer available/,
+    )
     vscode.window.activeTerminal = undefined
     await assert.rejects(
       callRpc(peer!, chatRequests.pasteTarget, null),

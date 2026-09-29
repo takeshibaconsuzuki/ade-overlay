@@ -114,8 +114,6 @@ async function run() {
     await contents.executeJavaScript(`(() => {
       // No tab, icon, title, or accessibility label identifies these terminals.
       document.body.innerHTML = '<div class="xterm"><textarea></textarea></div><textarea id="editor"></textarea>';
-      globalThis.logs = [];
-      console.info = (...args) => logs.push(args);
       globalThis.delivered = [];
       globalThis.submitted = [];
       globalThis.reservations = [];
@@ -123,9 +121,12 @@ async function run() {
       globalThis.richReads = 0;
       navigator.clipboard.readText = async () => { plainReads++; return 'plain fallback'; };
       navigator.clipboard.read = async () => { richReads++; return [new ClipboardItem({ 'text/plain': new Blob([fixture.text], { type: 'text/plain' }), 'text/html': new Blob([fixture.html], { type: 'text/html' }) })]; };
-      globalThis.disposePaste = pasteModule.installChatPastePreview({
+      globalThis.disposePaste = pasteModule.installChatPaste({
         reservePaste: () => new Promise((resolve, reject) => reservations.push({ resolve, reject })),
-        paste: async (id, items) => submitted.push({ id, items }),
+        paste: async (id, items) => {
+          submitted.push({ id, items });
+          if (globalThis.holdSubmissions) await new Promise(resolve => pendingSubmissions.push(resolve));
+        },
       });
       globalThis.terminal = document.querySelector('.xterm textarea');
       terminal.addEventListener('paste', event => delivered.push(event.clipboardData.getData('text/plain')));
@@ -230,6 +231,10 @@ async function run() {
     assert.equal(await contents.executeJavaScript('apiResult'), '')
 
     // All four pastes start their image reads before the first one finishes.
+    // Slow companion acknowledgements must not delay consuming reservations.
+    await contents.executeJavaScript(
+      'globalThis.holdSubmissions = true; globalThis.pendingSubmissions = []',
+    )
     // Later downloads may complete first, but submissions must keep paste order.
     const submissionCount = await contents.executeJavaScript('submitted.length')
     await contents.executeJavaScript(`(() => {
@@ -278,7 +283,13 @@ async function run() {
         ],
       })),
     )
-    await contents.executeJavaScript('restoreConcurrentFixture()')
+    assert.equal(
+      await contents.executeJavaScript('pendingSubmissions.length'),
+      4,
+    )
+    await contents.executeJavaScript(
+      'holdSubmissions = false; pendingSubmissions.forEach(resolve => resolve()); restoreConcurrentFixture()',
+    )
 
     await contents.executeJavaScript(
       `document.querySelector('#editor').focus()`,

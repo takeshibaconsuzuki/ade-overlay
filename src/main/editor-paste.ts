@@ -1,32 +1,8 @@
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { z } from 'zod'
+import { pasteItemsSchema } from '../shared/paste-schema.ts'
+import type { PastePart } from '../shared/paste.ts'
 import { pasteChannels } from '../shared/paste.ts'
-
-const itemsSchema = z
-  .array(
-    z.discriminatedUnion('type', [
-      z.object({ type: z.literal('text'), data: z.string() }),
-      z.object({
-        type: z.literal('image'),
-        data: z.union([z.string(), z.instanceof(Uint8Array)]),
-      }),
-    ]),
-  )
-  .max(1024)
-  .refine(
-    (items) =>
-      items.reduce(
-        (size, item) =>
-          size +
-          (typeof item.data === 'string'
-            ? item.data.length * 2
-            : item.data.byteLength),
-        0,
-      ) <=
-      32 * 1024 * 1024,
-    'Paste exceeds 32 MiB.',
-  )
 
 // Reservations belong to one document. They never re-query focus on submission.
 export function installEditorPaste(
@@ -34,6 +10,7 @@ export function installEditorPaste(
   isActive: () => boolean,
   isEditorUrl: (url: URL | null) => boolean,
   target: () => Promise<string | null>,
+  submit: (terminalId: string, items: PastePart[]) => Promise<unknown>,
 ): () => void {
   let generation = 0
   let pending = 0
@@ -87,7 +64,7 @@ export function installEditorPaste(
   )
   contents.ipc.handle(
     pasteChannels.paste,
-    (event, id: unknown, input: unknown) => {
+    async (event, id: unknown, input: unknown) => {
       assertSender(event)
       expire()
       const reservation =
@@ -95,9 +72,8 @@ export function installEditorPaste(
       if (!reservation)
         throw new Error('The paste reservation is invalid or expired.')
       reservations.delete(id as string)
-      const items = itemsSchema.parse(input)
-      // Diagnostic only. The reserved identity is available here for future delivery.
-      console.info(`[ADE paste: ${reservation.terminalId}]`, items)
+      const items = pasteItemsSchema.parse(input)
+      await submit(reservation.terminalId, items)
     },
   )
   const navigate = (

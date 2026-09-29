@@ -1,4 +1,4 @@
 import './settings-sync'
-import { installChatPastePreview } from './chat-paste'
+import { installChatPaste } from './chat-paste'
 
-installChatPastePreview()
+installChatPaste()

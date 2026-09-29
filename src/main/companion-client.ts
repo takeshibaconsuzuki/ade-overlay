@@ -1,3 +1,4 @@
+import type { PastePart } from '../shared/paste.ts'
 import { EventEmitter } from 'node:events'
 import type { Socket } from 'socket.io-client'
 import type { Chat } from '../shared/chats.ts'
@@ -161,6 +162,18 @@ export class CompanionClient extends EventEmitter<{
 
   pasteTarget(editorId: string): Promise<string | null> {
     return this.request(companionRequests.pasteTarget, editorId)
+  }
+
+  paste(
+    editorId: string,
+    terminalId: string,
+    items: PastePart[],
+  ): Promise<null> {
+    return this.request(companionRequests.paste, {
+      editorId,
+      terminalId,
+      items,
+    })
   }
 
   activateChat(id: string): Promise<null> {

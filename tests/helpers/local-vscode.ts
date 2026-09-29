@@ -116,12 +116,19 @@ export async function localVSCodeFixture(
       context.subscriptions.push(changes, new ChatController({ id: terminal => ids.get(terminal), find: id => [...ids].find(entry => entry[1] === id)?.[0], onDidChange: changes.event }, operation => operation()));
       for (const [name, setting, value] of [['hiddenIcons', 'showIcons', false], ['hiddenTabs', 'showTabs', 'none']]) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + name, () => vscode.workspace.getConfiguration('workbench.editor').update(setting, value, vscode.ConfigurationTarget.Global)));
       for (const provider of ['codex', 'claude', 'ordinary']) context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.' + provider, () => {
-        const terminal = vscode.window.createTerminal({ name: 'ADE paste fixture ' + provider, location: vscode.TerminalLocation.Editor, iconPath: new vscode.ThemeIcon('terminal') });
+        const options = { name: 'ADE paste fixture ' + provider, location: vscode.TerminalLocation.Editor, iconPath: new vscode.ThemeIcon('terminal') };
+        const write = new vscode.EventEmitter();
+        const terminal = vscode.window.createTerminal(provider === 'ordinary' ? options : { ...options, pty: {
+          onDidWrite: write.event,
+          open: () => write.fire('\\x1b[?2004h'),
+          close: () => write.dispose(),
+          handleInput: text => require('node:fs').appendFileSync(require('node:path').join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'paste-input.jsonl'), JSON.stringify({ terminalId: 'fixture-' + provider, text }) + '\\n'),
+        } });
         if (provider !== 'ordinary') ids.set(terminal, 'fixture-' + provider);
         pasteTerminals.push(terminal);
         terminal.show();
       }));
-      context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.close', () => { for (const terminal of pasteTerminals) terminal.dispose(); }));
+      context.subscriptions.push(vscode.commands.registerCommand('ade.pasteFixture.close', () => { ids.clear(); for (const terminal of pasteTerminals.splice(0)) terminal.dispose(); }));
       if (${observeSettings}) {
         const fs = require('node:fs');
         const path = require('node:path');

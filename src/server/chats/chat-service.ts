@@ -2,9 +2,13 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
+import { join } from 'node:path'
 import { Server as Engine } from 'engine.io'
 import getRawBody from 'raw-body'
 import { Server as SocketServer, type Socket } from 'socket.io'
+import { editorDataDir } from '../config.ts'
+import { materializePaste } from './chat-paste.ts'
+import type { PastePart } from '../../shared/paste.ts'
 import { callRpc, handleRpc, listenEvent, sendEvent } from '../../shared/rpc.ts'
 import { z } from 'zod'
 import type { Logger } from 'pino'
@@ -62,6 +66,8 @@ export class ChatService {
   )
   private readonly upgrades = new Set<Duplex>()
   private closing = false
+  private readonly pastes = new Set<Promise<null>>()
+  private readonly pasteQueues = new Map<string, Promise<void>>()
   private readonly server: Server
   private timer?: ReturnType<typeof setInterval>
   private titleTimer?: ReturnType<typeof setInterval>
@@ -71,7 +77,13 @@ export class ChatService {
   onNavigationFinished?: (id: string) => void
 
   private readonly logger: Logger
-  constructor(logger: Logger = silentLogger, store = new ChatStore()) {
+  private readonly pasteDirectory: string
+  constructor(
+    logger: Logger = silentLogger,
+    store = new ChatStore(),
+    pasteDirectory = join(editorDataDir(), 'paste-images'),
+  ) {
+    this.pasteDirectory = pasteDirectory
     this.logger = logger
     this.store = store
     this.server = createServer((request, response) => {
@@ -209,6 +221,57 @@ export class ChatService {
     if (this.closing || scope?.socket !== socket)
       throw new Error('The editor connection changed. Try pasting again.')
     return target
+  }
+
+  paste(
+    editorId: string,
+    terminalId: string,
+    items: PastePart[],
+  ): Promise<null> {
+    const key = JSON.stringify([editorId, terminalId])
+    const previous = this.pasteQueues.get(key) ?? Promise.resolve()
+    const request = this.deliverPaste(editorId, terminalId, items, previous)
+    const tail = Promise.allSettled([previous, request]).then(() => {})
+    this.pasteQueues.set(key, tail)
+    void tail.then(() => {
+      if (this.pasteQueues.get(key) === tail) this.pasteQueues.delete(key)
+    })
+    this.pastes.add(request)
+    void request.finally(() => this.pastes.delete(request)).catch(() => {})
+    return request
+  }
+
+  private async deliverPaste(
+    editorId: string,
+    terminalId: string,
+    items: PastePart[],
+    previous: Promise<void>,
+  ): Promise<null> {
+    const scope = this.editors.get(editorId)
+    const socket = scope?.socket
+    if (this.closing || !socket?.connected)
+      throw new Error(
+        'The editor extension is disconnected. Try pasting again.',
+      )
+    await this.store.reconcile()
+    const chat = this.store.getTerminal(editorId, terminalId)
+    if (!chat)
+      throw new Error(
+        'The chat is not running or has not finished starting. Try pasting again.',
+      )
+    const parts = await materializePaste(items, this.pasteDirectory)
+    const text = chat.provider.preparePaste(parts)
+    await previous
+    await this.store.reconcile()
+    if (
+      this.closing ||
+      scope?.socket !== socket ||
+      this.store.getTerminal(editorId, terminalId)?.chatId !== chat.chatId
+    )
+      throw new Error(
+        'The chat changed while preparing the paste. Try pasting again.',
+      )
+    return callRpc(socket, chatRequests.paste, { terminalId, text })
   }
 
   async listen(): Promise<void> {
@@ -361,6 +424,7 @@ export class ChatService {
       this.server.close(() => resolve())
       this.server.closeAllConnections()
     })
+    await Promise.allSettled(this.pastes)
     await titlesClosed
   }
 }

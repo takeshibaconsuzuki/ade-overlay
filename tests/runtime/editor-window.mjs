@@ -150,18 +150,33 @@ async function run() {
       )
     }, 'imported Node extension and settings')
     if (input.phase === 'paste') {
-      // Exercise the actual workbench DOM and paste action without touching
-      // the user's OS clipboard or launching either provider.
+      const png =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1cAAAAASUVORK5CYII='
+      const html = `<p>First</p><img src="data:image/png;base64,${png}"><p>Middle</p><img src="data:image/png;base64,${png}"><p>Last</p>`
+      const deliveries = () => {
+        try {
+          return (
+            readFileSync(join(input.project, 'paste-input.jsonl'), 'utf8')
+              .trim()
+              .split('\n')
+              .map((line) => JSON.parse(line))
+              // The VS Code command also sends the empty clipboard result.
+              .filter(
+                ({ text }) => text !== '\x1b[200~\x1b[201~' && text !== '',
+              )
+          )
+        } catch (error) {
+          if (error.code === 'ENOENT') return []
+          throw error
+        }
+      }
       await editor.executeJavaScript(`(() => {
         const read = navigator.clipboard.read;
-        const info = console.info;
-        globalThis.pasteResults = [];
-        console.info = (...args) => { if (args[0] === '[ADE paste]') pasteResults.push(args); else info(...args); };
         navigator.clipboard.read = async () => [new ClipboardItem({
           'text/plain': new Blob(['ADE_PASTE_TEXT'], { type: 'text/plain' }),
-          'text/html': new Blob(['<p>First</p><img src="data:image/png;base64,AQID"><p>Middle</p><img src="data:image/png;base64,BAUG"><p>Last</p>'], { type: 'text/html' }),
+          'text/html': new Blob([${JSON.stringify(html)}], { type: 'text/html' }),
         })];
-        globalThis.restorePasteFixture = () => { navigator.clipboard.read = read; console.info = info; };
+        globalThis.restorePasteFixture = () => { navigator.clipboard.read = read; };
       })()`)
       try {
         let count = 0
@@ -202,14 +217,14 @@ async function run() {
                   `(() => {
                 const data = new DataTransfer();
                 data.setData('text/plain', 'ADE_NATIVE_TEXT');
-                data.setData('text/html', '<p>First</p><img src="data:image/png;base64,AQID"><p>Middle</p><img src="data:image/png;base64,BAUG"><p>Last</p>');
+                data.setData('text/html', ${JSON.stringify(html)});
                 document.querySelector('.editor-group-container.active .xterm textarea').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
               })()`,
                   true,
                 )
-              const marker =
-                mechanism === 'command' ? 'ADE_PASTE_TEXT' : 'ADE_NATIVE_TEXT'
               if (provider === 'ordinary') {
+                const marker =
+                  mechanism === 'command' ? 'ADE_PASTE_TEXT' : 'ADE_NATIVE_TEXT'
                 await until(
                   () =>
                     editor.executeJavaScript(
@@ -217,35 +232,55 @@ async function run() {
                     ),
                   'ordinary terminal receives text',
                 )
-                assert.equal(
-                  await editor.executeJavaScript('pasteResults.length'),
-                  count,
-                )
+                assert.equal(deliveries().length, count)
               } else {
                 count++
                 await until(
-                  () =>
-                    editor.executeJavaScript(
-                      `pasteResults.length === ${count}`,
-                    ),
-                  'structured paste preview',
+                  () => deliveries().length >= count,
+                  `provider payload delivered to terminal (${setting}/${provider}/${mechanism})`,
                 )
-                const result = await editor.executeJavaScript(
-                  `pasteResults.at(-1)[1].map(part => ({ ...part, data: typeof part.data === 'string' ? part.data : Array.from(part.data) }))`,
-                )
-                assert.deepEqual(result, [
-                  { type: 'text', data: 'First' },
-                  { type: 'image', data: [1, 2, 3] },
-                  { type: 'text', data: 'Middle' },
-                  { type: 'image', data: [4, 5, 6] },
-                  { type: 'text', data: 'Last' },
-                ])
                 assert.equal(
-                  await editor.executeJavaScript(
-                    `document.querySelector('.editor-group-container.active .xterm-accessibility-tree')?.textContent.includes('${marker}')`,
-                  ),
-                  false,
+                  deliveries().length,
+                  count,
+                  JSON.stringify(deliveries()),
                 )
+                const result = deliveries().at(-1)
+                assert.equal(result.terminalId, `fixture-${provider}`)
+                const parts = result.text
+                  .split('\x1b[200~')
+                  .slice(1)
+                  .map((part) => {
+                    assert.ok(part.endsWith('\x1b[201~'), 'no Enter appended')
+                    return part.slice(0, -6)
+                  })
+                let paths
+                if (provider === 'codex') {
+                  assert.equal(parts.length, 5)
+                  assert.deepEqual(
+                    [parts[0], parts[2], parts[4]],
+                    ['First', 'Middle', 'Last'],
+                  )
+                  paths = [new URL(parts[1]), new URL(parts[3])]
+                } else {
+                  assert.equal(parts.length, 1)
+                  const ordered = parts[0].split('\r')
+                  assert.deepEqual(
+                    [ordered[0], ordered[2], ordered[4]],
+                    ['First', 'Middle', 'Last'],
+                  )
+                  assert.ok(
+                    ordered[1].startsWith('@') && ordered[3].startsWith('@'),
+                  )
+                  paths = [
+                    JSON.parse(ordered[1].slice(1)),
+                    JSON.parse(ordered[3].slice(1)),
+                  ]
+                }
+                for (const path of paths)
+                  assert.deepEqual(
+                    readFileSync(path),
+                    Buffer.from(png, 'base64'),
+                  )
               }
             }
             await command(editor, 'ADE: Paste Fixture close')

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { eventSpec, requestSpec } from './rpc.ts'
 import { chatIdSchema, chatSchema } from './chats.ts'
+import { pasteItemsSchema } from './paste-schema.ts'
 import { worktreeColorSchema } from './worktree-colors.ts'
 
 export const COMPANION_PROTOCOL_VERSION = 1
@@ -67,6 +68,16 @@ const worktreeSnapshotSchema = z.object({
 })
 
 export const companionRequests = {
+  paste: requestSpec(
+    'editor:paste',
+    z.object({
+      editorId: editorSessionSchema.shape.id,
+      terminalId: chatIdSchema,
+      items: pasteItemsSchema,
+    }),
+    z.null(),
+    25_000,
+  ),
   pasteTarget: requestSpec(
     'editor:paste-target',
     editorSessionSchema.shape.id,

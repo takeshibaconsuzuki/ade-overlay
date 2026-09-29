@@ -1,6 +1,8 @@
+import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { z } from 'zod'
+import { bracketedPaste, type MaterializedPastePart } from './chat-paste.ts'
 import type { ChatActivity } from '../../shared/chats.ts'
 import type { ChatProcess } from '../../shared/node/chat-processes.ts'
 
@@ -24,6 +26,7 @@ export type ChatTitles = Map<string, Map<string, string>>
 
 export interface ChatProvider {
   id: string
+  preparePaste(parts: readonly MaterializedPastePart[]): string
   hookFile(env: NodeJS.ProcessEnv): string
   events: readonly string[]
   hookCommand(args: readonly string[]): Record<string, unknown>
@@ -43,6 +46,15 @@ export interface ChatProvider {
 // Provider knowledge stays here; registry and navigation consume normalized data.
 export const codexProvider: ChatProvider = {
   id: 'codex',
+  // Codex accepts file URLs as a single dropped image path, including spaces.
+  preparePaste: (parts) =>
+    bracketedPaste(
+      parts.map((part) =>
+        part.type === 'image'
+          ? { ...part, data: pathToFileURL(part.data).href }
+          : part,
+      ),
+    ),
   hookFile: (env) =>
     join(env.CODEX_HOME || join(homedir(), '.codex'), 'hooks.json'),
   metadataRoot: (env) => env.CODEX_HOME || join(homedir(), '.codex'),
@@ -101,6 +113,26 @@ export const codexProvider: ChatProvider = {
 
 export const claudeProvider: ChatProvider = {
   id: 'claude',
+  // Image-path paste events resolve asynchronously in Claude and can move past
+  // later text. Inline file mentions keep their source positions in one draft;
+  // Claude reads the images when the user submits it.
+  preparePaste: (parts) =>
+    bracketedPaste([
+      {
+        type: 'text',
+        data: parts
+          .map((part) =>
+            part.type === 'text'
+              ? part.data
+              : '\n@' +
+                JSON.stringify(
+                  sep === '\\' ? part.data.replaceAll('\\', '/') : part.data,
+                ) +
+                '\n',
+          )
+          .join(''),
+      },
+    ]),
   hookFile: (env) =>
     join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'settings.json'),
   metadataRoot: (env) => env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),

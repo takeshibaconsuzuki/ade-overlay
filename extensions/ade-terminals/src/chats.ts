@@ -2,7 +2,12 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import type { Socket } from 'socket.io-client'
 import { createSocket } from '../../../src/shared/node/socket-client.ts'
-import { callRpc, handleRpc, listenEvent, sendEvent } from '../../../src/shared/rpc.ts'
+import {
+  callRpc,
+  handleRpc,
+  listenEvent,
+  sendEvent,
+} from '../../../src/shared/rpc.ts'
 import {
   chatRequests,
   chatEvents,
@@ -89,6 +94,15 @@ export class ChatController implements vscode.Disposable {
       maxReconnectDelay: 2000,
     })
     this.socket = socket
+    handleRpc(socket, chatRequests.paste, ({ terminalId, text }) => {
+      if (this.stopped || !socket.connected)
+        throw new Error('Editor connection closed.')
+      const terminal = this.identities.find(terminalId)
+      if (!terminal || !vscode.window.terminals.includes(terminal))
+        throw new Error('The chat terminal is no longer available.')
+      terminal.sendText(text, false)
+      return null
+    })
     handleRpc(socket, chatRequests.pasteTarget, () => {
       const terminal = vscode.window.activeTerminal
       if (!terminal || !vscode.window.terminals.includes(terminal))

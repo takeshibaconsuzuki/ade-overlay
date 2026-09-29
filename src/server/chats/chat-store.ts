@@ -87,6 +87,18 @@ export class ChatStore extends EventEmitter<{
     )
   }
 
+  getTerminal(
+    editorId: string,
+    terminalId: string,
+  ): { chatId: string; provider: ChatProvider } | undefined {
+    const entry = [...this.records.values()].find(
+      (entry) =>
+        entry.editorId === editorId && entry.chat.terminalId === terminalId,
+    )
+    const provider = entry && chatProvider(entry.provider)
+    return entry && provider ? { chatId: entry.chat.id, provider } : undefined
+  }
+
   async activity(
     editorId: string,
     worktree: OpenEditorInput,

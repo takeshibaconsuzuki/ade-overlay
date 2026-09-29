@@ -1,3 +1,4 @@
+import { MAX_PASTE_MESSAGE_BYTES } from '../paste-schema.ts'
 import { io } from 'socket.io-client'
 
 export function createSocket(
@@ -27,7 +28,7 @@ export function createSocket(
       ? { Authorization: `Bearer ${options.token}` }
       : undefined,
     transportOptions: {
-      websocket: { maxPayload: 16 * 1024 * 1024 },
+      websocket: { maxPayload: MAX_PASTE_MESSAGE_BYTES },
     },
   })
   // Commands belong to one connection. Reconnect reloads state, never mutations.
