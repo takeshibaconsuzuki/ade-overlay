@@ -93,12 +93,29 @@ async function focusWindow(enabled) {
   )
   await delay(60)
 }
-async function moveMouse(selector) {
+async function moveMouse(selector, firstEventOnly = false) {
   const point = await evaluate(`(() => {
     const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
     return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
   })()`)
-  window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+  // Chromium derives pointer movement from the screen coordinates.
+  // Entering the window starts with zero movement; follow it with a move.
+  if (!firstEventOnly) {
+    window.webContents.sendInputEvent({
+      type: 'mouseMove',
+      x: point.x - 1,
+      y: point.y,
+      globalX: point.x - 1,
+      globalY: point.y,
+    })
+    await delay(40)
+  }
+  window.webContents.sendInputEvent({
+    type: 'mouseMove',
+    ...point,
+    globalX: point.x,
+    globalY: point.y,
+  })
   await delay(40)
   return point
 }
@@ -213,6 +230,14 @@ async function run() {
   assert.equal((await state()).highlightVisible, true)
   await assertListAlignment()
 
+  stage = 'initial stationary pointer preserves keyboard selection'
+  await moveMouse('.worktree-list li:nth-child(2) .worktree-open', true)
+  assert.equal((await state()).index, 0)
+  await moveMouse('.worktree-list li:nth-child(2) .worktree-open', true)
+  assert.equal((await state()).index, 0)
+  await moveMouse('.worktree-list li:nth-child(2) .worktree-open')
+  assert.equal((await state()).index, 1)
+
   stage = 'case-insensitive basename and branch filtering'
   await search('ALpHa')
   assert.equal((await state()).count, 1)
@@ -261,6 +286,7 @@ async function run() {
   stage = 'window reactivation preserves scrolled selection'
   await focusWindow(false)
   await focusWindow(true)
+  await moveMouse('.worktree-list li:nth-child(12) .worktree-open', true)
   assert.deepEqual(await state(), before)
   stage = 'focusing search from a result preserves scrolled selection'
   await evaluate(
@@ -283,6 +309,10 @@ async function run() {
   const hovered = await state()
   assert.equal(hovered.index, 12)
   assert.equal(hovered.highlightVisible, true)
+  await focusWindow(false)
+  await focusWindow(true)
+  await moveMouse('.worktree-list li:nth-child(12) .worktree-open', true)
+  assert.deepEqual(await state(), hovered)
   await moveMouse('.worktree-list li:nth-child(13) .worktree-delete')
   assert.deepEqual(await state(), hovered)
   await moveMouse('.toolbar button')

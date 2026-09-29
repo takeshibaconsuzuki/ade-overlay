@@ -143,7 +143,13 @@ export function usePickerNavigation(
   }, [suspensionVersion, syncHighlightVisibility])
 
   useLayoutEffect(() => {
+    const resetPointer = () => {
+      pointer.current = null
+      hovering.current = false
+      syncHighlightVisibility()
+    }
     const onFocus = () => {
+      resetPointer()
       // A modal owns focus until it closes, including across window switches.
       if (suspended.current === 0) {
         searchRef.current?.focus({ preventScroll: true })
@@ -152,28 +158,28 @@ export function usePickerNavigation(
     }
     document.addEventListener('focusin', syncHighlightVisibility)
     document.addEventListener('focusout', syncHighlightVisibility)
-    window.addEventListener('blur', syncHighlightVisibility)
+    window.addEventListener('blur', resetPointer)
     window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', resetPointer)
     return () => {
       document.removeEventListener('focusin', syncHighlightVisibility)
       document.removeEventListener('focusout', syncHighlightVisibility)
-      window.removeEventListener('blur', syncHighlightVisibility)
+      window.removeEventListener('blur', resetPointer)
       window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', resetPointer)
     }
   }, [syncHighlightVisibility])
 
   function onPointerMove(event: PointerEvent<HTMLElement>) {
     if (event.pointerType !== 'mouse') return
     if (!event.currentTarget.contains(event.target as Node)) return
-    const { clientX: x, clientY: y } = event
-    // Scrolling can move rows beneath the pointer without mouse input.
-    if (
-      mode.current === 'keyboard' &&
-      pointer.current?.x === x &&
-      pointer.current?.y === y
-    )
-      return
+    const { screenX: x, screenY: y } = event
+    const previous = pointer.current
     pointer.current = { x, y }
+    // The first event after showing or entering only establishes a baseline.
+    // Its movement delta can include travel while the picker was hidden.
+    // Screen coordinates also ignore rows or the window moving under the cursor.
+    if (!previous || (previous.x === x && previous.y === y)) return
     const button = targetEntry(event.target as Element)
     hovering.current = !!button
     syncHighlightVisibility()
@@ -273,6 +279,7 @@ export function usePickerNavigation(
       ref: rootRef,
       onPointerMove,
       onPointerLeave: () => {
+        pointer.current = null
         hovering.current = false
         syncHighlightVisibility()
       },
