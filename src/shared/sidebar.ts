@@ -1,15 +1,17 @@
 import { z } from 'zod'
 import { chatIdSchema, chatSchema } from './chats.ts'
 
-export const launchProviderSchema = z.enum(['codex', 'claude'])
-export const launchKindSchema = z.enum([
-  'terminal',
-  ...launchProviderSchema.options,
-])
 export const chatProviderOptions = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
 ] as const
+export const launchProviderSchema = z.enum(
+  chatProviderOptions.map(({ id }) => id),
+)
+export const launchKindSchema = z.enum([
+  'terminal',
+  ...launchProviderSchema.options,
+])
 export const sidebarActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }),
   z.object({
@@ -29,3 +31,4 @@ export const sidebarStateSchema = z.object({
 export type SidebarAction = z.infer<typeof sidebarActionSchema>
 export type SidebarState = z.infer<typeof sidebarStateSchema>
 export type LaunchProvider = z.infer<typeof launchProviderSchema>
+export type LaunchKind = z.infer<typeof launchKindSchema>

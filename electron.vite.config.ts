@@ -12,6 +12,9 @@ export default defineConfig({
     build: {
       target: 'node24.15',
       externalizeDeps: true,
+      rollupOptions: {
+        output: { format: 'cjs', entryFileNames: '[name].cjs' },
+      },
     },
   },
   renderer: {

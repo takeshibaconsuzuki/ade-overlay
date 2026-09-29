@@ -8,11 +8,10 @@ import {
 } from 'electron'
 import { join } from 'node:path'
 import { CompanionClient } from './companion-client.ts'
-import {
-  companionChannels,
-  type WorktreeSnapshot,
-} from '../shared/companion.ts'
+import { CompanionState } from './companion-state.ts'
+import { companionChannels } from '../shared/ipc.ts'
 import { EditorWindow } from './editor-window.ts'
+import { EditorNavigation } from './editor-navigation.ts'
 import { loadDesktopConfig } from './config.ts'
 
 // Keep Chromium storage at the original location when the installer changes the
@@ -27,30 +26,14 @@ try {
 }
 
 const trustedRenderers = new Set<WebContents>()
-const editorWindow = new EditorWindow()
-let editorRequest = 0
-let chatNavigation:
-  | { id: string; request: number; controller: AbortController }
-  | undefined
-let connectionEpoch = 0
-let editorRevision = -1
 const companion = new CompanionClient(configuration)
-
-function nextEditorRequest(): number {
-  const previous = chatNavigation
-  chatNavigation = undefined
-  if (previous) {
-    previous.controller.abort()
-    companion.chatViewReady(previous.id, 'Navigation was superseded.')
-  }
-  return ++editorRequest
-}
-
-function reconcileEditors(snapshot: WorktreeSnapshot, epoch: number): void {
-  if (epoch !== connectionEpoch || snapshot.revision < editorRevision) return
-  editorRevision = snapshot.revision
-  editorWindow.reconcile(snapshot)
-}
+const editorWindow = new EditorWindow(companion.getStatus().url)
+const companionState = new CompanionState(companion)
+const editorNavigation = new EditorNavigation(
+  companion,
+  editorWindow,
+  companionState,
+)
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   if (
@@ -66,10 +49,10 @@ function createWindow(): void {
     width: 900,
     height: 600,
     webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
@@ -101,132 +84,50 @@ app.whenReady().then(() => {
     app.quit()
     return
   }
-  ipcMain.handle(companionChannels.getStatus, (event) => {
+  ipcMain.handle(companionChannels.getState, (event) => {
     assertTrustedSender(event)
-    return companion.getStatus()
+    return companionState.getCurrent()
   })
   ipcMain.handle(companionChannels.reconnect, (event) => {
     assertTrustedSender(event)
-    nextEditorRequest()
-    editorWindow.cancelPending()
-    return companion.connect()
-  })
-  ipcMain.handle(companionChannels.listWorktrees, async (event) => {
-    assertTrustedSender(event)
-    const epoch = connectionEpoch
-    const snapshot = await companion.listWorktrees()
-    reconcileEditors(snapshot, epoch)
-    return snapshot
+    editorNavigation.cancelSelectionRequest()
+    companion.connect()
   })
   ipcMain.handle(companionChannels.refreshWorktrees, (event) => {
     assertTrustedSender(event)
-    return companion.refreshWorktrees()
+    return companionState.refreshWorktrees()
   })
   ipcMain.handle(companionChannels.createWorktree, (event, input) => {
     assertTrustedSender(event)
-    return companion.createWorktree(input)
+    return companionState.createWorktree(input)
   })
   ipcMain.handle(companionChannels.deleteWorktree, (event, input) => {
     assertTrustedSender(event)
-    return companion.deleteWorktree(input)
+    return companionState.deleteWorktree(input)
   })
   ipcMain.handle(companionChannels.setWorktreeError, (event, input) => {
     assertTrustedSender(event)
-    return companion.setWorktreeError(input)
+    return companionState.setWorktreeError(input)
   })
-  ipcMain.handle(companionChannels.openEditor, async (event, input) => {
+  ipcMain.handle(companionChannels.openEditor, (event, input) => {
     assertTrustedSender(event)
-    const request = nextEditorRequest()
-    try {
-      const editor = await companion.openEditor(input)
-      if (request !== editorRequest) return
-      await editorWindow.open(companion.getStatus().url, editor, input)
-    } catch (error) {
-      if (request !== editorRequest) return
-      try {
-        await companion.setWorktreeError({
-          project: input.project,
-          path: input.path,
-          error: (error instanceof Error ? error.message : String(error)).slice(
-            0,
-            4096,
-          ),
-        })
-      } catch {
-        // Fall back to a local row error only when the companion cannot own it.
-        throw error
-      }
-    }
+    return editorNavigation.openWorktree(input)
   })
-  companion.on('worktreesUpdated', (update) => {
-    reconcileEditors(update.snapshot, connectionEpoch)
+  companionState.on('snapshot', (snapshot) => editorWindow.reconcile(snapshot))
+  companionState.on('changed', (state) => {
     for (const renderer of trustedRenderers) {
-      if (!renderer.isDestroyed())
-        renderer.send(companionChannels.worktreesUpdated, update)
+      if (!renderer.isDestroyed()) renderer.send(companionChannels.state, state)
     }
   })
   companion.on('chatActivate', ({ id, input }) => {
-    const request = nextEditorRequest()
-    const controller = new AbortController()
-    chatNavigation = { id, request, controller }
-    void (async () => {
-      const editor = await companion.openEditor(input, controller.signal)
-      if (request !== editorRequest)
-        throw new Error('Navigation was superseded.')
-      const page = await editorWindow
-        .open(companion.getStatus().url, editor, input)
-        .catch((error: unknown) => {
-          if (request === editorRequest) {
-            // Startup errors belong to the server; page failures originate
-            // here. Persist them without delaying the chat's failure reply.
-            void companion
-              .setWorktreeError({
-                ...input,
-                error: (error instanceof Error
-                  ? error.message
-                  : String(error)
-                ).slice(0, 4096),
-              })
-              .catch(() => {
-                // The source extension still receives the original failure.
-              })
-          }
-          throw error
-        })
-      if (request !== editorRequest) return
-      const activationAfter = await page.chatActivation()
-      if (request !== editorRequest)
-        throw new Error('Navigation was superseded.')
-      companion.chatViewReady(id, undefined, activationAfter)
-    })().catch((error: unknown) => {
-      if (!controller.signal.aborted)
-        companion.chatViewReady(
-          id,
-          error instanceof Error ? error.message : String(error),
-        )
-    })
+    void editorNavigation.openChat(id, input)
   })
   companion.on('chatFinished', (id) => {
-    if (chatNavigation?.id !== id) return
-    const navigation = chatNavigation
-    chatNavigation = undefined
-    navigation.controller.abort()
-    if (navigation.request === editorRequest) {
-      editorRequest++
-      editorWindow.cancelPending()
-    }
+    editorNavigation.finishChat(id)
   })
   companion.on('status', (status) => {
-    connectionEpoch++
-    editorRevision = -1
-    if (status.state !== 'connected') {
-      nextEditorRequest()
-      editorWindow.cancelPending()
-    } else editorWindow.reconnectSettings()
-    for (const renderer of trustedRenderers) {
-      if (!renderer.isDestroyed())
-        renderer.send(companionChannels.status, status)
-    }
+    if (status.state !== 'connected') editorNavigation.cancelSelectionRequest()
+    else editorWindow.reconnectSettings()
   })
   companion.connect()
   createWindow()

@@ -39,7 +39,7 @@ def node_platform() -> tuple[str, str]:
     }.get(machine)
 
     if os_name is None or arch is None:
-        raise SystemExit(f"Unsupported platform: {system}-{machine}")
+        raise ValueError(f"Unsupported platform: {system}-{machine}")
 
     return os_name, arch
 
@@ -85,7 +85,7 @@ def expected_sha256(filename: str) -> str:
             line = raw_line.decode("utf-8").strip()
             if line.endswith(f"  {filename}"):
                 return line.split()[0]
-    raise SystemExit(f"Could not find checksum for {filename}")
+    raise ValueError(f"Could not find checksum for {filename}")
 
 
 def archive_relative_parts(path: str, root_name: str) -> Optional[tuple[str, ...]]:
@@ -191,7 +191,7 @@ def bootstrap(force: bool) -> Path:
         actual = sha256(archive)
         expected = expected_sha256(filename)
         if actual != expected:
-            raise SystemExit(
+            raise ValueError(
                 f"Checksum mismatch for {filename}: expected {expected}, got {actual}"
             )
 
@@ -350,12 +350,11 @@ def main() -> None:
 
     try:
         node_dir = prepare_environment(force=args.force)
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         logger.error("Environment setup failed: %s", error)
         # Preserve failure when the caller evaluates stdout through a shell.
-        os_name, _ = node_platform()
         print(
-            "throw 'Environment setup failed.'" if os_name == "win" else "false"
+            "throw 'Environment setup failed.'" if os.name == "nt" else "false"
         )
         raise SystemExit(1) from error
     print_env(node_dir)

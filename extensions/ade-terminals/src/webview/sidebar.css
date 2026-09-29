@@ -29,7 +29,7 @@ body {
 .chat-provider-button > button:last-child {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  border-left: 1px solid var(--accent-10);
+  border-left: 1px solid var(--app-control-divider);
   padding: 0;
 }
 .chat-list {
@@ -60,13 +60,13 @@ body {
 }
 .chat-row:hover,
 .chat-row:focus-visible {
-  background: var(--accent-a4);
+  background: var(--app-highlight);
 }
 .chat-row[aria-current='true'] {
-  box-shadow: inset 2px 0 var(--accent-9);
+  box-shadow: inset 2px 0 var(--app-selection);
 }
 .chat-row:focus-visible {
-  outline: 2px solid var(--accent-8);
+  outline: 2px solid var(--app-focus);
   outline-offset: -2px;
 }
 .chat-status {
@@ -83,7 +83,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--green-9, #30a46c);
+  background: var(--app-status-idle);
 }
 .chat-content {
   display: grid;

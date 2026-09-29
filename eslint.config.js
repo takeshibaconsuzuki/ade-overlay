@@ -27,22 +27,28 @@ export default tseslint.config(
       'src/main/**/*.ts',
       'src/preload/**/*.ts',
       'src/server/**/*.ts',
+      'src/shared/node/**/*.ts',
       'tests/**/*.ts',
       'tests/**/*.mjs',
       'tests/**/*.cjs',
       'extensions/**/*.ts',
       'scripts/**/*.mjs',
     ],
+    ignores: ['extensions/**/src/webview/**'],
     languageOptions: {
       globals: globals.node,
     },
   },
   {
-    files: ['src/server/settings-sync-client.ts'],
+    files: ['src/editor-browser/**/*.ts'],
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: [
+      'src/renderer/**/*.{ts,tsx}',
+      'src/shared/ui/**/*.{ts,tsx}',
+      'extensions/**/src/webview/**/*.{ts,tsx}',
+    ],
     languageOptions: {
       globals: globals.browser,
     },

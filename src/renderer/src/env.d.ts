@@ -1,4 +1,4 @@
-import type { CompanionAPI } from '../../shared/companion'
+import type { CompanionAPI } from '../../shared/ipc'
 
 declare global {
   interface Window {

@@ -1,46 +1,10 @@
 ﻿import { z } from 'zod'
+import { eventSpec, requestSpec } from './rpc.ts'
 
 export const COMPANION_PROTOCOL_VERSION = 1
 export const DEFAULT_COMPANION_PORT = 4317
 export const DEFAULT_COMPANION_URL = `ws://127.0.0.1:${DEFAULT_COMPANION_PORT}/companion`
 export const MAX_MESSAGE_BYTES = 16 * 1024
-export const MAX_SERVER_MESSAGE_BYTES = 16 * 1024 * 1024
-
-export const companionChannels = {
-  status: 'companion:status',
-  getStatus: 'companion:get-status',
-  reconnect: 'companion:reconnect',
-  listWorktrees: 'companion:worktrees:list',
-  refreshWorktrees: 'companion:worktrees:refresh',
-  createWorktree: 'companion:worktrees:create',
-  deleteWorktree: 'companion:worktrees:delete',
-  setWorktreeError: 'companion:worktrees:set-error',
-  openEditor: 'companion:editor:open',
-  worktreesUpdated: 'companion:worktrees:updated',
-} as const
-
-export interface CompanionStatus {
-  state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
-  url: string
-  error?: string
-}
-
-export interface PingResult {
-  roundTripMs: number
-}
-
-export interface CompanionAPI {
-  getStatus(): Promise<CompanionStatus>
-  reconnect(): Promise<CompanionStatus>
-  onStatus(callback: (status: CompanionStatus) => void): () => void
-  listWorktrees(): Promise<WorktreeSnapshot>
-  refreshWorktrees(): Promise<WorktreeSnapshot>
-  createWorktree(input: CreateWorktreeInput): Promise<WorktreeSnapshot>
-  deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot>
-  setWorktreeError(input: SetWorktreeErrorInput): Promise<WorktreeSnapshot>
-  openEditor(input: OpenEditorInput): Promise<void>
-  onWorktreesUpdated(callback: (update: WorktreeUpdate) => void): () => void
-}
 
 const idSchema = z.string().min(1).max(128)
 const argumentSchema = z
@@ -63,16 +27,17 @@ export const openEditorInputSchema = deleteWorktreeInputSchema
 export const setWorktreeErrorInputSchema = deleteWorktreeInputSchema.extend({
   error: z.string().max(4096).optional(),
 })
-export const editorSessionSchema = z.object({
+const editorSessionSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
-  path: z.string().regex(/^\/editors\/[a-f0-9]{64}\/$/),
   accessToken: z.string().regex(/^[a-f0-9]{64}$/),
 })
+export function editorPath(id: string): string {
+  return `/editors/${id}/`
+}
 const worktreeSchema = z.object({
   project: textSchema,
   path: textSchema,
   branch: textSchema.nullable(),
-  head: z.string(),
   main: z.boolean(),
   locked: z.boolean(),
   prunable: z.boolean(),
@@ -87,73 +52,57 @@ const worktreeSnapshotSchema = z.object({
   projects: z.array(textSchema),
   worktrees: z.array(worktreeSchema),
 })
-const worktreeUpdateSchema = z.object({
-  change: z.enum(['created', 'deleted', 'refreshed', 'editor', 'operation']),
-  snapshot: worktreeSnapshotSchema,
-})
 
-const clientMessageSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('chat:view-ready'),
-    id: idSchema,
-    error: z.string().max(1024).optional(),
-    activationAfter: z.uuid().nullable(),
-  }),
-  z.object({
-    type: z.literal('worktrees:set-error'),
-    id: idSchema,
-    input: setWorktreeErrorInputSchema,
-  }),
-  z.object({
-    type: z.literal('editor:open'),
-    id: idSchema,
-    input: openEditorInputSchema,
-  }),
-  z.object({
-    type: z.enum(['ping', 'worktrees:list', 'worktrees:refresh']),
-    id: idSchema,
-  }),
-  z.object({
-    type: z.literal('worktrees:create'),
-    id: idSchema,
-    input: createWorktreeInputSchema,
-  }),
-  z.object({
-    type: z.literal('worktrees:delete'),
-    id: idSchema,
-    input: deleteWorktreeInputSchema,
-  }),
-])
-const responseMessageSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('editor'),
-    id: idSchema,
-    session: editorSessionSchema,
-  }),
-  z.object({ type: z.literal('pong'), id: idSchema }),
-  z.object({
-    type: z.literal('worktrees'),
-    id: idSchema,
-    snapshot: worktreeSnapshotSchema,
-  }),
-])
-const serverMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('chat:finished'), id: idSchema }),
-  z.object({
-    type: z.literal('chat:activate'),
-    id: idSchema,
-    input: openEditorInputSchema,
-  }),
-  z.object({ type: z.literal('hello'), protocolVersion: z.int() }),
-  ...responseMessageSchema.options,
-  worktreeUpdateSchema.extend({ type: z.literal('worktrees:updated') }),
-  z.object({
-    type: z.literal('error'),
-    id: idSchema.optional(),
-    message: z.string(),
-  }),
-])
-const requestEnvelopeSchema = z.object({ id: idSchema })
+export const companionRequests = {
+  list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
+  refresh: requestSpec(
+    'worktrees:refresh',
+    z.null(),
+    worktreeSnapshotSchema,
+    120_000,
+  ),
+  create: requestSpec(
+    'worktrees:create',
+    createWorktreeInputSchema,
+    worktreeSnapshotSchema,
+    120_000,
+  ),
+  delete: requestSpec(
+    'worktrees:delete',
+    deleteWorktreeInputSchema,
+    worktreeSnapshotSchema,
+    120_000,
+  ),
+  setError: requestSpec(
+    'worktrees:set-error',
+    setWorktreeErrorInputSchema,
+    worktreeSnapshotSchema,
+    120_000,
+  ),
+  openEditor: requestSpec(
+    'editor:open',
+    openEditorInputSchema,
+    editorSessionSchema,
+    180_000,
+  ),
+}
+export const companionEvents = {
+  hello: eventSpec('hello', z.object({ protocolVersion: z.int() })),
+  worktrees: eventSpec('worktrees:updated', worktreeSnapshotSchema),
+  activateChat: eventSpec(
+    'chat:activate',
+    z.object({ id: idSchema, input: openEditorInputSchema }),
+  ),
+  finishChat: eventSpec('chat:finished', idSchema),
+  viewReady: eventSpec(
+    'chat:view-ready',
+    z.object({
+      id: idSchema,
+      error: z.string().max(1024).optional(),
+      activationAfter: z.uuid().nullable(),
+    }),
+  ),
+}
 
 export type CreateWorktreeInput = z.infer<typeof createWorktreeInputSchema>
 export type DeleteWorktreeInput = z.infer<typeof deleteWorktreeInputSchema>
@@ -162,31 +111,6 @@ export type SetWorktreeErrorInput = z.infer<typeof setWorktreeErrorInputSchema>
 export type EditorSession = z.infer<typeof editorSessionSchema>
 export type Worktree = z.infer<typeof worktreeSchema>
 export type WorktreeSnapshot = z.infer<typeof worktreeSnapshotSchema>
-export type WorktreeUpdate = z.infer<typeof worktreeUpdateSchema>
-export type ClientMessage = z.infer<typeof clientMessageSchema>
-export type ResponseMessage = z.infer<typeof responseMessageSchema>
-export type ServerMessage = z.infer<typeof serverMessageSchema>
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
-
-export function parseClientMessage(text: string): ClientMessage | null {
-  return clientMessageSchema.safeParse(parseJson(text)).data ?? null
-}
-
-export function parseServerMessage(text: string): ServerMessage | null {
-  return serverMessageSchema.safeParse(parseJson(text)).data ?? null
-}
-
-export function requestId(text: string): string | undefined {
-  return requestEnvelopeSchema.safeParse(parseJson(text)).data?.id
-}
-
 const companionUrlSchema = z
   .url({ protocol: /^wss?$/ })
   .max(2048)

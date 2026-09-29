@@ -16,19 +16,14 @@ await build({
     ),
     emptyOutDir: true,
     lib: {
-      entry: Object.fromEntries(
-        ['extension', 'launcher', 'chats'].map((name) => [
-          name,
-          fileURLToPath(
-            new URL(
-              `../extensions/ade-terminals/src/${name}.ts`,
-              import.meta.url,
-            ),
-          ),
-        ]),
+      entry: fileURLToPath(
+        new URL(
+          '../extensions/ade-terminals/src/extension.ts',
+          import.meta.url,
+        ),
       ),
       formats: ['cjs'],
-      fileName: (_format, name) => `${name}.js`,
+      fileName: () => 'extension.js',
     },
     rollupOptions: {
       output: { chunkFileNames: '[name]-[hash].js' },

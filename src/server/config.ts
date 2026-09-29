@@ -66,7 +66,7 @@ export function parseServerArgs(args: string[]): {
   configPath?: string
   help?: boolean
   version?: boolean
-  installExtension?: boolean
+  setup?: boolean
 } {
   const { values } = parseArgs({
     args,
@@ -74,7 +74,7 @@ export function parseServerArgs(args: string[]): {
       config: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean' },
-      'install-extension': { type: 'boolean' },
+      setup: { type: 'boolean' },
     },
     allowPositionals: false,
   })
@@ -84,7 +84,7 @@ export function parseServerArgs(args: string[]): {
     configPath: values.config,
     ...(values.help ? { help: true } : {}),
     ...(values.version ? { version: true } : {}),
-    ...(values['install-extension'] ? { installExtension: true } : {}),
+    ...(values.setup ? { setup: true } : {}),
   }
 }
 
@@ -115,39 +115,7 @@ export async function loadServerConfig(
       { cause: error },
     )
   }
-  return {
-    ...config,
-    ...(config.editor
-      ? {
-          editor: {
-            ...config.editor,
-            ...(config.editor.dataDir
-              ? {
-                  dataDir: resolve(
-                    dirname(path),
-                    expandHome(config.editor.dataDir),
-                  ),
-                }
-              : {}),
-            ...(config.editor.localUserDataDir
-              ? {
-                  localUserDataDir: resolve(
-                    dirname(path),
-                    expandHome(config.editor.localUserDataDir),
-                  ),
-                }
-              : {}),
-            ...(config.editor.localExtensionsDir
-              ? {
-                  localExtensionsDir: resolve(
-                    dirname(path),
-                    expandHome(config.editor.localExtensionsDir),
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
+  const normalized: ServerConfig = {
     projects: config.projects.map((project) => ({
       ...project,
       mainWorktreePath: resolve(
@@ -156,4 +124,17 @@ export async function loadServerConfig(
       ),
     })),
   }
+  if (config.editor) {
+    normalized.editor = { ...config.editor }
+    for (const key of [
+      'dataDir',
+      'localUserDataDir',
+      'localExtensionsDir',
+    ] as const) {
+      const value = config.editor[key]
+      if (value !== undefined)
+        normalized.editor[key] = resolve(dirname(path), expandHome(value))
+    }
+  }
+  return normalized
 }

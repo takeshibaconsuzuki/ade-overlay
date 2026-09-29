@@ -9,5 +9,5 @@
     "rewriteRelativeImportExtensions": true,
     "noEmitOnError": true
   },
-  "include": ["src/server/**/*.ts", "src/shared/**/*.ts"]
+  "include": ["src/server/**/*.ts"]
 }

@@ -4,7 +4,6 @@ import type {
   CreateWorktreeInput,
   DeleteWorktreeInput,
   WorktreeSnapshot,
-  WorktreeUpdate,
 } from '../../src/shared/companion.ts'
 
 // Existing editor integration scenarios need completed Git operations. The
@@ -51,8 +50,8 @@ function complete(
       if (row?.operation) return
       finish(row?.error ? new Error(row.error) : undefined, latest)
     }
-    function update(value: WorktreeUpdate) {
-      latest = value.snapshot
+    function update(value: WorktreeSnapshot) {
+      latest = value
       check()
     }
     client.on('worktreesUpdated', update)

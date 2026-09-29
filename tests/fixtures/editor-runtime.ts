@@ -1,26 +1,29 @@
 import { join } from 'node:path'
-import { EditorRuntimeManager } from '../../src/server/vscode-runtime.ts'
+import { EventEmitter } from 'node:events'
+import type { EditorRuntimeProvider } from '../../src/server/editors/vscode-runtime.ts'
 
 // Socket/window tests own isolated runtimes and profiles; never invoke the
 // developer's installed CLI or install into their real extensions directory.
-export class FixtureRuntime extends EditorRuntimeManager {
+export class FixtureRuntime
+  extends EventEmitter<{ progress: [string] }>
+  implements EditorRuntimeProvider
+{
   runtimeRoot: string
   private readonly root: string
   constructor(root: string, runtimeRoot: string) {
-    super(root)
+    super()
     this.root = root
     this.runtimeRoot = runtimeRoot
   }
-  override async localCode() {
+  async localCode() {
     return {
       command: 'fixture',
       commit: 'a'.repeat(40),
-      channel: 'stable' as const,
       userDataDir: join(this.root, 'local user'),
       extensionsDir: join(this.root, 'local extensions'),
     }
   }
-  override async get() {
+  async get() {
     return {
       executable: join(
         this.runtimeRoot,
@@ -29,4 +32,6 @@ export class FixtureRuntime extends EditorRuntimeManager {
       entrypoint: join(this.runtimeRoot, 'out', 'server-main.js'),
     }
   }
+  prepareRuntime(): void {}
+  async close(): Promise<void> {}
 }

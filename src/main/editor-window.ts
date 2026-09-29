@@ -10,6 +10,7 @@ import {
 import { createHash } from 'node:crypto'
 import { EditorSettingsSync } from './settings-sync.ts'
 import { EditorPage } from './editor-page.ts'
+import { editorPath } from '../shared/companion.ts'
 import type {
   EditorSession,
   OpenEditorInput,
@@ -31,24 +32,29 @@ export class EditorWindow {
   private window?: BaseWindow
   private active?: EditorView
   private readonly views = new Map<string, EditorView>()
-  private readonly sessions = new Map<
-    string,
-    { browser: Session; tokens: Map<string, string>; sync: EditorSettingsSync }
-  >()
-  private generation = 0
+  private browser?: {
+    browser: Session
+    tokens: Map<string, string>
+    sync: EditorSettingsSync
+  }
+  private readonly origin: URL
 
+  constructor(companionUrl: string) {
+    this.origin = new URL(companionUrl)
+    this.origin.protocol = this.origin.protocol === 'wss:' ? 'https:' : 'http:'
+  }
+
+  // Select the view before waiting for page readiness. Another open can select
+  // a different view during that wait; completing this load never reselects it.
   async open(
-    companionUrl: string,
     editor: EditorSession,
     worktree: OpenEditorInput,
   ): Promise<EditorPage> {
-    const generation = ++this.generation
-    const origin = new URL(companionUrl)
-    origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
-    const url = new URL(editor.path, origin)
-    const key = createHash('sha256').update(url.href).digest('hex')
-    const browserSession = this.browserSession(url)
-    browserSession.tokens.set(editor.path, editor.accessToken)
+    const path = editorPath(editor.id)
+    const url = new URL(path, this.origin)
+    const key = editor.id
+    const browserSession = this.browserSession()
+    browserSession.tokens.set(path, editor.accessToken)
     let entry = this.views.get(key)
     if (
       entry &&
@@ -59,7 +65,7 @@ export class EditorWindow {
       this.discard(key, entry, false)
       entry = undefined
       // discard removes the previous view's request credentials.
-      browserSession.tokens.set(editor.path, editor.accessToken)
+      browserSession.tokens.set(path, editor.accessToken)
     }
     if (!entry) {
       const view = new WebContentsView({
@@ -74,10 +80,7 @@ export class EditorWindow {
       view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       view.webContents.on('will-navigate', (event, target) => {
         const next = new URL(target)
-        if (
-          next.origin !== url.origin ||
-          !next.pathname.startsWith(editor.path)
-        )
+        if (next.origin !== url.origin || !next.pathname.startsWith(path))
           event.preventDefault()
       })
       entry = {
@@ -85,14 +88,12 @@ export class EditorWindow {
         token: editor.accessToken,
         page: new EditorPage(view.webContents, url.href),
         worktree,
-        forget: () => browserSession.tokens.delete(editor.path),
+        forget: () => browserSession.tokens.delete(path),
       }
       const created = entry
       view.webContents.once('destroyed', () => this.discard(key, created))
       this.views.set(key, entry)
     }
-    if (generation !== this.generation)
-      throw new Error('Editor navigation was superseded.')
     const window = this.ensureWindow()
     if (this.active && this.active !== entry) {
       window.contentView.removeChildView(this.active.view)
@@ -130,10 +131,6 @@ export class EditorWindow {
     entry.page.dispose()
   }
 
-  cancelPending(): void {
-    this.generation++
-  }
-
   reconcile(snapshot: WorktreeSnapshot): void {
     for (const [key, entry] of this.views) {
       if (
@@ -148,13 +145,13 @@ export class EditorWindow {
     }
   }
 
-  private browserSession(url: URL) {
+  private browserSession() {
+    if (this.browser) return this.browser
+    const url = this.origin
     const key = createHash('sha256').update(url.origin).digest('hex')
-    let entry = this.sessions.get(key)
-    if (entry) return entry
     const browser = session.fromPartition(`persist:ade-editor-${key}`)
     const tokens = new Map<string, string>()
-    entry = { browser, tokens, sync: new EditorSettingsSync(url.origin) }
+    const entry = { browser, tokens, sync: new EditorSettingsSync(url.origin) }
     browser.webRequest.onBeforeSendHeaders((details, callback) => {
       const request = new URL(details.url)
       const protocol = request.protocol.replace(/^ws/, 'http')
@@ -214,7 +211,7 @@ export class EditorWindow {
           )
       },
     )
-    this.sessions.set(key, entry)
+    this.browser = entry
     return entry
   }
 
@@ -247,8 +244,7 @@ export class EditorWindow {
   }
 
   close(): void {
-    this.generation++
-    for (const { sync } of this.sessions.values()) sync.close()
+    this.browser?.sync.close()
     for (const [key, entry] of this.views) {
       entry.view.webContents.session.flushStorageData()
       this.discard(key, entry, false)
@@ -256,6 +252,6 @@ export class EditorWindow {
   }
 
   reconnectSettings(): void {
-    for (const { sync } of this.sessions.values()) void sync.sync()
+    void this.browser?.sync.sync()
   }
 }

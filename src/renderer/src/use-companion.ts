@@ -1,90 +1,59 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  CompanionStatus,
-  WorktreeSnapshot,
-  OpenEditorInput,
-} from '../../shared/companion'
+import { useEffect, useRef, useState } from 'react'
+import type { OpenEditorInput } from '../../shared/companion'
+import type { CompanionState } from '../../shared/ipc'
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 export function useCompanion() {
-  const [status, setStatus] = useState<CompanionStatus | null>(null)
-  const [snapshot, setSnapshot] = useState<WorktreeSnapshot | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [state, setState] = useState<CompanionState | null>(null)
   const [error, setError] = useState('')
   const [opening, setOpening] = useState<string | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const openRequest = useRef(0)
-  const epoch = useRef(0)
-  const apply = useCallback((next: WorktreeSnapshot, generation: number) => {
-    if (generation !== epoch.current) return
-    setSnapshot((current) =>
-      !current || next.revision >= current.revision ? next : current,
-    )
-  }, [])
-
+  const clearRequests = useRef(new Set<symbol>())
   useEffect(() => {
-    const connectionEpoch = epoch
-    let receivedStatus = false
+    const pendingOpens = openRequest
+    const pendingClears = clearRequests.current
+    let receivedState = false
     let active = true
-    let connected = false
-    const acceptStatus = (next: CompanionStatus): void => {
+    const acceptState = (next: CompanionState): void => {
       if (!active) return
-      setStatus(next)
-      const generation = ++epoch.current
-      connected = next.state === 'connected'
-      setSnapshot(null)
+      setState(next)
       setError('')
-      setRowErrors({})
-      setLoading(connected)
-      openRequest.current++
-      setOpening(null)
-      if (connected)
-        void window.companion
-          .listWorktrees()
-          .then((value) => apply(value, generation))
-          .catch((cause: unknown) => {
-            if (generation === epoch.current) setError(errorMessage(cause))
-          })
-          .finally(() => {
-            if (generation === epoch.current) setLoading(false)
-          })
+      if (next.status.state !== 'connected') {
+        pendingClears.clear()
+        setRowErrors({})
+        pendingOpens.current++
+        setOpening(null)
+      }
     }
-    const offUpdates = window.companion.onWorktreesUpdated((update) => {
-      if (active && connected) apply(update.snapshot, epoch.current)
-    })
-    const offStatus = window.companion.onStatus((next) => {
-      receivedStatus = true
-      acceptStatus(next)
+    const unsubscribe = window.companion.onState((next) => {
+      receivedState = true
+      acceptState(next)
     })
     void window.companion
-      .getStatus()
+      .getState()
       .then((next) => {
-        if (!receivedStatus) acceptStatus(next)
+        if (!receivedState) acceptState(next)
       })
       .catch((cause: unknown) => {
-        if (active) setError(errorMessage(cause))
+        if (active && !receivedState) setError(errorMessage(cause))
       })
     return () => {
       active = false
-      connectionEpoch.current++
-      offStatus()
-      offUpdates()
+      pendingOpens.current++
+      pendingClears.clear()
+      unsubscribe()
     }
-  }, [apply])
+  }, [])
 
   async function refresh(): Promise<void> {
-    const generation = epoch.current
-    setLoading(true)
-    setError('')
     try {
-      apply(await window.companion.refreshWorktrees(), generation)
+      await window.companion.refreshWorktrees()
     } catch (cause) {
-      if (generation === epoch.current) setError(errorMessage(cause))
-    } finally {
-      if (generation === epoch.current) setLoading(false)
+      setError(errorMessage(cause))
     }
   }
 
@@ -97,13 +66,12 @@ export function useCompanion() {
   }
   async function openEditor(input: OpenEditorInput): Promise<void> {
     const request = ++openRequest.current
-    const generation = epoch.current
     const key = JSON.stringify([input.project, input.path])
     setOpening(input.path)
     try {
       await window.companion.openEditor(input)
     } catch (cause) {
-      if (generation === epoch.current && request === openRequest.current)
+      if (request === openRequest.current)
         setRowErrors((current) => ({
           ...current,
           [key]: errorMessage(cause),
@@ -113,28 +81,28 @@ export function useCompanion() {
     }
   }
   async function clearError(input: OpenEditorInput): Promise<void> {
-    const generation = epoch.current
+    const request = Symbol()
+    clearRequests.current.add(request)
     const key = JSON.stringify([input.project, input.path])
     try {
-      apply(
-        await window.companion.setWorktreeError({
-          project: input.project,
-          path: input.path,
-        }),
-        generation,
-      )
-      if (generation === epoch.current)
+      await window.companion.setWorktreeError({
+        project: input.project,
+        path: input.path,
+      })
+      if (clearRequests.current.has(request))
         setRowErrors((current) => ({ ...current, [key]: '' }))
     } catch (cause) {
-      if (generation === epoch.current)
+      if (clearRequests.current.has(request))
         setRowErrors((current) => ({ ...current, [key]: errorMessage(cause) }))
+    } finally {
+      clearRequests.current.delete(request)
     }
   }
   return {
-    status,
-    snapshot,
-    loading,
-    error,
+    status: state?.status ?? null,
+    snapshot: state?.snapshot ?? null,
+    loading: state?.loading ?? false,
+    error: error || state?.error,
     refresh,
     reconnect,
     opening,

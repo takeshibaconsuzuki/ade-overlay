@@ -1,0 +1,106 @@
+# Worktrees
+
+- The companion caches Git membership and combines it with operation state, retained errors, and editor status. Synthetic creation rows describe pending or failed work even when Git has no worktree there.
+- Mutations and refreshes run in one ordered queue across clients. Listing reads the cache without running Git; external Git changes appear after a refresh.
+- Presentation prioritizes an operation or opening progress, then a retained error, then editor status. Editor status events publish state without rescanning Git or reconciling membership.
+- Sources: [worktree store](../src/server/worktrees/worktree-store.ts), [mutation dialogs](../src/renderer/src/components/worktree-actions.tsx).
+
+## Refresh and apply membership
+
+```mermaid
+sequenceDiagram
+    participant Caller as Startup, refresh, or creation
+    participant Store as Worktree store
+    participant Git
+    participant Editors as Editor processes
+    participant Clients as Connected desktops
+    Caller->>Store: Request membership discovery
+    Note over Store: Refresh and creation run in the worktree<br/>queue
+    alt Startup or explicit worktrees:refresh
+        Store->>Git: Scan all configured projects
+        Git-->>Store: Complete membership
+    else Creation finishes or partially fails
+        Store->>Git: Scan the affected project
+        Git-->>Store: Project membership
+        Store->>Store: Merge with other projects' cached membership
+    end
+    Store->>Editors: Retain only editors in the complete accepted<br/>list
+    Editors-->>Store: Removed editors stopped, pending starts<br/>cancelled
+    Store->>Store: Replace membership and project displayed<br/>rows
+    Store-->>Clients: Publish updated snapshot
+    Store-->>Caller: Membership application complete
+```
+
+- Every accepted membership change uses the same reconciliation order, including deletion's known removal. Synthetic rows are excluded from the editor retention list.
+- Desktop main [accepts newer snapshots](desktop.md#accept-shared-state) and reconciles retained pages before updating the picker.
+
+## Schedule a mutation
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Dialog
+    participant Store as Companion worktree store
+    participant Queue as Ordered worktree queue
+    participant Clients as All connected desktops
+    User->>Dialog: Submit creation or confirm deletion
+    Dialog->>Store: worktrees:create or worktrees:delete
+    Store->>Store: Validate target and reserve its operation<br/>row
+    Store-->>Clients: Publish creating or deleting state
+    Store->>Queue: Schedule mutation in the background
+    Store-->>Dialog: Accepted snapshot
+    Dialog-->>User: Close dialog, row shows ongoing operation
+    Queue->>Queue: Wait for earlier work, then run the creation<br/>or deletion workflow
+    Queue-->>Clients: Workflow publishes its final shared state
+    Note over Store,Clients: The result survives the initiating desktop<br/>disconnecting
+```
+
+- Acceptance is separate from completion. Admission failures leave the dialog open; later execution failures belong to the shared row.
+- Creation runs [create a worktree](#create-a-worktree); deletion runs [delete a worktree](#delete-a-worktree). Neither operation automatically opens an editor.
+
+## Create a worktree
+
+```mermaid
+flowchart TD
+    Start([Queued creation begins]) --> Add[Add the worktree, creating a new branch if requested]
+    Add --> Run[If Git succeeds, run any configured project bootstrap and wait]
+    Run --> Result{Creation completed?}
+    Result -->|Yes| Reconcile[Refresh project membership and reconcile editors]
+    Reconcile --> Success([Publish the created worktree and clear its operation])
+    Result -->|No| Inspect[Refresh membership to preserve partially created work]
+    Inspect --> Failure([Retain a row error without rollback])
+    click Reconcile "worktrees.md#refresh-and-apply-membership"
+    click Inspect "worktrees.md#refresh-and-apply-membership"
+```
+
+- Paths are on the companion machine; relative paths start at the selected project. Creation resolves physical path identity before reserving the row.
+- A failing Git hook or project bootstrap can leave a real worktree. The row remains usable after the operation ends; a failure with no worktree remains as a synthetic error row.
+
+## Delete a worktree
+
+```mermaid
+flowchart TD
+    Start([Queued deletion begins]) --> Stop[Cancel startup or stop the worktree's editor]
+    Stop --> Remove[Ask Git to remove the worktree without force]
+    Remove --> Result{Removal succeeded?}
+    Result -->|Yes| Membership[Apply membership without this worktree]
+    Membership --> Success([Remove operation row and publish, branch remains])
+    Result -->|No| Failure([Keep worktree and row error, editor remains stopped])
+    click Stop "editors.md#editor-process-lifetime"
+    click Membership "worktrees.md#refresh-and-apply-membership"
+```
+
+- Main and locked worktrees cannot be scheduled for deletion. Git can refuse removal, including when local changes make it unsafe.
+- After a failed removal, the user can address the error and reopen the editor. Deletion does not delete the branch.
+
+## Clear a retained error
+
+```mermaid
+flowchart TD
+    Start([User clears a row error]) --> Request[Send worktrees:set-error without an error]
+    Request --> Clear[Remove error state unless an operation owns the row]
+    Clear --> Publish[Publish remaining Git membership and operation state]
+    Publish --> Done([Real worktrees remain, cleared synthetic rows disappear])
+```
+
+- Clearing an error does not rerun the failed operation. Successful editor opening also leaves retained errors in place until cleared.

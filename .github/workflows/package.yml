@@ -27,12 +27,23 @@ jobs:
           cache: npm
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools
+        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools xvfb libgbm1 libasound2
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run package
-      - run: npm test
+      - name: Test on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm test
+      - name: Test on desktop runners
+        if: runner.os != 'Linux'
+        run: npm test
+      - name: Check approved VS Code runtime on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:runtime
+      - name: Check approved VS Code runtime on desktop runners
+        if: runner.os != 'Linux'
+        run: npm run test:runtime
       - run: npm run test:package
       - uses: actions/upload-artifact@v4
         with:

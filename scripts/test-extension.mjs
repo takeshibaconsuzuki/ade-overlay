@@ -1,13 +1,24 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import {
+  copyFile,
+  cp,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { builtinModules } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runTests } from '@vscode/test-electron'
-import { ChatService } from '../src/server/chat-service.ts'
-import { installProviderHooks } from '../src/server/chat-hooks.ts'
-import { codexProvider } from '../src/server/chat-providers.ts'
+import { build } from 'vite'
+import { ChatService } from '../src/server/chats/chat-service.ts'
+import { installProviderHooks } from '../src/server/chats/chat-hooks.ts'
+import { codexProvider } from '../src/server/chats/chat-providers.ts'
+import { vscodeRelease } from '../src/server/editors/vscode-release.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'ade-extension-'))
 const chats = new ChatService()
@@ -18,6 +29,69 @@ const control = createServer((request, response) => {
   response.end(JSON.stringify(chats.store.list()))
 })
 try {
+  const extension = join(root, 'extension')
+  const testModules = join(extension, 'out')
+  await mkdir(testModules, { recursive: true })
+  for (const asset of [
+    'package.json',
+    'media',
+    'out/sidebar.js',
+    'out/sidebar.css',
+  ]) {
+    await cp(
+      new URL(`../extensions/ade-terminals/${asset}`, import.meta.url),
+      join(extension, asset),
+      { recursive: true },
+    )
+  }
+  const sidebarScript = join(testModules, 'sidebar.js')
+  const browserBundle = await readFile(sidebarScript)
+  // Share module instances with the activation under test: the chat module
+  // consumes its private bootstrap credential once when it is first loaded.
+  await build({
+    configFile: false,
+    resolve: { conditions: ['node'], mainFields: ['module', 'main'] },
+    build: {
+      target: 'node22',
+      outDir: testModules,
+      emptyOutDir: false,
+      lib: {
+        entry: Object.fromEntries(
+          [
+            'extension',
+            'launcher',
+            'chats',
+            'terminal-identities',
+            'sidebar',
+          ].map((name) => [
+            name === 'sidebar' ? 'sidebar-host' : name,
+            fileURLToPath(
+              new URL(
+                `../extensions/ade-terminals/src/${name}.ts`,
+                import.meta.url,
+              ),
+            ),
+          ]),
+        ),
+        formats: ['cjs'],
+        fileName: (_format, name) => `${name}.js`,
+      },
+      rollupOptions: {
+        output: { chunkFileNames: '[name]-[hash].js' },
+        external: [
+          'vscode',
+          /^node:/,
+          ...builtinModules,
+          'bufferutil',
+          'utf-8-validate',
+        ],
+      },
+    },
+  })
+  assert.ok(
+    (await readFile(sidebarScript)).equals(browserBundle),
+    'The extension-host test build must preserve the sidebar browser bundle',
+  )
   const workspace = join(root, 'workspace')
   await mkdir(workspace)
   await chats.listen()
@@ -32,7 +106,7 @@ try {
   await installProviderHooks(
     codexProvider,
     hookFile,
-    fileURLToPath(new URL('../src/server/chat-hook.ts', import.meta.url)),
+    fileURLToPath(new URL('../src/server/chats/chat-hook.ts', import.meta.url)),
   )
   const quote = (text) =>
     process.platform === 'win32'
@@ -72,17 +146,17 @@ try {
       'telemetry.telemetryLevel': 'off',
     }),
   )
-  const chatEnvironment = chats.environment('extension-test', {
-    project: workspace,
-    path: workspace,
-  })
+  const { activityEnvironment: chatEnvironment, controlToken } =
+    chats.registerEditor('extension-test', {
+      project: workspace,
+      path: workspace,
+    })
   await runTests({
+    version: vscodeRelease.version,
     vscodeExecutablePath: process.env.ADE_TEST_VSCODE_EXECUTABLE,
-    extensionDevelopmentPath: fileURLToPath(
-      new URL('../extensions/ade-terminals/', import.meta.url),
-    ),
+    extensionDevelopmentPath: extension,
     extensionTestsPath: fileURLToPath(
-      new URL('../tests/fixtures/ade-terminals.cjs', import.meta.url),
+      new URL('../tests/runtime/ade-terminals.cjs', import.meta.url),
     ),
     launchArgs: [
       workspace,
@@ -90,7 +164,7 @@ try {
       `--extensions-dir=${join(root, 'extensions')}`,
       '--disable-extensions',
       '--disable-gpu',
-      `--extensionEnvironment=${JSON.stringify({ ADE_CHAT_EXTENSION_TOKEN: chats.extensionToken('extension-test') })}`,
+      `--extensionEnvironment=${JSON.stringify({ ADE_CHAT_EXTENSION_TOKEN: controlToken })}`,
     ],
     extensionTestsEnv: {
       ELECTRON_RUN_AS_NODE: undefined,

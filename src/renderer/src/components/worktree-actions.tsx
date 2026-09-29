@@ -1,7 +1,46 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Worktree, WorktreeSnapshot } from '../../../shared/companion'
 import { errorMessage } from '../use-companion'
-import { Button, Field, Modal, Notice, SelectField } from './ui'
+import {
+  Button,
+  Field,
+  Modal,
+  Notice,
+  SelectField,
+} from '../../../shared/ui/components'
+
+function useSubmission() {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const generation = useRef(0)
+  useEffect(
+    () => () => {
+      generation.current++
+    },
+    [],
+  )
+  function changeOpen(next: boolean): void {
+    generation.current++
+    setBusy(false)
+    setError('')
+    setOpen(next)
+  }
+  async function submit(operation: () => Promise<void>): Promise<void> {
+    const current = ++generation.current
+    setBusy(true)
+    setError('')
+    try {
+      await operation()
+      if (current === generation.current) changeOpen(false)
+    } catch (cause) {
+      if (current === generation.current) setError(errorMessage(cause))
+    } finally {
+      if (current === generation.current) setBusy(false)
+    }
+  }
+  return { open, busy, error, changeOpen, submit }
+}
 
 export function CreateWorktree({
   snapshot,
@@ -10,13 +49,17 @@ export function CreateWorktree({
   snapshot: WorktreeSnapshot | null
   connected: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const {
+    open,
+    busy,
+    error,
+    changeOpen: changeSubmission,
+    submit: submitOperation,
+  } = useSubmission()
   const [project, setProject] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
   const [branch, setBranch] = useState('')
   const [path, setPath] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
 
   function selectProject(value: string): void {
     setProject(value)
@@ -30,27 +73,19 @@ export function CreateWorktree({
       selectProject(snapshot?.projects[0] ?? '')
       setBranch('')
       setPath('')
-      setError('')
     }
-    setOpen(next)
+    changeSubmission(next)
   }
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault()
-    setBusy(true)
-    setError('')
-    try {
-      await window.companion.createWorktree({
+    await submitOperation(() =>
+      window.companion.createWorktree({
         project,
         baseBranch: baseBranch.trim(),
         branch: branch.trim(),
         path: path.trim(),
-      })
-      setOpen(false)
-    } catch (cause) {
-      setError(errorMessage(cause))
-    } finally {
-      setBusy(false)
-    }
+      }),
+    )
   }
   return (
     <Modal
@@ -104,7 +139,7 @@ export function CreateWorktree({
           <Notice>Reconnect to the server to create a worktree.</Notice>
         )}
         <div className="dialog-actions">
-          <Button tone="secondary" onClick={() => setOpen(false)}>
+          <Button tone="secondary" onClick={() => changeOpen(false)}>
             Cancel
           </Button>
           <Button
@@ -129,24 +164,15 @@ export function DeleteWorktree({
   worktree: Worktree
   connected: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const { open, busy, error, changeOpen, submit } = useSubmission()
 
   async function remove(): Promise<void> {
-    setBusy(true)
-    setError('')
-    try {
-      await window.companion.deleteWorktree({
+    await submit(() =>
+      window.companion.deleteWorktree({
         project: worktree.project,
         path: worktree.path,
-      })
-      setOpen(false)
-    } catch (cause) {
-      setError(errorMessage(cause))
-    } finally {
-      setBusy(false)
-    }
+      }),
+    )
   }
 
   const reason = worktree.main
@@ -160,10 +186,7 @@ export function DeleteWorktree({
       title="Delete worktree?"
       description="Remove this working directory and keep its branch."
       open={open}
-      onOpenChange={(next) => {
-        setError('')
-        setOpen(next)
-      }}
+      onOpenChange={changeOpen}
       trigger={
         <Button
           tone="danger"
@@ -184,7 +207,7 @@ export function DeleteWorktree({
       <p className="delete-path">{worktree.path}</p>
       {error && <Notice>{error}</Notice>}
       <div className="dialog-actions">
-        <Button tone="secondary" onClick={() => setOpen(false)}>
+        <Button tone="secondary" onClick={() => changeOpen(false)}>
           Cancel
         </Button>
         <Button

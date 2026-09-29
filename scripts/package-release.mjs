@@ -84,7 +84,7 @@ const desktop = await stage('desktop', {
   type: 'module',
   main: app.main,
   dependencies: Object.fromEntries(
-    ['ws', 'zod'].map((name) => [name, app.dependencies[name]]),
+    ['socket.io-client', 'zod'].map((name) => [name, app.dependencies[name]]),
   ),
 })
 for (const directory of ['main', 'preload', 'renderer'])
@@ -100,7 +100,7 @@ const serverManifest = JSON.parse(
   await readFile(join(root, 'out/server/package.json'), 'utf8'),
 )
 const companion = await stage('companion', serverManifest)
-for (const directory of ['server', 'shared'])
+for (const directory of ['server', 'shared', 'assets'])
   await cp(join(root, 'out/server', directory), join(companion, directory), {
     recursive: true,
   })

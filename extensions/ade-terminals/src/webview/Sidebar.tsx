@@ -5,7 +5,7 @@ import {
   SkeletonLine,
   Spinner,
   UIProvider,
-} from '../../../../src/renderer/src/components/ui'
+} from '../../../../src/shared/ui/components'
 import {
   chatProviderOptions,
   launchProviderSchema,

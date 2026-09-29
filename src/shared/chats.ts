@@ -1,12 +1,13 @@
 import { z } from 'zod'
+import { eventSpec, requestSpec } from './rpc.ts'
 
 export const chatIdSchema = z.string().min(1).max(128)
 export const processIdentitySchema = z.object({
   pid: z.int().positive(),
   startedAt: z.string().min(1).max(128),
 })
-export const chatActivitySchema = z.enum(['idle', 'working'])
-export const chatTextSchema = z.string().max(4000)
+const chatActivitySchema = z.enum(['idle', 'working'])
+const chatTextSchema = z.string().max(4000)
 export const chatReportSchema = z.object({
   provider: chatIdSchema,
   sessionId: chatIdSchema,
@@ -20,50 +21,32 @@ export const chatReportSchema = z.object({
 })
 export const chatSchema = z.object({
   id: chatIdSchema,
-  provider: chatIdSchema,
-  sessionId: chatIdSchema,
   terminalId: chatIdSchema,
-  project: z.string(),
   path: z.string(),
   title: z.string().max(512).optional(),
   message: chatTextSchema.optional(),
-  lastTurnAt: z.number().finite().nonnegative().optional(),
   activity: chatActivitySchema,
 })
-export const chatSnapshotSchema = z.object({
-  revision: z.int().nonnegative(),
+const chatSnapshotSchema = z.object({
   chats: z.array(chatSchema),
 })
-export const extensionChatMessageSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('activate'),
-    id: chatIdSchema,
-    chatId: chatIdSchema,
-  }),
-  z.object({
-    type: z.literal('focused'),
-    id: chatIdSchema,
-    error: z.string().max(1024).optional(),
-  }),
-])
-export const serverChatMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('snapshot'), snapshot: chatSnapshotSchema }),
-  z.object({
-    type: z.literal('focus'),
-    id: chatIdSchema,
-    terminalId: chatIdSchema,
-  }),
-  z.object({ type: z.literal('cancel-focus'), id: chatIdSchema }),
-  z.object({
-    type: z.literal('result'),
-    id: chatIdSchema,
-    error: z.string().max(1024).optional(),
-  }),
-])
+export const chatRequests = {
+  activate: requestSpec('activate', chatIdSchema, z.null(), 35_000),
+}
+export const chatEvents = {
+  snapshot: eventSpec('snapshot', chatSnapshotSchema),
+  focus: eventSpec(
+    'focus',
+    z.object({ id: chatIdSchema, terminalId: chatIdSchema }),
+  ),
+  cancelFocus: eventSpec('cancel-focus', chatIdSchema),
+  focused: eventSpec(
+    'focused',
+    z.object({ id: chatIdSchema, error: z.string().max(1024).optional() }),
+  ),
+}
 export type ProcessIdentity = z.infer<typeof processIdentitySchema>
 export type ChatActivity = z.infer<typeof chatActivitySchema>
 export type ChatReport = z.infer<typeof chatReportSchema>
 export type Chat = z.infer<typeof chatSchema>
 export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>
-export type ExtensionChatMessage = z.infer<typeof extensionChatMessageSchema>
-export type ServerChatMessage = z.infer<typeof serverChatMessageSchema>

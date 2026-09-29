@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { extractFile, listPackage } from '@electron/asar'
 import spawn from 'cross-spawn'
-import { WebSocket } from 'ws'
+import { io } from 'socket.io-client'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const app = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
@@ -70,7 +70,7 @@ try {
   )
   const options = { cwd: home, env }
   assert.equal(run(launcher, ['--version'], options).trim(), app.version)
-  assert.match(run(launcher, ['--help'], options), /--install-extension/)
+  assert.match(run(launcher, ['--help'], options), /--setup/)
   const node = join(
     companion,
     'runtime',
@@ -83,7 +83,14 @@ try {
   await readFile(join(companion, 'runtime', 'LICENSE'))
 
   const config = join(home, 'server config.yaml')
-  await writeFile(config, 'projects: []\n')
+  const extensions = join(home, 'custom extensions')
+  await writeFile(
+    config,
+    JSON.stringify({
+      projects: [],
+      editor: { localExtensionsDir: extensions },
+    }),
+  )
   // Exercise extension setup with a local CLI fixture, including paths with spaces.
   const bin = join(home, 'Code bin')
   await mkdir(bin)
@@ -91,7 +98,7 @@ try {
   const record = join(home, 'installed.json')
   await writeFile(
     fakeCode,
-    `const fs = require('node:fs'); const args = process.argv.slice(2); if (args.includes('--version')) console.log('1.138.0\\n${'a'.repeat(40)}\\nx64'); else if (args.includes('--help')) console.log('--cli-data-dir --connection-token-file'); else { fs.accessSync(args[args.indexOf('--install-extension') + 1]); fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(args)); }`,
+    `const fs = require('node:fs'); const args = process.argv.slice(2); if (args.includes('--version')) console.log('1.138.0\\n${'a'.repeat(40)}\\nx64'); else if (args.includes('--help')) console.log('--cli-data-dir --connection-token-file --commit-id'); else { fs.accessSync(args[args.indexOf('--install-extension') + 1]); fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(args)); }`,
   )
   const command = join(bin, platform === 'win32' ? 'code.cmd' : 'code')
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'"
@@ -102,7 +109,7 @@ try {
       : `#!/bin/sh\nexec ${quote(node)} ${quote(fakeCode)} "$@"\n`,
   )
   await chmod(command, 0o755)
-  run(launcher, ['--install-extension', '--config', config], {
+  run(launcher, ['--setup', '--config', config], {
     ...options,
     env: { ...env, PATH: bin + (platform === 'win32' ? ';' : ':') + env.PATH },
   })
@@ -114,7 +121,43 @@ try {
     await realpath(installed[installIndex + 1]),
     await realpath(join(companion, 'ade-terminals.vsix')),
   )
-  assert.ok(installed.includes(env.VSCODE_EXTENSIONS))
+  assert.ok(installed.includes(extensions))
+
+  const hookFile = join(env.CODEX_HOME, 'hooks.json')
+  const hooks = await readFile(hookFile, 'utf8')
+  assert.match(hooks, /ADE chat activity/)
+  const handlers = Object.values(JSON.parse(hooks).hooks).flatMap((groups) =>
+    groups.flatMap((group) => group.hooks),
+  )
+  const reporter = await realpath(
+    join(companion, 'server', 'chats', 'chat-hook.js'),
+  )
+  for (const handler of handlers) {
+    const command = handler.command
+    assert.ok(command.includes(reporter))
+    assert.ok(command.includes('runtime'))
+  }
+  run(node, [reporter, 'codex'], options)
+  run(launcher, ['--setup', '--config', config], {
+    ...options,
+    env: { ...env, PATH: bin + (platform === 'win32' ? ';' : ':') + env.PATH },
+  })
+  assert.equal(await readFile(hookFile, 'utf8'), hooks, 'setup is idempotent')
+  await writeFile(hookFile, '{malformed hooks')
+  const invalidSetup = spawn.sync(launcher, ['--setup', '--config', config], {
+    ...options,
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { ...env, PATH: bin + (platform === 'win32' ? ';' : ':') + env.PATH },
+  })
+  assert.ifError(invalidSetup.error)
+  assert.notEqual(invalidSetup.status, 0, 'setup reports malformed hooks')
+  assert.equal(await readFile(hookFile, 'utf8'), '{malformed hooks')
+  const bridge = await readFile(
+    join(companion, 'assets', 'settings-sync.js'),
+    'utf8',
+  )
+  assert.match(bridge, /adeSettingsSync/)
 
   const reservation = createServer()
   reservation.listen(0, '127.0.0.1')
@@ -146,22 +189,31 @@ try {
     assert.ifError(failure)
     assert.equal(server.exitCode, null, logs)
     assert.ok(Date.now() < deadline, logs)
-    const candidate = new WebSocket(`ws://127.0.0.1:${port}/companion`)
+    const candidate = io(`http://127.0.0.1:${port}`, {
+      path: '/companion',
+      addTrailingSlash: false,
+      transports: ['websocket'],
+      reconnection: false,
+    })
     try {
-      const [message] = await once(candidate, 'message', {
+      const [message] = await once(candidate, 'hello', {
         signal: AbortSignal.timeout(2000),
       })
-      assert.equal(JSON.parse(message.toString()).type, 'hello')
+      assert.equal(message.protocolVersion, 1)
       socket = candidate
     } catch {
-      candidate.on('error', () => {})
-      candidate.terminate()
+      candidate.disconnect()
       await delay(100)
     }
   }
-  const reply = once(socket, 'message', { signal: AbortSignal.timeout(5000) })
-  socket.send(JSON.stringify({ type: 'worktrees:list', id: 'package-smoke' }))
-  assert.equal(JSON.parse((await reply)[0].toString()).type, 'worktrees')
+  const reply = await socket.timeout(5000).emitWithAck('worktrees:list', null)
+  assert.equal(reply.ok, true)
+  assert.ok(Array.isArray(reply.value.worktrees))
+  assert.equal(
+    await readFile(hookFile, 'utf8'),
+    '{malformed hooks',
+    'startup leaves hooks untouched',
+  )
 
   const resources =
     platform === 'darwin'
@@ -180,8 +232,9 @@ try {
   const files = listPackage(asar).map((name) => name.replaceAll('\\', '/'))
   for (const path of [
     '/out/main/index.js',
-    '/out/preload/index.mjs',
+    '/out/preload/index.cjs',
     '/out/renderer/index.html',
+    '/node_modules/socket.io-client/package.json',
     '/node_modules/ws/package.json',
     '/node_modules/zod/package.json',
   ])
@@ -198,10 +251,10 @@ try {
     app.version,
   )
   console.log(
-    'Package smoke checks passed: extracted companion, bundled Node, CLI, extension setup, WebSocket connection, desktop assets and dependencies.',
+    'Package smoke checks passed: extracted companion, bundled Node, CLI, explicit extension/hook setup, browser bridge, Socket.IO commands, desktop assets and dependencies.',
   )
 } finally {
-  socket?.terminate()
+  socket?.disconnect()
   if (server && server.exitCode === null) {
     const stopped = once(server, 'exit')
     server.kill()

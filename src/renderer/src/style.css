@@ -32,14 +32,6 @@ body {
   flex: 1;
   min-height: 200px;
 }
-.worktree-scrollbox [data-radix-scroll-area-viewport] {
-  overscroll-behavior: contain;
-}
-.worktree-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 .worktree-list li {
   position: relative;
   display: grid;
@@ -49,13 +41,6 @@ body {
 }
 .worktree-list li:first-child {
   border-top: 1px solid var(--app-border);
-}
-.worktree-list[data-highlight-visible='true'] li[data-highlighted] {
-  background: var(--accent-a4);
-}
-.worktree-list[data-navigation='mouse'] .worktree-open:focus-visible,
-.worktree-list[data-highlight-visible='false'] .worktree-open:focus-visible {
-  outline: none;
 }
 .worktree-branch {
   color: var(--app-muted);
@@ -101,10 +86,10 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--gray-8);
+  background: var(--app-status-stopped);
 }
 .editor-dot.running {
-  background: var(--green-9, #30a46c);
+  background: var(--app-status-idle);
 }
 .editor-status.has-error {
   visibility: hidden;

@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import { providerShellCommand } from './provider-command.js'
 
-export type TerminalKind = 'terminal' | 'codex' | 'claude'
+import type { LaunchKind } from '../../../src/shared/sidebar.ts'
 
 const groupOrdinals = [
   'First',
@@ -37,7 +37,12 @@ export class TerminalLauncher implements vscode.Disposable {
   private readonly tabs = new Map<vscode.Tab, vscode.Terminal>()
   private selectedTerminal?: vscode.Terminal
   private readonly subscriptions: vscode.Disposable[]
-  constructor() {
+  constructor(
+    private readonly registerTerminal: (
+      terminal: vscode.Terminal,
+      terminalId: string,
+    ) => void,
+  ) {
     this.subscriptions = [
       vscode.window.tabGroups.onDidChangeTabs((event) => {
         for (const tab of event.closed) this.tabs.delete(tab)
@@ -77,7 +82,7 @@ export class TerminalLauncher implements vscode.Disposable {
     this.tabs.clear()
   }
 
-  open(kind: TerminalKind): Promise<vscode.Terminal | undefined> {
+  open(kind: LaunchKind): Promise<vscode.Terminal> {
     return this.run(() => this.launch(kind))
   }
 
@@ -136,17 +141,11 @@ export class TerminalLauncher implements vscode.Disposable {
     return this.chatGroup
   }
 
-  private async launch(
-    kind: TerminalKind,
-  ): Promise<vscode.Terminal | undefined> {
+  private async launch(kind: LaunchKind): Promise<vscode.Terminal> {
     const folders = vscode.workspace.workspaceFolders
-    const folder =
-      folders && folders.length > 1
-        ? await vscode.window.showWorkspaceFolderPick({
-            placeHolder: 'Choose the terminal workspace',
-          })
-        : folders?.[0]
-    if (folders && folders.length > 1 && !folder) return undefined
+    if (folders?.length !== 1)
+      throw new Error('ADE terminals require exactly one workspace folder.')
+    const folder = folders[0]
 
     const chat = kind !== 'terminal'
     const command = chat
@@ -176,12 +175,13 @@ export class TerminalLauncher implements vscode.Disposable {
     const previousTabs = new Set(
       vscode.window.tabGroups.all.flatMap((item) => item.tabs),
     )
+    const terminalId = chat ? randomUUID() : undefined
     const terminal = vscode.window.createTerminal({
       env: {
         ADE_CHAT_EXTENSION_TOKEN: null,
-        ADE_TERMINAL_ID: chat ? randomUUID() : null,
+        ADE_TERMINAL_ID: terminalId ?? null,
       },
-      cwd: folder?.uri,
+      cwd: folder.uri,
       ...(chat ? { waitOnExit: false } : {}),
       // Let VS Code route ordinary terminals around locked groups, including
       // groups left behind by earlier activations that we no longer manage.
@@ -190,6 +190,7 @@ export class TerminalLauncher implements vscode.Disposable {
         : vscode.TerminalLocation.Editor,
       iconPath: new vscode.ThemeIcon(chat ? 'comment-discussion' : 'terminal'),
     })
+    if (terminalId) this.registerTerminal(terminal, terminalId)
     try {
       terminal.show()
       const tab = await waitFor(

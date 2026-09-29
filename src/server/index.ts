@@ -1,10 +1,10 @@
 import { DEFAULT_COMPANION_PORT } from '../shared/companion.ts'
 import { startCompanionServer } from './server.ts'
-import { parseServerArgs } from './config.ts'
+import { loadServerConfig, parseServerArgs } from './config.ts'
 import { createServerLogger, serverLogPath } from './logging.ts'
-import { installChatHooks } from './chat-hooks.ts'
+import { installChatHooks } from './chats/chat-hooks.ts'
 import { readFile } from 'node:fs/promises'
-import { installBundledExtension } from './install-extension.ts'
+import { installBundledExtension } from './editors/install-extension.ts'
 
 let logging: ReturnType<typeof createServerLogger> | undefined
 
@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const args = parseServerArgs(process.argv.slice(2))
   if (args.help) {
     console.log(
-      'Usage: ade-companion [--config path/to/server.yaml]\n       ade-companion --install-extension [--config path/to/server.yaml]\n       ade-companion --version\n\nConfiguration defaults to ~/.ade-overlay/server.yaml.\nKeep this installation at a stable path for provider hooks.\nInstall VS Code separately; running editors accepts https://aka.ms/vscode-server-license.',
+      'Usage: ade-companion [--config path/to/server.yaml]\n       ade-companion --setup [--config path/to/server.yaml]\n       ade-companion --version\n\nConfiguration defaults to ~/.ade-overlay/server.yaml.\nKeep this installation at a stable path for provider hooks.\nInstall VS Code separately; running editors accepts https://aka.ms/vscode-server-license.',
     )
     return
   }
@@ -26,13 +26,15 @@ async function main(): Promise<void> {
     console.log(JSON.parse(await readFile(manifest, 'utf8')).version)
     return
   }
-  if (args.installExtension) {
-    await installBundledExtension(args.configPath)
+  if (args.setup) {
+    const config = await loadServerConfig(args.configPath)
+    await installBundledExtension(config)
+    await installChatHooks()
+    console.log('Companion setup complete. Reload existing ADE editor windows.')
     return
   }
   const serverLogging = createServerLogger()
   logging = serverLogging
-  await installChatHooks()
   const rawPort =
     process.env.ADE_COMPANION_PORT ?? String(DEFAULT_COMPANION_PORT)
   const port = Number(rawPort)
@@ -53,7 +55,7 @@ async function main(): Promise<void> {
     token: process.env.ADE_COMPANION_TOKEN || undefined,
     logger: serverLogging.logger,
   })
-  server.startEditorUpdates()
+  server.prepareEditorRuntime()
   serverLogging.logger.info(
     { url: server.url, logFile: serverLogPath },
     'Companion ready. Press Ctrl+C to stop.',
