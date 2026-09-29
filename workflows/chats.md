@@ -23,9 +23,11 @@ sequenceDiagram
     Hook-->>Provider: Reporting finished
 ```
 
+- Codex launches without its shared daemon so hooks inherit the terminal’s reporting context and process ancestry. Customized launch commands must preserve this.
 - The hook reports only terminals carrying ADE reporting context. The companion verifies provider process identity, including start time, and ignores obsolete reports.
 - Work in progress displays as working. Permission requests, explicit user-input waits, completed turns, and interruption display as idle; compaction continues the working state.
 - User prompts and completed assistant messages supply the latest message preview and ordering time. [Titles](#refresh-chat-titles) refresh from provider metadata in the background.
+- Accepted working-to-idle transitions also emit a live event to connected desktops for [native notifications](desktop.md#notify-when-a-chat-becomes-idle).
 - New conversations request [title maintenance](#schedule-chat-maintenance) without waiting for metadata reads.
 - Hooks are bounded and best effort: an unavailable companion does not delay or alter provider decisions beyond the short reporting deadline.
 
@@ -97,6 +99,7 @@ sequenceDiagram
     Source-->>User: Destination chat terminal is focused
 ```
 
+- Desktop notification clicks request the same activation directly through the companion connection; the desktop receives the final result after terminal focus.
 - The companion requires exactly one connected desktop for chat navigation. Desktop selection uses the shared [worktree opening](desktop.md#open-a-worktree) and [supersession](desktop.md#supersede-navigation) workflows, then the target performs [terminal focus](extension.md#focus-a-chat-terminal).
 - Page readiness is not terminal readiness. The page's activation baseline prevents a newly loaded document from sending focus to the old extension host.
 - Timeout, supersession, page failure, or a participating connection closing finishes the source request with an error and cancels outstanding terminal focus. Shared editor startup and retained page loading can continue.

@@ -151,7 +151,10 @@ export class TerminalLauncher implements vscode.Disposable {
     const command = chat
       ? vscode.workspace
           .getConfiguration('adeTerminals')
-          .get<string>(`${kind}Command`, kind)
+          .get<string>(
+            `${kind}Command`,
+            kind === 'codex' ? 'codex --no-daemon' : kind,
+          )
           .trim()
       : undefined
     if (chat && !command)

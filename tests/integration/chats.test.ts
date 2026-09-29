@@ -155,6 +155,49 @@ function report(extra: Partial<ChatReport> = {}): ChatReport {
   }
 }
 
+test('idle events require an accepted working-to-idle transition of the same chat', async (t) => {
+  const entries = processes()
+  const store = new ChatStore(async () => entries)
+  t.after(() => store.close())
+  const idle: string[] = []
+  store.on('idle', (chat) => idle.push(chat.id))
+  let observedAt = Date.now() - 1000
+  const activity = (extra: Partial<ChatReport> = {}) =>
+    store.activity(
+      'editor',
+      worktree,
+      report({ observedAt: ++observedAt, ...extra }),
+    )
+  await activity()
+  await activity({ message: 'Idle update' })
+  await activity({ activity: 'working' })
+  assert.equal(await activity({ observedAt: observedAt - 2 }), false)
+  assert.deepEqual(idle, [])
+  await activity()
+  const first = store.list().chats[0].id
+  assert.deepEqual(idle, [first])
+  await activity()
+  await activity({ message: 'Another idle update' })
+  await store.refreshTitles()
+  assert.deepEqual(idle, [first])
+  await activity({ activity: 'working' })
+  await activity({ sessionId: 'replacement' })
+  assert.deepEqual(
+    idle,
+    [first],
+    'replacing a working session is not a transition',
+  )
+  await activity({ sessionId: 'replacement', activity: 'working' })
+  await activity({ sessionId: 'replacement' })
+  assert.equal(idle.length, 2)
+  assert.notEqual(idle[1], first)
+  await activity({ sessionId: 'replacement', activity: 'working' })
+  entries.clear()
+  assert.equal(await activity({ sessionId: 'replacement' }), false)
+  await store.reconcile()
+  assert.equal(idle.length, 2, 'rejection and process removal do not notify')
+})
+
 test('activity bursts share process validation and accept newly reported terminals', async () => {
   const entries = processes()
   let scans = 0

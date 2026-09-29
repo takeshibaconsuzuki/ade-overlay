@@ -228,6 +228,13 @@ try {
           'dist',
           `${platform === 'win32' ? 'win' : 'linux'}${process.arch === 'arm64' ? '-arm64' : ''}-unpacked/resources`,
         )
+  if (platform === 'darwin')
+    run('codesign', [
+      '--verify',
+      '--deep',
+      '--strict',
+      resolve(resources, '../..'),
+    ])
   const asar = join(resources, 'app.asar')
   const files = listPackage(asar).map((name) => name.replaceAll('\\', '/'))
   for (const path of [

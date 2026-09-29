@@ -176,7 +176,7 @@ export class ChatService {
       handleRpc(client, chatRequests.activate, (chatId) => {
         if (scope.socket !== client || this.closing)
           throw new Error('Editor connection is no longer current.')
-        return this.activate(client, chatId)
+        return this.activate(chatId, client)
       })
       listenEvent(
         client,
@@ -255,7 +255,8 @@ export class ChatService {
     // Chat removal still belongs exclusively to process reconciliation.
   }
 
-  private activate(source: Socket, chatId: string): Promise<null> {
+  activate(chatId: string, source: Socket): Promise<null> {
+    if (this.closing) throw new Error('Companion is stopping.')
     if (this.navigation)
       this.finish(this.navigation.id, 'Superseded by another navigation.')
     const entry = this.store.get(chatId)

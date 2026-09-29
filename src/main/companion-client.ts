@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { Socket } from 'socket.io-client'
+import type { Chat } from '../shared/chats.ts'
 import type { CompanionStatus } from '../shared/ipc.ts'
 import {
   COMPANION_PROTOCOL_VERSION,
@@ -34,6 +35,7 @@ export class CompanionClient extends EventEmitter<{
   worktreesUpdated: [WorktreeSnapshot]
   chatActivate: [{ id: string; input: OpenEditorInput }]
   chatFinished: [string]
+  chatIdle: [Chat]
 }> {
   private status: CompanionStatus
   private readonly options: ClientOptions
@@ -123,6 +125,7 @@ export class CompanionClient extends EventEmitter<{
     receive(companionEvents.worktrees, (value) =>
       this.emit('worktreesUpdated', value),
     )
+    receive(companionEvents.chatIdle, (chat) => this.emit('chatIdle', chat))
     receive(companionEvents.activateChat, (value) =>
       this.emit('chatActivate', value),
     )
@@ -154,6 +157,10 @@ export class CompanionClient extends EventEmitter<{
     this.socket = undefined
     socket?.disconnect()
     this.update({ state: 'disconnected', url: this.status.url })
+  }
+
+  activateChat(id: string): Promise<null> {
+    return this.request(companionRequests.activateChat, id)
   }
 
   listWorktrees(): Promise<WorktreeSnapshot> {
@@ -196,7 +203,9 @@ export class CompanionClient extends EventEmitter<{
         throw new Error(
           spec.event === 'editor:open'
             ? 'Editor startup timed out. Try opening the worktree again.'
-            : 'Worktree request timed out. Refresh to check the result before retrying.',
+            : spec.event === 'chat:activate'
+              ? 'Chat navigation timed out. Try opening the chat again.'
+              : 'Worktree request timed out. Refresh to check the result before retrying.',
           { cause: error },
         )
       throw error

@@ -30,7 +30,10 @@ interface ChatRecord {
   metadataRoot?: string
 }
 
-export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
+export class ChatStore extends EventEmitter<{
+  update: [ChatSnapshot]
+  idle: [Chat]
+}> {
   private readonly records = new Map<string, ChatRecord>()
   private queue: Promise<unknown> = Promise.resolve()
   private titleRefresh?: Promise<void>
@@ -112,6 +115,8 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
         if (entry === current && previousId !== id)
           this.records.delete(previousId)
       const previous = this.records.get(id)
+      const becameIdle =
+        previous?.chat.activity === 'working' && report.activity === 'idle'
       const message = report.message || previous?.chat.message
       const lastTurnAt = report.turnEvent
         ? report.observedAt
@@ -144,6 +149,7 @@ export class ChatStore extends EventEmitter<{ update: [ChatSnapshot] }> {
       this.records.set(id, previous ? Object.assign(previous, next) : next)
       inserted = !previous
       if (changed) this.publish()
+      if (becameIdle) this.emit('idle', { ...next.chat })
       return true
     })
     if (inserted) {

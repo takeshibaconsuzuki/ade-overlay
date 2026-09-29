@@ -4,6 +4,10 @@ export function prepareSigning(env = process.env, platform = process.platform) {
   if (!env.CSC_LINK?.trim()) delete env.CSC_LINK
 
   const required = env.ADE_REQUIRE_SIGNING === 'true'
+  const adHoc =
+    platform === 'darwin' &&
+    !required &&
+    ((!env.CSC_LINK && !env.CSC_NAME?.trim()) || env.CSC_NAME?.trim() === '-')
   if (platform === 'darwin' && required) {
     const credentials = [
       ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'],
@@ -21,5 +25,17 @@ export function prepareSigning(env = process.env, platform = process.platform) {
   return {
     forceCodeSigning: platform !== 'linux' && required,
     ...(platform === 'darwin' && required ? { mac: { notarize: true } } : {}),
+    // Sign the complete bundle so macOS can register ADE for notifications even
+    // without a Developer ID certificate. Ad-hoc builds cannot be notarized.
+    ...(adHoc
+      ? {
+          mac: {
+            identity: '-',
+            notarize: false,
+            preAutoEntitlements: false,
+            timestamp: 'none',
+          },
+        }
+      : {}),
   }
 }

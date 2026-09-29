@@ -15,6 +15,18 @@ On Linux/macOS, use `./ade-companion --setup` and `./ade-companion`. Run it unde
 
 For development commands, see [AGENTS.md](AGENTS.md).
 
+## macOS setup
+
+Open the disk image, drag **ADE.app** to **Applications**, then launch it after starting the companion. If VS Code's `code` command is missing, open VS Code's Command Palette and run **Shell Command: Install 'code' command in PATH**, then open a new terminal.
+
+To enable chat notifications:
+
+1. Start a chat from ADE's terminal sidebar and let it finish a response. ADE sends a notification when the chat changes from working to idle; allow notifications if macOS asks.
+2. Open **System Settings → Notifications → ADE** and enable **Allow notifications** and display on the desktop and in Notification Center.
+3. Choose **Persistent** for the alert style (**Alerts** on older macOS versions) to keep the popup visible until dismissed. Sound is optional. Clicking the notification opens that chat.
+
+If ADE is missing from Notifications, run the packaged **ADE.app**, quit and reopen it after upgrading, then finish another chat response. Local macOS packages are automatically ad-hoc signed so macOS can recognize the complete app bundle; they do not require an Apple Developer account. Release builds use Developer ID signing and notarization. For a notification sound without a popup, check the alert style, Focus, and notification settings while sharing or mirroring the display.
+
 ## Connect to another computer
 
 Local connections work without configuration. For a remote companion, create `~/.ade-overlay/client.json` on the desktop computer:
@@ -96,13 +108,15 @@ Install the bundled VS Code extension and activity hooks with the companion laun
 
 Reload existing editors with **Developer: Reload Window**, then open **ADE** in the Activity Bar. The sidebar uses the same theme as the main window. **Terminal** opens a normal shell alongside files in an editor group. The second button launches the selected chat provider; choosing **Codex** or **Claude** from its dropdown immediately launches a chat and remembers your choice. Buttons stay available while launches queue. Provider terminals share a locked chat group and close when the configured foreground command finishes, including failures. Ordinary terminals stay open. Starting from an empty editor uses the full width; another group is created only when ordinary content and chat need to coexist. All terminals start in the current worktree; none open in the terminal panel.
 
-Install and sign in to the provider CLIs on the companion machine separately. Commands default to `codex` and `claude`; customize `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in that machine's User/Remote settings. Keep provider commands in the foreground so their lifetime controls terminal cleanup. Supported shell profiles include PowerShell, Command Prompt, bash, zsh and fish. VS Code controls terminal titles and persistence. Each extension activation starts without adopting existing terminal groups; new chat launches reuse an empty group or create a new one. Deactivation leaves terminals and groups intact. VS Code still allows manually moving tabs and unlocking groups.
+Install and sign in to the provider CLIs on the companion machine separately. Commands default to `codex --no-daemon` and `claude`; customize `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in that machine's User/Remote settings. Keep `--no-daemon` in customized Codex commands: its shared background server does not inherit the terminal context required for live chat reporting. Keep provider commands in the foreground so their lifetime controls terminal cleanup. Supported shell profiles include PowerShell, Command Prompt, bash, zsh and fish. VS Code controls terminal titles and persistence. Each extension activation starts without adopting existing terminal groups; new chat launches reuse an empty group or create a new one. Deactivation leaves terminals and groups intact. VS Code still allows manually moving tabs and unlocking groups.
 
 ADE terminal launches require exactly one workspace folder and use it as their working directory.
 
 Chats appear immediately below the launch buttons, sorted by newest prompt or turn end. Tool activity does not move rows. The current chat tab in this activation's ADE chat group has a left selection line, even when another group has focus. Selecting a file inside that chat group clears the line. Rows show a spinner for working or a green dot for idle, followed by the worktree name, conversation title and three lines reserved for a wrapped message preview. For Codex, the title comes from local resume metadata; the preview is the latest submitted prompt or final assistant reply received through hooks, shortened for display. Missing titles and messages show skeletons. Existing transcript messages are not loaded. Click a chat to switch the connected desktop to its worktree and terminal. Navigation requires exactly one connected desktop. Chat identities survive editor reloads and desktop reconnects while the companion and terminal processes keep running. Claude terminals still launch normally; activity tracking currently supports Codex only.
 
 Companion setup merges ADE activity commands into the companion account's `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`), preserving other hooks. Start a new Codex terminal and trust the added commands through `/hooks` when prompted. Hooks outside ADE terminals do nothing. Invalid hook configuration makes setup fail without overwriting the file. Normal service startup never modifies hooks; missing hooks only prevent live activity from appearing. Keep the companion installation at a stable path; rerunning setup after moving it updates the commands and may require trusting them again.
+
+While the desktop is connected, each **working → idle** transition shows a system notification. Click it to open that chat. Notifications follow your operating-system settings; reconnecting does not replay missed transitions.
 
 Chats show **working** or **idle**, including permission waits, user input and interruption. These are hook observations: after permission approval a chat can remain idle until the next hook, and missed hooks leave the previous activity visible. Process reconciliation removes exited chats within a few seconds; idle chats do not expire. Closing the desktop does not remove chats. Restarting the companion resets the live registry and stops its editors; recovery of processes surviving a companion crash is not supported.
 

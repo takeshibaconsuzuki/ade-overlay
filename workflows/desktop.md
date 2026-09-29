@@ -91,6 +91,30 @@ sequenceDiagram
 - Create and delete dialogs suspend picker interaction and invoke [worktree mutations](worktrees.md#schedule-a-mutation). Dismissing a dialog does not cancel an accepted server operation.
 - An opening failure becomes a companion row error; if main cannot store it there, the picker retains a local error. Opening an editor does not clear an existing error.
 
+## Notify when a chat becomes idle
+
+```mermaid
+sequenceDiagram
+    participant Chats as Companion registry
+    participant Main as Desktop main
+    participant OS as Desktop notifications
+    actor User
+    Chats->>Chats: Accept working to idle for the same chat
+    Chats-->>Main: chat:idle with title and message
+    Main->>OS: Show notification
+    User->>OS: Click notification
+    OS->>Main: Open the notified chat
+    Main->>Chats: chat:activate, wait for terminal focus
+    Note over Chats,Main: Run shared chat navigation
+    Chats-->>Main: Terminal focused or navigation failed
+    Main-->>User: Chat is visible, or show opening error
+```
+
+- Notifications use the chat title and latest message, falling back to the worktree path when no message is available. They also appear while the desktop is focused, subject to operating-system notification settings.
+- Only accepted working-to-idle transitions notify. Initial idle reports, repeated idle reports, title updates, session replacement, and process removal do not. Transitions while disconnected are not replayed.
+- Each chat retains at most one notification. A later notification replaces it; clicking, disconnecting, or quitting clears it.
+- Clicks use [chat navigation](chats.md#navigate-to-a-chat), including terminal acknowledgement and stale-chat errors. Notification navigation requires exactly one connected desktop, as sidebar navigation does.
+
 ## Supersede navigation
 
 ```mermaid

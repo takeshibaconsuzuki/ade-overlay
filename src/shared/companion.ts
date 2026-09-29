@@ -1,5 +1,6 @@
-﻿import { z } from 'zod'
+import { z } from 'zod'
 import { eventSpec, requestSpec } from './rpc.ts'
+import { chatIdSchema, chatSchema } from './chats.ts'
 
 export const COMPANION_PROTOCOL_VERSION = 1
 export const DEFAULT_COMPANION_PORT = 4317
@@ -54,6 +55,7 @@ const worktreeSnapshotSchema = z.object({
 })
 
 export const companionRequests = {
+  activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),
   list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
   refresh: requestSpec(
     'worktrees:refresh',
@@ -87,6 +89,7 @@ export const companionRequests = {
   ),
 }
 export const companionEvents = {
+  chatIdle: eventSpec('chat:idle', chatSchema),
   hello: eventSpec('hello', z.object({ protocolVersion: z.int() })),
   worktrees: eventSpec('worktrees:updated', worktreeSnapshotSchema),
   activateChat: eventSpec(

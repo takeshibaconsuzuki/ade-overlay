@@ -4,6 +4,7 @@ import {
   globalShortcut,
   ipcMain,
   dialog,
+  Notification,
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron'
@@ -16,10 +17,13 @@ import { EditorNavigation } from './editor-navigation.ts'
 import { loadDesktopConfig } from './config.ts'
 import { PickerWindow } from './picker-window.ts'
 import { createWindowFocus } from './window-focus.ts'
+import { ChatNotifications } from './chat-notifications.ts'
 
 // Keep Chromium storage at the original location when the installer changes the
 // visible product name. Editor cookies and settings must survive an upgrade.
 app.setName('ade-overlay')
+if (process.platform === 'win32')
+  app.setAppUserModelId('io.github.takeshibaconsuzuki.ade-overlay')
 let configuration: ReturnType<typeof loadDesktopConfig> = {}
 let configurationError: unknown
 try {
@@ -31,6 +35,16 @@ try {
 const trustedRenderers = new Set<WebContents>()
 let pickerWindow: PickerWindow | undefined
 const companion = new CompanionClient(configuration)
+const chatNotifications = new ChatNotifications(
+  (options) =>
+    Notification.isSupported() ? new Notification(options) : undefined,
+  (id) => companion.activateChat(id),
+  (error) =>
+    dialog.showErrorBox(
+      'Could not open chat',
+      error instanceof Error ? error.message : String(error),
+    ),
+)
 const editorWindow = new EditorWindow(companion.getStatus().url)
 const companionState = new CompanionState(companion)
 const editorNavigation = new EditorNavigation(
@@ -147,9 +161,12 @@ app.whenReady().then(() => {
   companion.on('chatFinished', (id) => {
     editorNavigation.finishChat(id)
   })
+  companion.on('chatIdle', (chat) => chatNotifications.show(chat))
   companion.on('status', (status) => {
-    if (status.state !== 'connected') editorNavigation.cancelSelectionRequest()
-    else editorWindow.reconnectSettings()
+    if (status.state !== 'connected') {
+      chatNotifications.clear()
+      editorNavigation.cancelSelectionRequest()
+    } else editorWindow.reconnectSettings()
   })
   companion.connect()
   pickerWindow = createWindow(registered)
@@ -157,6 +174,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   globalShortcut.unregisterAll()
+  chatNotifications.clear()
   editorWindow.close()
   companion.stop()
 })

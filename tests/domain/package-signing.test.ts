@@ -5,16 +5,40 @@ const { prepareSigning } = await import(
   new URL('../../scripts/package-signing.mjs', import.meta.url).href
 )
 
-test('manual packaging removes empty certificates and preserves configured signing', () => {
+test('manual macOS packaging signs ad-hoc without a certificate', () => {
   for (const certificate of [undefined, '', '  ']) {
     const env = { CSC_LINK: certificate }
-    assert.deepEqual(prepareSigning(env, 'darwin'), { forceCodeSigning: false })
+    assert.deepEqual(prepareSigning(env, 'darwin'), {
+      forceCodeSigning: false,
+      mac: {
+        identity: '-',
+        notarize: false,
+        preAutoEntitlements: false,
+        timestamp: 'none',
+      },
+    })
     assert.equal(Object.hasOwn(env, 'CSC_LINK'), false)
   }
-  const env = { CSC_LINK: '/certificate.p12', CSC_KEY_PASSWORD: '' }
-  prepareSigning(env, 'darwin')
-  assert.equal(env.CSC_LINK, '/certificate.p12')
-  assert.equal(env.CSC_KEY_PASSWORD, '')
+})
+
+test('manual macOS packaging honors explicit certificate signing', () => {
+  for (const env of [
+    { CSC_LINK: '/certificate.p12', CSC_KEY_PASSWORD: '' },
+    { CSC_NAME: 'Example Developer (TEAM)' },
+  ]) {
+    const original = { ...env }
+    assert.deepEqual(prepareSigning(env, 'darwin'), { forceCodeSigning: false })
+    assert.deepEqual(env, original)
+  }
+})
+
+test('explicit ad-hoc signing disables notarization even with Apple credentials', () => {
+  const config = prepareSigning(
+    { CSC_NAME: '-', APPLE_KEYCHAIN_PROFILE: 'notarization' },
+    'darwin',
+  )
+  assert.equal(config.mac.identity, '-')
+  assert.equal(config.mac.notarize, false)
 })
 
 test('required macOS releases reject absent and incomplete notarization credentials', () => {
@@ -60,6 +84,8 @@ test('required macOS releases reject absent and incomplete notarization credenti
 })
 
 test('other platforms do not require Apple credentials', () => {
+  for (const platform of ['win32', 'linux'])
+    assert.deepEqual(prepareSigning({}, platform), { forceCodeSigning: false })
   assert.deepEqual(prepareSigning({ ADE_REQUIRE_SIGNING: 'true' }, 'win32'), {
     forceCodeSigning: true,
   })

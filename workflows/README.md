@@ -4,16 +4,16 @@
 - The desktop presents worktrees and retained editor pages. The companion runs separately and owns Git operations, editor processes, and live chat state. The workspace extension launches and focuses terminals inside VS Code.
 - Contributor commands and architectural constraints live in [AGENTS.md](../AGENTS.md); configuration and operating instructions live in the [project README](../README.md).
 
-| Component                           | Workflows                                                                                                   |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [Desktop](desktop.md)               | Connect and reconnect, accept shared state, open a worktree, supersede navigation, close windows            |
-| [Companion](companion.md)           | Start services, admit connections, stop and drain accepted work                                             |
-| [Worktrees](worktrees.md)           | Refresh membership, schedule mutations, create and bootstrap, delete, clear retained errors                 |
-| [Editor processes](editors.md)      | Share runtime preparation, start or reuse an editor, reconcile process lifetime, authenticate editor access |
-| [Editor pages](editor-pages.md)     | Select retained views, follow document readiness, restore an editor window, apply browser permissions       |
-| [Workspace extension](extension.md) | Connect the sidebar, launch terminals, restore terminal identities, focus a chat terminal                   |
-| [Live chats](chats.md)              | Report activity, reconcile processes, refresh titles, navigate across worktrees                             |
-| [Settings](settings.md)             | Initialize a browser profile, observe saves, schedule and resolve whole-file synchronization                |
+| Component                           | Workflows                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [Desktop](desktop.md)               | Connect and reconnect, accept shared state, open a worktree, supersede navigation, notify on idle chats, close windows |
+| [Companion](companion.md)           | Start services, admit connections, stop and drain accepted work                                                        |
+| [Worktrees](worktrees.md)           | Refresh membership, schedule mutations, create and bootstrap, delete, clear retained errors                            |
+| [Editor processes](editors.md)      | Share runtime preparation, start or reuse an editor, reconcile process lifetime, authenticate editor access            |
+| [Editor pages](editor-pages.md)     | Select retained views, follow document readiness, restore an editor window, apply browser permissions                  |
+| [Workspace extension](extension.md) | Connect the sidebar, launch terminals, restore terminal identities, focus a chat terminal                              |
+| [Live chats](chats.md)              | Report activity, reconcile processes, refresh titles, navigate across worktrees                                        |
+| [Settings](settings.md)             | Initialize a browser profile, observe saves, schedule and resolve whole-file synchronization                           |
 
 ## Follow a user action
 

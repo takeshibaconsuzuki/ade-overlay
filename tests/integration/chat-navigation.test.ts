@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { once } from 'node:events'
+import { CompanionClient } from '../../src/main/companion-client.ts'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
@@ -57,9 +59,13 @@ test(
     const source = await extension('source')
     const target = await extension('target')
     const activate = async (peer = source) => {
-      const result = callRpc(peer.socket, chatRequests.activate, 'chat').catch(
-        (error: Error) => error,
-      )
+      const result = callRpc(
+        peer.socket,
+        peer === desktop
+          ? companionRequests.activateChat
+          : chatRequests.activate,
+        'chat',
+      ).catch((error: Error) => error)
       return {
         id: (await desktop.take(companionEvents.activateChat)).id,
         result,
@@ -124,6 +130,23 @@ test(
     assert.equal(await desktop.take(companionEvents.finishChat), second.id)
     assert.equal(await second.result, null)
 
+    // Notification clicks enter the same navigation path without a source extension.
+    const notification = await activate(desktop)
+    await ready(notification.id)
+    assert.equal((await target.take(chatEvents.focus)).terminalId, 'terminal')
+    let notificationCompleted = false
+    void notification.result.then(() => {
+      notificationCompleted = true
+    })
+    await delay(20)
+    assert.equal(notificationCompleted, false)
+    sendEvent(target.socket, chatEvents.focused, { id: notification.id })
+    assert.equal(
+      await desktop.take(companionEvents.finishChat),
+      notification.id,
+    )
+    assert.equal(await notification.result, null)
+
     const disconnected = await activate()
     await ready(disconnected.id)
     await target.take(chatEvents.focus)
@@ -141,5 +164,71 @@ test(
     desktop.socket.disconnect()
     assert.match(String(await pending.result), /Desktop disconnected/)
     assert.equal(await target.take(chatEvents.cancelFocus), pending.id)
+  },
+)
+
+test(
+  'desktop receives live idle events without replay and can request chat activation',
+  { timeout: 10_000 },
+  async (t) => {
+    const services: ChatService[] = []
+    const listen = ChatService.prototype.listen
+    t.mock.method(
+      ChatService.prototype,
+      'listen',
+      function (this: ChatService) {
+        services.push(this)
+        return listen.call(this)
+      },
+    )
+    const server = await startCompanionServer({
+      config: { projects: [] },
+      port: 0,
+    })
+    t.after(() => server.close())
+    const [chats] = services
+    const desktop = new CompanionClient({ url: server.url })
+    t.after(() => desktop.stop())
+    const idle = {
+      id: 'chat',
+      terminalId: 'terminal',
+      path: '/project',
+      activity: 'idle' as const,
+    }
+    const received: unknown[] = []
+    desktop.on('chatIdle', (chat) => received.push(chat))
+    const connect = async () => {
+      const connected = new Promise<void>((resolve) => {
+        const listener = (status: { state: string }) => {
+          if (status.state !== 'connected') return
+          desktop.off('status', listener)
+          resolve()
+        }
+        desktop.on('status', listener)
+      })
+      desktop.connect()
+      await connected
+      await desktop.listWorktrees()
+    }
+    chats.store.emit('idle', idle)
+    await connect()
+    assert.deepEqual(received, [])
+    const notified = once(desktop, 'chatIdle')
+    chats.store.emit('idle', idle)
+    assert.deepEqual(await notified, [idle])
+    desktop.stop()
+    chats.store.emit('idle', idle)
+    await connect()
+    assert.deepEqual(received, [idle])
+    await assert.rejects(desktop.activateChat('gone'), /no longer available/)
+    const activate = t.mock.method(chats, 'activate', async (id: string) => {
+      assert.equal(id, idle.id)
+      return null
+    })
+    assert.equal(await desktop.activateChat(idle.id), null)
+    assert.equal(activate.mock.callCount(), 1)
+    desktop.stop()
+    await server.close()
+    assert.equal(chats.store.listenerCount('idle'), 0)
   },
 )

@@ -17,6 +17,7 @@ import {
   type requestSpec,
 } from '../shared/rpc.ts'
 import type { WorktreeStore } from './worktrees/worktree-store.ts'
+import type { Chat } from '../shared/chats.ts'
 import type { ChatService } from './chats/chat-service.ts'
 import { authorized, rejectUpgrade } from './transport.ts'
 
@@ -62,6 +63,11 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     for (const client of sockets.sockets.sockets.values())
       sendEvent(client, companionEvents.worktrees, snapshot)
   }
+  const notifyIdle = (chat: Chat) => {
+    for (const client of sockets.sockets.sockets.values())
+      sendEvent(client, companionEvents.chatIdle, chat)
+  }
+  chats.store.on('idle', notifyIdle)
   worktrees.on('update', broadcast)
   sockets.on('connection', (client) => {
     logger.info('Companion client connected')
@@ -126,6 +132,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
         },
       )
     }
+    register(companionRequests.activateChat, (id) => chats.activate(id, client))
     register(companionRequests.list, () => worktrees.list())
     register(companionRequests.refresh, () => worktrees.refresh())
     register(companionRequests.create, (input) => worktrees.startCreate(input))
@@ -160,6 +167,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     close(): Promise<void> {
       closing ??= (async () => {
         worktrees.off('update', broadcast)
+        chats.store.off('idle', notifyIdle)
         if (chatRequest)
           chats.viewReady(chatRequest.id, 'Companion is stopping.')
         chatRequest = undefined
