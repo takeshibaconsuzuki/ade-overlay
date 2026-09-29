@@ -10,7 +10,6 @@
     "build:extension": "tsc -p extensions/ade-terminals/tsconfig.json && node scripts/package-extension.mjs",
     "test:extension": "npm run build:extension && node scripts/test-extension.mjs",
     "build:server": "tsc -p tsconfig.server.json && node scripts/package-server.mjs",
-    "server": "npm run build:server && node out/server/server/index.js",
     "server:dev": "node scripts/server-dev.mjs",
     "test": "node --experimental-strip-types --test tests/domain/*.test.ts tests/integration/*.test.ts tests/electron/*.test.ts tests/runtime/*.test.ts",
     "lint": "eslint .",

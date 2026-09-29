@@ -1,135 +1,119 @@
-# Install
+# ADE
 
-Install the desktop package for your system: the Windows installer, macOS disk image, or Linux AppImage, Debian or RPM package. On macOS, choose the build for Apple Silicon (`arm64`) or Intel (`x64`).
+ADE manages Git worktrees and opens VS Code editors with Codex or Claude chats. The desktop app connects to a companion running on the computer that holds your repositories.
 
-The companion runs separately on the computer that holds your repositories. Extract its matching archive to a permanent directory. It includes Node.js and the terminal extension; Python and npm are not needed. Install Git and stable VS Code separately and put `git` and `code` on PATH. Provider CLIs and their sign-ins also belong on this computer.
+## Install
 
-Create the server configuration below, then open a terminal in the extracted `ade-companion` directory. On Windows:
+Install the desktop app and extract the companion archive from the same release to a permanent directory. On the companion computer, install Git and stable VS Code with `git` and `code` on `PATH`. For chats, install and sign in to the Codex or Claude CLI.
+
+### Configure projects
+
+Create `~/.ade-overlay/server.yaml` on the companion computer:
+
+```yaml
+projects:
+  - mainWorktreePath: ~/code/my-project
+    bootstrapCommand: npm install
+```
+
+Each `mainWorktreePath` points to a repository's main worktree. Relative paths resolve from the configuration file. The optional `bootstrapCommand` runs in new worktrees; failures leave the worktree available for inspection. Restart the companion after configuration changes.
+
+### Start ADE
+
+From the extracted `ade-companion` directory, run:
+
+Windows:
 
 ```powershell
 .\ade-companion.cmd --setup
 .\ade-companion.cmd
 ```
 
-On Linux/macOS, use `./ade-companion --setup` and `./ade-companion`. Run it under your own account and keep that terminal running. Setup validates configuration, installs the extension into the companion's configured local extensions directory, and installs provider activity hooks. Pass the same `--config` argument to setup and the service when using a custom configuration. Launch ADE from your desktop after the companion starts.
+Linux/macOS:
 
-For development commands, see [AGENTS.md](AGENTS.md).
+```sh
+./ade-companion --setup
+./ade-companion
+```
 
-## macOS setup
+Run under your own account, keep the companion running, then launch ADE. Local connections are automatic. For a custom configuration, pass `--config path/to/server.yaml` to both commands.
 
-Open the disk image, drag **ADE.app** to **Applications**, then launch it after starting the companion. If VS Code's `code` command is missing, open VS Code's Command Palette and run **Shell Command: Install 'code' command in PATH**, then open a new terminal.
+Running editors accepts the [VS Code Server license terms](https://aka.ms/vscode-server-license).
 
-To enable chat notifications:
+## Worktrees
 
-1. Start a chat from ADE's terminal sidebar and let it finish a response. ADE sends a notification when the chat changes from working to idle; allow notifications if macOS asks.
-2. Open **System Settings → Notifications → ADE** and enable **Allow notifications** and display on the desktop and in Notification Center.
-3. Choose **Persistent** for the alert style (**Alerts** on older macOS versions) to keep the popup visible until dismissed. Sound is optional. Clicking the notification opens that chat.
+Press **Ctrl+Shift+Space** on Windows/Linux or **Cmd+Shift+Space** on macOS to toggle the worktree window. **Esc** in the search bar or clicking elsewhere hides it.
 
-If ADE is missing from Notifications, run the packaged **ADE.app**, quit and reopen it after upgrading, then finish another chat response. Local macOS packages are automatically ad-hoc signed so macOS can recognize the complete app bundle; they do not require an Apple Developer account. Release builds use Developer ID signing and notarization. For a notification sound without a popup, check the alert style, Focus, and notification settings while sharing or mirroring the display.
+Click a worktree to open its editor. Opened worktrees are automatically trusted.
 
-## Connect to another computer
+- **Create worktree:** leave the branch name blank to check out the base branch. Relative paths start at the selected project.
+- **Delete:** removes the directory but keeps its branch. Main or locked worktrees, and those with uncommitted or untracked files, cannot be deleted.
+- **Refresh worktrees:** picks up external Git changes.
 
-Local connections work without configuration. For a remote companion, create `~/.ade-overlay/client.json` on the desktop computer:
+Hover or focus an error row for details; click its red X to clear the error.
+
+Closing the worktree window quits ADE; closing only the editor window does not. Save first: ADE does not wait for saves or backups. Terminals survive desktop restarts while the companion is running; restarting the companion stops its editors and terminals.
+
+## Terminals and chats
+
+Open **ADE** in VS Code's Activity Bar to launch shells or chats in the current worktree. Launches require exactly one workspace folder. Chat terminals close when their command exits.
+
+For Codex activity tracking, start a new chat after setup and trust the added commands through `/hooks` when prompted. Click a sidebar chat or idle notification to open its terminal; navigation requires exactly one connected ADE desktop. Claude activity tracking is unavailable.
+
+Customize commands through `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in the companion computer's VS Code User/Remote settings. Keep `--no-daemon` in the Codex command and run both commands in the foreground.
+
+## VS Code settings and extensions
+
+ADE shares extensions with the companion account's local VS Code. Some extensions requiring desktop-only features are unavailable. Reload open editors with **Developer: Reload Window** after installing extensions.
+
+User settings synchronize with that account's default VS Code profile every minute while an editor is open. The newer file replaces the older one; avoid editing both at once. Keybindings are imported once.
+
+## Remote connections
+
+On the desktop computer, create `~/.ade-overlay/client.json`, restrict access to your account, and restart ADE:
 
 ```json
 {
   "url": "wss://your-server.example/companion",
-  "token": "the-secret-supplied-by-your-server-operator"
+  "token": "your-shared-secret"
 }
 ```
 
-Keep this file readable only by your account (on Linux/macOS, `chmod 600 ~/.ade-overlay/client.json`). Restart ADE after editing it. `ADE_COMPANION_URL` and `ADE_COMPANION_TOKEN` override the saved values. The credential stays in the desktop main process.
+Repository paths refer to the companion computer. Remote hosting requires a TLS reverse proxy forwarding HTTP and WebSocket traffic for `/companion` and `/editors/`.
 
-## Upgrade or uninstall
+| Environment variable  | Where to set it | Purpose                                                                                   |
+| --------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `ADE_COMPANION_HOST`  | Companion       | Listen address; default `127.0.0.1`.                                                      |
+| `ADE_COMPANION_PORT`  | Companion       | Listen port; default `4317`.                                                              |
+| `ADE_COMPANION_URL`   | Desktop         | Overrides the saved address; default `ws://127.0.0.1:4317/companion`.                     |
+| `ADE_COMPANION_TOKEN` | Both            | Shared secret; use the same value on both computers. Overrides the desktop's saved token. |
 
-Upgrade the desktop, companion and extension together from the same release. Stop the companion with Ctrl+C before replacing its installation directory, then run `--setup` again and restart both applications. This stops running editors and terminals; save work first. Rerun setup after relocating the companion or changing the provider home so hook commands use the current paths.
+## Optional editor configuration
 
-Uninstalling the desktop or removing the companion directory leaves repositories and saved state intact. State lives in `~/.ade-overlay` and the desktop's application-data directory. To fully remove the integration, uninstall **ADE Terminals** from VS Code and remove only hook handlers marked `ADE chat activity` from the provider's hooks file.
-
-# Server
-
-Create `~/.ade-overlay/server.yaml` (`~` is your home directory):
-
-```yaml
-projects:
-  - mainWorktreePath: ~/code/my-project
-    bootstrapCommand: npm install
-  - mainWorktreePath: E:/Devel/another-project
-```
-
-Each project object requires `mainWorktreePath`, pointing to a main Git worktree root. Paths may be absolute, start with `~`, or be relative to the config file. Duplicate projects are combined; the last entry supplies the bootstrap command. The optional `bootstrapCommand` runs in each newly created worktree using the companion account and the server's default shell. Creation stays pending until it exits. A nonzero exit marks creation as failed and retains the worktree for inspection.
-
-Run the companion launcher, or choose a config with `ade-companion --config path/to/server.yaml` (use `ade-companion.cmd` on Windows). The server scans all projects before accepting connections. A missing default config starts with no projects; an explicitly selected missing file, invalid config, or invalid project stops startup. Restart the server after changing the config.
-
-| Variable              | Used by | Purpose                                                   |
-| --------------------- | ------- | --------------------------------------------------------- |
-| `ADE_COMPANION_HOST`  | Server  | Listen address; defaults to `127.0.0.1`.                  |
-| `ADE_COMPANION_PORT`  | Server  | Port; defaults to `4317`.                                 |
-| `ADE_COMPANION_URL`   | App     | Address; defaults to `ws://127.0.0.1:4317/companion`.     |
-| `ADE_COMPANION_TOKEN` | Both    | Optional shared secret; use the same value on both sides. |
-
-For a remote server, use the `wss://` address and token supplied by its operator. Worktree paths always refer to the server’s filesystem.
-
-Install stable VS Code separately on the companion machine and put `code` on that account's PATH. Each ADE release uses one approved VS Code server build, prepared through Microsoft's downloader and cached locally. Runtime updates arrive with ADE releases. Editor data and cached runtimes live in `~/.ade-overlay/editors`; keep this directory to preserve workspace state.
-
-All editors use the companion account's local VS Code extensions directory directly. Installs, updates and removals are shared with desktop VS Code on that machine. Previous ADE-only extensions remain in `~/.ade-overlay/editors/extensions`; that directory is no longer used unless selected with `localExtensionsDir`. Remote Node extensions can run; extensions requiring a desktop UI host remain unavailable. An extension may require sign-in.
-
-Browser User settings synchronize with the companion account's local default VS Code profile every minute while an editor is loaded. The newer save replaces the entire older file, preserving comments; simultaneous edits and clock differences have approximate ordering. The first sync uses the companion's settings. Browser save times survive app restarts, so pending edits reconcile when reopened. Remote and Workspace settings remain explicit overrides. Keybindings are imported once for a new browser profile.
-
-Closing windows and quitting the app stay immediate. Quitting does not wait for editor saves, backups or settings sync, so recent unsaved edits can be lost. The companion and its running terminals continue independently.
-
-Optional configuration:
+Add to `server.yaml` to customize storage, session retention, or VS Code locations:
 
 ```yaml
 editor:
   dataDir: ~/.ade-overlay/editors
-  # Seconds to retain disconnected terminal and extension-host sessions:
-  reconnectionGraceSeconds: 604800
-  # Override the discovered local profile locations:
+  reconnectionGraceSeconds: 604800 # Seven days.
   # localUserDataDir: /path/to/Code
   # localExtensionsDir: /path/to/.vscode/extensions
 ```
 
-ADE discovers ordinary stable VS Code profile and extension directories. For portable or other custom layouts, set `localUserDataDir` and `localExtensionsDir` explicitly. `localUserDataDir` contains `User/settings.json`. The reconnection grace defaults to seven days and accepts 1?2147483 seconds. Running the editor accepts the [VS Code Server license terms](https://aka.ms/vscode-server-license). Remote reverse proxies must forward HTTP and WebSocket traffic for `/editors/` as well as `/companion` over TLS.
+`localUserDataDir` must contain `User/settings.json`. Rerun `--setup` after changing the extensions directory.
 
-The companion writes structured logs to its terminal and `~/.ade-overlay/server.log`. Logs include commands, timings, runtime preparation, editor startup and failures. Set `ADE_LOG_LEVEL=debug` for detailed editor output. Each editor also saves stdout and stderr in `~/.ade-overlay/editors/workspaces/<id>/server.log` (under `editor.dataDir` when configured). Session tokens are redacted. Worktree rows show download and startup progress; Refresh remains available while an editor starts.
+## macOS setup
 
-# App
+If `code` is unavailable, run **Shell Command: Install 'code' command in PATH** from VS Code's Command Palette.
 
-Press **Ctrl+Shift+Space** on Windows/Linux or **Cmd+Shift+Space** on macOS to toggle the worktree window from any application while ADE is running. The shortcut hides the window when focused; otherwise, it shows and focuses it. The window also hides when it loses focus or you press **Esc** in the search bar. Hiding clears the search, keeps the window open, and avoids the Dock minimize animation.
+After a Codex chat finishes a response, enable ADE in **System Settings > Notifications**.
 
-If the shortcut cannot be registered, ADE opens a normal window that stays visible when it loses focus or you press **Esc**. You can minimize and restore it using your desktop's window controls.
+## Logs
 
-Dismissing the picker returns keyboard focus to the previous window, including windows in other applications. Clicking another window leaves that window focused. On Linux/Wayland, the desktop compositor controls which window receives focus after the picker hides.
+Check the companion terminal or `~/.ade-overlay/server.log` for errors. Set `ADE_LOG_LEVEL=debug` for detailed output.
 
-## Terminal sidebar
+## Upgrade or uninstall
 
-Install the bundled VS Code extension and activity hooks with the companion launcher's `--setup` command. Pass the same `--config` argument used by the server if you configured a different extensions directory.
+Save your work, stop the companion, and install the desktop and companion from the same release. Run `--setup` again, then restart both. Also rerun setup after moving the companion or changing the Codex home directory.
 
-Reload existing editors with **Developer: Reload Window**, then open **ADE** in the Activity Bar. The sidebar uses the same theme as the main window. **Terminal** opens a normal shell alongside files in an editor group. The second button launches the selected chat provider; choosing **Codex** or **Claude** from its dropdown immediately launches a chat and remembers your choice. Buttons stay available while launches queue. Provider terminals share a locked chat group and close when the configured foreground command finishes, including failures. Ordinary terminals stay open. Starting from an empty editor uses the full width; another group is created only when ordinary content and chat need to coexist. All terminals start in the current worktree; none open in the terminal panel.
-
-Install and sign in to the provider CLIs on the companion machine separately. Commands default to `codex --no-daemon` and `claude`; customize `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in that machine's User/Remote settings. Keep `--no-daemon` in customized Codex commands: its shared background server does not inherit the terminal context required for live chat reporting. Keep provider commands in the foreground so their lifetime controls terminal cleanup. Supported shell profiles include PowerShell, Command Prompt, bash, zsh and fish. VS Code controls terminal titles and persistence. Each extension activation starts without adopting existing terminal groups; new chat launches reuse an empty group or create a new one. Deactivation leaves terminals and groups intact. VS Code still allows manually moving tabs and unlocking groups.
-
-ADE terminal launches require exactly one workspace folder and use it as their working directory.
-
-Chats appear immediately below the launch buttons, sorted by newest prompt or turn end. Tool activity does not move rows. The current chat tab in this activation's ADE chat group has a left selection line, even when another group has focus. Selecting a file inside that chat group clears the line. Rows show a spinner for working or a green dot for idle, followed by the worktree name, conversation title and three lines reserved for a wrapped message preview. For Codex, the title comes from local resume metadata; the preview is the latest submitted prompt or final assistant reply received through hooks, shortened for display. Missing titles and messages show skeletons. Existing transcript messages are not loaded. Click a chat to switch the connected desktop to its worktree and terminal. Navigation requires exactly one connected desktop. Chat identities survive editor reloads and desktop reconnects while the companion and terminal processes keep running. Claude terminals still launch normally; activity tracking currently supports Codex only.
-
-Companion setup merges ADE activity commands into the companion account's `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`), preserving other hooks. Start a new Codex terminal and trust the added commands through `/hooks` when prompted. Hooks outside ADE terminals do nothing. Invalid hook configuration makes setup fail without overwriting the file. Normal service startup never modifies hooks; missing hooks only prevent live activity from appearing. Keep the companion installation at a stable path; rerunning setup after moving it updates the commands and may require trusting them again.
-
-While the desktop is connected, each **working → idle** transition shows a system notification. Click it to open that chat. Notifications follow your operating-system settings; reconnecting does not replay missed transitions.
-
-Chats show **working** or **idle**, including permission waits, user input and interruption. These are hook observations: after permission approval a chat can remain idle until the next hook, and missed hooks leave the previous activity visible. Process reconciliation removes exited chats within a few seconds; idle chats do not expire. Closing the desktop does not remove chats. Restarting the companion resets the live registry and stops its editors; recovery of processes surviving a companion crash is not supported.
-
-## Worktrees
-
-Launch ADE. Worktrees load on connection and after reconnecting. Closing the worktree picker quits the app, including its editor window; the companion and remote sessions keep running. Closing only the editor window keeps the picker open.
-
-- **Create worktree**: choose a project, base branch, and path. Enter a new branch name to create a branch, or leave it blank to check out the base branch directly. Git refuses branches already checked out elsewhere. Relative worktree paths start at the selected project.
-- **Click a worktree**: open its remote VS Code session. Worktrees opened through ADE are automatically trusted. A grey dot means stopped; green means running. A spinner means an operation is pending and takes priority over errors; errors take priority over green or grey status. A red X indicates an error: hover or focus the row for details, and click the X to clear it. Opening an editor preserves the error until it is explicitly cleared. All worktrees use one editor window, which switches to the selected worktree. Closing that window leaves the remote sessions running.
-- **Delete** on a worktree row: remove the working directory and keep its branch. Main and locked worktrees cannot be deleted; Git refuses worktrees with uncommitted or untracked files.
-- **Refresh worktrees**: rescan Git to include changes made outside the app.
-- **Reconnect**: force a new connection. The app also retries automatically after disconnects.
-
-Create and delete dialogs close once the server accepts the request. Creation immediately adds a pending row; deletion shows a spinner on the existing row. Progress and errors appear in every connected app and survive desktop restarts while the companion stays running. Failed creations that never produced a Git worktree keep an error row until its X is cleared. The branch and directory remain available when bootstrap fails. Restarting the companion rescans Git and resets operation/error state.
-
-Files, layout and terminal sessions are restored when you reopen a worktree after restarting the desktop app. ADE enables `terminal.integrated.enablePersistentSessions` in each editor server's Remote settings at startup, leaving synchronized User settings unchanged. Workspace settings can override this value. Keep the companion running to retain terminal processes; disconnected sessions use the configured reconnection grace period. Restarting the companion or server machine stops running processes. Each worktree keeps its own workspace state, and all editors share installed extensions. Already-open editors may need **Developer: Reload Window** to activate an extension installed elsewhere.
+Uninstalling leaves repositories and saved state intact. State lives in `~/.ade-overlay` and the desktop's application-data directory. To remove the integration, uninstall **ADE Terminals** from VS Code and remove only hook handlers marked `ADE chat activity` from `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`).
