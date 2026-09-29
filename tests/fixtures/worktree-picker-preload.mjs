@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('companion', {
   createWorktree: (input) => ipcRenderer.invoke('test:create', input),
   deleteWorktree: (input) => ipcRenderer.invoke('test:delete', input),
   setWorktreeError: (input) => ipcRenderer.invoke('test:error', input),
+  stopEditor: (input) => ipcRenderer.invoke('test:stop', input),
   onState: (callback) => {
     const listener = (_event, update) => callback(update)
     ipcRenderer.on('test:update', listener)

@@ -158,12 +158,16 @@ export function CreateWorktree({
   )
 }
 
-export function DeleteWorktree({
+export function WorktreeActions({
   worktree,
   connected,
+  opening,
+  onStopEditor,
 }: {
   worktree: Worktree
   connected: boolean
+  opening: boolean
+  onStopEditor: () => void
 }) {
   const { open, busy, error, changeOpen, submit } = useSubmission()
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -198,11 +202,10 @@ export function DeleteWorktree({
     )
   }
 
-  const reason = worktree.main
-    ? 'The main worktree cannot be deleted'
-    : worktree.locked
-      ? 'Unlock this worktree in Git before deleting it'
-      : `Actions for ${worktree.branch ?? worktree.path}`
+  const reason = `Actions for ${worktree.branch ?? worktree.path}`
+  const deletion = worktree.locked
+    ? 'Unlock this worktree in Git before deleting it'
+    : undefined
 
   return (
     <>
@@ -210,29 +213,35 @@ export function DeleteWorktree({
         restoreFocus={!dialogOpen}
         items={[
           {
-            label: 'Delete worktree',
-            tone: 'danger',
-            onSelect: () => select(false),
+            label: 'Stop VS Code server',
+            disabled: worktree.editor !== 'running' || opening,
+            onSelect: onStopEditor,
           },
-          {
-            label: 'Delete worktree and branch',
-            tone: 'danger',
-            disabled: !worktree.branch,
-            onSelect: () => select(true),
-          },
+          ...(worktree.main
+            ? []
+            : [
+                {
+                  label: 'Delete worktree',
+                  tone: 'danger' as const,
+                  disabled: worktree.locked,
+                  title: deletion,
+                  onSelect: () => select(false),
+                },
+                {
+                  label: 'Delete worktree and branch',
+                  tone: 'danger' as const,
+                  disabled: worktree.locked || !worktree.branch,
+                  title: deletion,
+                  onSelect: () => select(true),
+                },
+              ]),
         ]}
       >
         <Button
           ref={triggerRef}
           tone="secondary"
           className="worktree-menu-trigger"
-          disabled={
-            !connected ||
-            worktree.main ||
-            worktree.locked ||
-            !!worktree.operation ||
-            worktree.missing
-          }
+          disabled={!connected || !!worktree.operation || worktree.missing}
           title={reason}
           aria-label={reason}
         >

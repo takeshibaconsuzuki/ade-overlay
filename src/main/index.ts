@@ -161,6 +161,10 @@ app.whenReady().then(() => {
     assertTrustedSender(event)
     return editorNavigation.openWorktree(input)
   })
+  ipcMain.handle(companionChannels.stopEditor, (event, input) => {
+    assertTrustedSender(event)
+    return companionState.stopEditor(input)
+  })
   companionState.on('snapshot', (snapshot) => editorWindow.reconcile(snapshot))
   companionState.on('snapshot', (snapshot) =>
     worktreeNotifications.update(snapshot),

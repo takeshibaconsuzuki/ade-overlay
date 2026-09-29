@@ -25,6 +25,7 @@ export const companionChannels = {
   deleteWorktree: 'companion:worktrees:delete',
   setWorktreeError: 'companion:worktrees:set-error',
   openEditor: 'companion:editor:open',
+  stopEditor: 'companion:editor:stop',
 } as const
 
 export interface CompanionStatus {
@@ -49,4 +50,5 @@ export interface CompanionAPI {
   deleteWorktree(input: DeleteWorktreeInput): Promise<void>
   setWorktreeError(input: SetWorktreeErrorInput): Promise<void>
   openEditor(input: OpenEditorInput): Promise<void>
+  stopEditor(input: OpenEditorInput): Promise<void>
 }

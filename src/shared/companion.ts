@@ -117,6 +117,12 @@ export const companionRequests = {
     editorSessionSchema,
     180_000,
   ),
+  stopEditor: requestSpec(
+    'editor:stop',
+    openEditorInputSchema,
+    worktreeSnapshotSchema,
+    120_000,
+  ),
 }
 export const companionEvents = {
   chatIdle: eventSpec('chat:idle', chatSchema),

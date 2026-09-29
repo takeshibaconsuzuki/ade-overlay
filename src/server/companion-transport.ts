@@ -163,6 +163,9 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     register(companionRequests.openEditor, (input) =>
       worktrees.openEditor(input),
     )
+    register(companionRequests.stopEditor, (input) =>
+      worktrees.stopEditor(input),
+    )
     sendEvent(client, companionEvents.hello, {
       protocolVersion: COMPANION_PROTOCOL_VERSION,
     })

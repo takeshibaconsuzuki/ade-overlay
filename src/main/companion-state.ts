@@ -7,6 +7,7 @@ import type {
 import type {
   CreateWorktreeInput,
   DeleteWorktreeInput,
+  OpenEditorInput,
   SetWorktreeErrorInput,
   WorktreeSnapshot,
 } from '../shared/companion.ts'
@@ -58,6 +59,10 @@ export class CompanionState extends EventEmitter<{
 
   setWorktreeError(input: SetWorktreeErrorInput): Promise<void> {
     return this.applyReply(() => this.client.setWorktreeError(input))
+  }
+
+  stopEditor(input: OpenEditorInput): Promise<void> {
+    return this.applyReply(() => this.client.stopEditor(input))
   }
 
   private async applyReply(

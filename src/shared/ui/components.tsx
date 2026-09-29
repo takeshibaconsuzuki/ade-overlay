@@ -115,6 +115,7 @@ export function ActionMenu({
   items: readonly {
     label: string
     disabled?: boolean
+    title?: string
     onSelect: () => void
     tone?: 'danger'
   }[]
@@ -135,6 +136,7 @@ export function ActionMenu({
           <DropdownMenu.Item
             key={item.label}
             disabled={item.disabled}
+            title={item.title}
             color={item.tone === 'danger' ? 'red' : undefined}
             onSelect={item.onSelect}
           >

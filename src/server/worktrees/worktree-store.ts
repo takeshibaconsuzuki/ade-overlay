@@ -391,6 +391,28 @@ export class WorktreeStore extends EventEmitter<{
     }
   }
 
+  // Stopping ends a running process; membership and the saved workspace data
+  // remain, so a later open starts a fresh process. Startup is not stoppable,
+  // so an explicit stop never surfaces as an opening failure.
+  async stopEditor(input: OpenEditorInput): Promise<WorktreeSnapshot> {
+    this.accepting()
+    const project = this.project(input.project)
+    const key = worktreeKey({ ...input, project })
+    if (this.rows.get(key)?.operation)
+      throw new Error('A worktree operation is still running.')
+    return this.serialize(async () => {
+      const current = this.find({ ...input, project })
+      if (!current)
+        throw new Error('Worktree is not in the cache. Refresh the list first.')
+      if (this.editors.status(current) === 'starting')
+        throw new Error(
+          'VS Code is still starting. Stop it once it is running.',
+        )
+      await this.editors.stop(current)
+      return this.list()
+    })
+  }
+
   private schedule(
     target: WorktreeTarget,
     operation: NonNullable<Worktree['operation']>,

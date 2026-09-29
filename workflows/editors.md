@@ -67,13 +67,14 @@ stateDiagram-v2
     Starting --> Stopped: Preparation fails
     Running --> Stopped: Process exits
     Starting --> Stopping: Delete, removed membership, or companion shutdown
-    Running --> Stopping: Delete, removed membership, or companion shutdown
+    Running --> Stopping: Stop, delete, removed membership, or companion shutdown
     Stopping --> Stopped: Release chat control and stop process
     Running --> Running: Desktop disconnects or closes editor window
 ```
 
 - Process exit releases its editor registration and publishes stopped status. [Chat reconciliation](chats.md#reconcile-live-processes) separately decides when chat records disappear.
 - Deletion and accepted membership removal cancel pending starts and stop running editors. Companion shutdown cancels shared preparation and stops all editors.
+- The picker row menu offers **Stop VS Code server** for any worktree with a running editor, including the main worktree. It is unavailable while the editor starts or the picker is opening it, so an explicit stop never surfaces as an opening failure. `editor:stop` runs in the worktree queue, keeps membership, and is refused during startup or while a creation or deletion owns the row. Retained desktop pages stay until the worktree is reopened, which starts a fresh process with a new access credential.
 - Workspace data remains on disk. VS Code's reconnection grace governs disconnected extension hosts and terminals; it does not determine the companion-owned process lifetime.
 
 ## Serve editor traffic

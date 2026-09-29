@@ -437,6 +437,54 @@ test('async mutations preserve cache on failure, serialize conflicts and protect
   )
 })
 
+test('stopping an editor keeps membership and allows reopening, including the main worktree', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const path = join(root, 'linked')
+  await git(project, 'worktree', 'add', '-b', 'linked', path)
+  const editors = new WorktreeEditors()
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    editors,
+  )
+  const reconciliations = editors.retained.length
+  for (const target of [
+    { project, path: project },
+    { project, path },
+  ]) {
+    await store.openEditor(target)
+    assert.equal(editors.status(target), 'running')
+    const stopped = await store.stopEditor(target)
+    const row = stopped.worktrees.find((entry) => entry.path === target.path)
+    assert.equal(row?.editor, 'stopped')
+    assert.equal(row?.color, undefined)
+    assert.equal(stopped.worktrees.length, 2)
+    // Stopping an already stopped editor is a no-op.
+    await store.stopEditor(target)
+    await store.openEditor(target)
+    assert.equal(editors.status(target), 'running')
+  }
+  assert.equal(editors.retained.length, reconciliations)
+  await assert.rejects(
+    store.stopEditor({ project, path: join(root, 'unknown') }),
+    /not in the cache/,
+  )
+  await assert.rejects(
+    store.stopEditor({ project: root, path }),
+    /not configured/,
+  )
+  // Startup is not stoppable, so cancellation never becomes an open failure.
+  await store.openEditor({ project, path })
+  const status = editors.status.bind(editors)
+  editors.status = () => 'starting'
+  await assert.rejects(store.stopEditor({ project, path }), /still starting/)
+  editors.status = status
+  assert.equal(editors.status({ project, path }), 'running')
+  await store.startDelete({ project, path })
+  await assert.rejects(store.stopEditor({ project, path }), /still running/)
+  await store.settled()
+})
+
 test('synthetic creation failures stay outside Git membership and disappear when cleared', async (t) => {
   const { root, makeProject } = await fixture(t)
   const project = await makeProject('project')

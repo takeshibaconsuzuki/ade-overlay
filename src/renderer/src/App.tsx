@@ -7,7 +7,7 @@ import {
   UIProvider,
   WorktreeName,
 } from '../../shared/ui/components'
-import { CreateWorktree, DeleteWorktree } from './components/worktree-actions'
+import { CreateWorktree, WorktreeActions } from './components/worktree-actions'
 import { useCompanion } from './use-companion'
 import { Picker, PickerAction } from '../../shared/ui/picker'
 
@@ -25,6 +25,7 @@ export default function App() {
     reconnect,
     opening,
     openEditor,
+    stopEditor,
     rowErrors,
     clearError,
   } = useCompanion()
@@ -225,7 +226,12 @@ export default function App() {
                 </div>
               </Tooltip>
               <div className="worktree-delete">
-                <DeleteWorktree worktree={worktree} connected={connected} />
+                <WorktreeActions
+                  worktree={worktree}
+                  connected={connected}
+                  opening={isOpening}
+                  onStopEditor={() => void stopEditor(worktree)}
+                />
               </div>
             </>
           )

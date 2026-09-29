@@ -20,6 +20,8 @@ const companion: CompanionAPI = {
     ipcRenderer.invoke(companionChannels.setWorktreeError, input),
   openEditor: (input) =>
     ipcRenderer.invoke(companionChannels.openEditor, input),
+  stopEditor: (input) =>
+    ipcRenderer.invoke(companionChannels.stopEditor, input),
   onState: (callback) => {
     const listener = (_event: IpcRendererEvent, state: CompanionState): void =>
       callback(state)

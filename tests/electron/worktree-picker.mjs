@@ -18,6 +18,7 @@ let finishOpen
 let holdMutation = false
 const mutations = []
 const deletions = []
+const stops = []
 const deferMutation = () =>
   new Promise((resolve, reject) => mutations.push({ resolve, reject }))
 const worktree = (path, branch) => ({
@@ -211,6 +212,16 @@ async function run() {
               deletionFailure: undefined,
               error: undefined,
             }
+          : row,
+      ),
+    )
+  })
+  ipcMain.handle('test:stop', async (_event, value) => {
+    stops.push(value.path)
+    await update(
+      snapshot.worktrees.map((row) =>
+        row.path === value.path
+          ? { ...row, editor: 'stopped', color: undefined }
           : row,
       ),
     )
@@ -733,6 +744,65 @@ async function run() {
   )
   await key('ESCAPE')
   await until("!document.querySelector('[role=menu]')")
+
+  stage = 'main worktrees only offer stopping a running VS Code server'
+  const menuItems = () =>
+    evaluate(
+      "[...document.querySelectorAll('[role=menuitem]')].map(item => [item.textContent, item.getAttribute('aria-disabled') === 'true'])",
+    )
+  await search('detached')
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.deepEqual(await menuItems(), [
+    ['Stop VS Code server', true],
+    ['Delete worktree', false],
+    ['Delete worktree and branch', true],
+  ])
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=menu]')")
+  const mainPath = 'C:/demo/detached'
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath
+        ? { ...row, main: true, editor: 'running', color: 'blue' }
+        : row,
+    ),
+  )
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath
+        ? { ...row, main: true, editor: 'starting', color: 'blue' }
+        : row,
+    ),
+  )
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.deepEqual(await menuItems(), [['Stop VS Code server', true]])
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=menu]')")
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath ? { ...row, editor: 'running' } : row,
+    ),
+  )
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.deepEqual(await menuItems(), [['Stop VS Code server', false]])
+  await evaluate(
+    "[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Stop VS Code server').click()",
+  )
+  await until("!document.querySelector('[role=menu]')")
+  assert.deepEqual(stops, [mainPath])
+  assert.equal(
+    snapshot.worktrees.find((row) => row.path === mainPath).editor,
+    'stopped',
+  )
+  assert.equal(opened.length, beforeMenuOpens)
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath ? { ...row, main: false } : row,
+    ),
+  )
 
   stage = 'deletion closes its dialog while the existing row spins'
   await search('Alpha')

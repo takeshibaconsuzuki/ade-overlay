@@ -12,10 +12,10 @@ export function useCompanion() {
   const [opening, setOpening] = useState<string | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const openRequest = useRef(0)
-  const clearRequests = useRef(new Set<symbol>())
+  const rowRequests = useRef(new Set<symbol>())
   useEffect(() => {
     const pendingOpens = openRequest
-    const pendingClears = clearRequests.current
+    const pendingRowRequests = rowRequests.current
     let receivedState = false
     let active = true
     const acceptState = (next: CompanionState): void => {
@@ -23,7 +23,7 @@ export function useCompanion() {
       setState(next)
       setError('')
       if (next.status.state !== 'connected') {
-        pendingClears.clear()
+        pendingRowRequests.clear()
         setRowErrors({})
         pendingOpens.current++
         setOpening(null)
@@ -44,7 +44,7 @@ export function useCompanion() {
     return () => {
       active = false
       pendingOpens.current++
-      pendingClears.clear()
+      pendingRowRequests.clear()
       unsubscribe()
     }
   }, [])
@@ -80,22 +80,35 @@ export function useCompanion() {
       if (request === openRequest.current) setOpening(null)
     }
   }
+  async function stopEditor(input: OpenEditorInput): Promise<void> {
+    const request = Symbol()
+    rowRequests.current.add(request)
+    const key = JSON.stringify([input.project, input.path])
+    try {
+      await window.companion.stopEditor(input)
+    } catch (cause) {
+      if (rowRequests.current.has(request))
+        setRowErrors((current) => ({ ...current, [key]: errorMessage(cause) }))
+    } finally {
+      rowRequests.current.delete(request)
+    }
+  }
   async function clearError(input: OpenEditorInput): Promise<void> {
     const request = Symbol()
-    clearRequests.current.add(request)
+    rowRequests.current.add(request)
     const key = JSON.stringify([input.project, input.path])
     try {
       await window.companion.setWorktreeError({
         project: input.project,
         path: input.path,
       })
-      if (clearRequests.current.has(request))
+      if (rowRequests.current.has(request))
         setRowErrors((current) => ({ ...current, [key]: '' }))
     } catch (cause) {
-      if (clearRequests.current.has(request))
+      if (rowRequests.current.has(request))
         setRowErrors((current) => ({ ...current, [key]: errorMessage(cause) }))
     } finally {
-      clearRequests.current.delete(request)
+      rowRequests.current.delete(request)
     }
   }
   return {
@@ -107,6 +120,7 @@ export function useCompanion() {
     reconnect,
     opening,
     openEditor,
+    stopEditor,
     rowErrors,
     clearError,
   }

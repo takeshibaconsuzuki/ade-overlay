@@ -200,6 +200,9 @@ export class CompanionClient extends EventEmitter<{
   setWorktreeError(input: SetWorktreeErrorInput): Promise<WorktreeSnapshot> {
     return this.request(companionRequests.setError, input)
   }
+  stopEditor(input: OpenEditorInput): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.stopEditor, input)
+  }
   openEditor(
     input: OpenEditorInput,
     signal?: AbortSignal,
