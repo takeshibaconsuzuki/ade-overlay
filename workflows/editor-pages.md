@@ -58,4 +58,18 @@ flowchart TD
 ```
 
 - The owning editor view must be active; its extension frames remain subject to VS Code and Chromium frame policies. Operating-system microphone permission still applies.
-- Top-level navigation stays inside the editor's companion origin and path. New browser windows are denied.
+
+## Open a web link
+
+```mermaid
+flowchart TD
+    Link([VS Code opens a link]) --> Target{Navigation target?}
+    Target -->|Current editor, same window| Editor([Navigate inside the retained editor])
+    Target -->|External HTTP or HTTPS link| Browser[Desktop asks its OS to open the default browser]
+    Browser --> Retained([Editor stays open in the app])
+    Target -->|Other scheme or editor popup| Blocked([Opening blocked])
+```
+
+- Both new-window links and links that would replace the editor open in the desktop machine's browser. No additional Electron window is created.
+- The desktop hands off the URL without companion credentials. Localhost URLs refer to the desktop machine unless VS Code has resolved them through port forwarding.
+- Extension frames can open web links through the same new-window handler; ordinary frame navigation stays embedded.

@@ -18,6 +18,10 @@ for (const [name, fixture] of [
     'editor permissions allow user-initiated paste and microphone access in the active workbench',
     'editor-permissions.mjs',
   ],
+  [
+    'editor web links open in the desktop browser without replacing the workbench',
+    'editor-links.mjs',
+  ],
 ])
   test(
     name,

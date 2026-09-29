@@ -21,12 +21,16 @@ export class EditorPage {
   constructor(
     private readonly contents: WebContents,
     url: string,
+    acceptsNavigation: (target: URL | null) => boolean,
   ) {
     contents.on('did-start-navigation', (details) => {
       if (
         !details.isMainFrame ||
         details.isSameDocument ||
-        this.state === 'disposed'
+        this.state === 'disposed' ||
+        // Electron announces the start before will-navigate can cancel an
+        // external link. That handoff does not replace this document.
+        !acceptsNavigation(URL.parse(details.url))
       )
         return
       if (this.awaitingStart === this.navigation) this.awaitingStart = undefined

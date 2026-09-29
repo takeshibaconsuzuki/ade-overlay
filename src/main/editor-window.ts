@@ -2,6 +2,7 @@ import {
   BaseWindow,
   WebContentsView,
   session,
+  shell,
   type Session,
   type WebContents,
   type PermissionRequest,
@@ -77,16 +78,37 @@ export class EditorWindow {
           backgroundThrottling: false,
         },
       })
-      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      view.webContents.on('will-navigate', (event, target) => {
-        const next = new URL(target)
-        if (next.origin !== url.origin || !next.pathname.startsWith(path))
-          event.preventDefault()
+      const isEditorUrl = (target: URL | null): boolean =>
+        target !== null &&
+        target.origin === url.origin &&
+        target.pathname.startsWith(path)
+      const openBrowser = (target: URL | null): void => {
+        if (
+          !target ||
+          !['http:', 'https:'].includes(target.protocol) ||
+          isEditorUrl(target)
+        )
+          return
+        // Main runs on the desktop, even when the companion is remote. Only
+        // web URLs may reach the OS; never dispatch arbitrary protocol handlers.
+        void shell.openExternal(target.href).catch(() => {
+          console.warn('[ADE] Could not open the link in the desktop browser.')
+        })
+      }
+      view.webContents.setWindowOpenHandler(({ url: target }) => {
+        openBrowser(URL.parse(target))
+        return { action: 'deny' }
+      })
+      view.webContents.on('will-navigate', (event) => {
+        const next = URL.parse(event.url)
+        if (isEditorUrl(next)) return
+        event.preventDefault()
+        openBrowser(next)
       })
       entry = {
         view,
         token: editor.accessToken,
-        page: new EditorPage(view.webContents, url.href),
+        page: new EditorPage(view.webContents, url.href, isEditorUrl),
         worktree,
         forget: () => browserSession.tokens.delete(path),
       }
