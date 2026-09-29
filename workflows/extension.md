@@ -1,7 +1,7 @@
 # Workspace extension
 
 - The extension runs with the workspace on the companion machine. It owns terminal placement, terminal identities, the ADE sidebar, and destination terminal focus.
-- Codex and Claude commands can launch provider terminals. The current [live chat provider](chats.md#report-chat-activity) is Codex.
+- Codex and Claude commands launch provider terminals and report [live chat activity](chats.md#report-chat-activity).
 - Sources: [activation](../extensions/ade-terminals/src/extension.ts), [launcher](../extensions/ade-terminals/src/launcher.ts), [terminal identities](../extensions/ade-terminals/src/terminal-identities.ts), [chat controller](../extensions/ade-terminals/src/chats.ts), [sidebar](../extensions/ade-terminals/src/sidebar.ts).
 
 ## Activate and connect

@@ -8,7 +8,7 @@
 
 ```mermaid
 sequenceDiagram
-    participant Provider as Codex process
+    participant Provider as Codex or Claude process
     participant Hook as Provider hook
     participant Chats as Companion registry
     participant Extensions as Workspace extensions
@@ -25,7 +25,8 @@ sequenceDiagram
 
 - Codex launches without its shared daemon so hooks inherit the terminal’s reporting context and process ancestry. Customized launch commands must preserve this.
 - The hook reports only terminals carrying ADE reporting context. The companion verifies provider process identity, including start time, and ignores obsolete reports.
-- Work in progress displays as working. Permission requests, explicit user-input waits, completed turns, and interruption display as idle; compaction continues the working state.
+- Claude subagent events and unrelated notifications do not change the main conversation. Tool failures resume working unless the hook reports an interruption; failed turns return to idle.
+- Work in progress displays as working. Permission requests, explicit user-input waits, completed turns, and reported interruptions display as idle. Claude manual compaction returns to idle on completion; automatic compaction continues the working state. Normal Claude Esc cancellation has no completion hook, so activity remains unchanged until another supported hook arrives.
 - User prompts and completed assistant messages supply the latest message preview and ordering time. [Titles](#refresh-chat-titles) refresh from provider metadata in the background.
 - Accepted working-to-idle transitions also emit a live event to connected desktops for [native notifications](desktop.md#notify-when-a-chat-becomes-idle).
 - New conversations request [title maintenance](#schedule-chat-maintenance) without waiting for metadata reads.
@@ -72,7 +73,7 @@ flowchart TD
     Publish --> Done([Live titles updated, unavailable titles retained])
 ```
 
-- Codex titles are read from its local state without modifying it. Missing or temporarily unavailable metadata leaves existing titles intact.
+- Codex titles come from its local state; Claude titles come from the official Agent SDK’s session metadata lookup, including durable renamed titles. Each Claude provider home is read in an isolated worker so SDK configuration cannot affect another home or the companion. Neither provider’s files are modified. Missing or temporarily unavailable metadata leaves existing titles intact.
 - The sidebar shows placeholders until a title or message is available.
 
 ## Navigate to a chat

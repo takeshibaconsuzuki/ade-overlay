@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { extractFile, listPackage } from '@electron/asar'
 import spawn from 'cross-spawn'
@@ -53,6 +53,7 @@ try {
     APPDATA: home,
     XDG_CONFIG_HOME: home,
     CODEX_HOME: join(home, 'codex'),
+    CLAUDE_CONFIG_DIR: join(home, 'claude'),
     VSCODE_EXTENSIONS: join(home, 'extensions'),
     ADE_COMPANION_HOST: '127.0.0.1',
     ADE_COMPANION_TOKEN: '',
@@ -138,11 +139,61 @@ try {
     assert.ok(command.includes('runtime'))
   }
   run(node, [reporter, 'codex'], options)
+  const claudeHookFile = join(env.CLAUDE_CONFIG_DIR, 'settings.json')
+  const claudeHooks = await readFile(claudeHookFile, 'utf8')
+  for (const groups of Object.values(JSON.parse(claudeHooks).hooks)) {
+    for (const { hooks } of groups) {
+      for (const handler of hooks) {
+        assert.equal(handler.statusMessage, 'ADE chat activity')
+        assert.ok(handler.command.includes('runtime'))
+        assert.deepEqual(handler.args, [
+          '--experimental-strip-types',
+          reporter,
+          'claude',
+        ])
+      }
+    }
+  }
+  run(node, [reporter, 'claude'], options)
+  // Metadata lookup must also work in the shipped dependency tree, where the
+  // SDK's optional Claude executables are omitted.
+  const sessionId = '55555555-5555-4555-8555-555555555555'
+  const project = join(env.CLAUDE_CONFIG_DIR, 'projects', '-package-test')
+  await mkdir(join(project, sessionId), { recursive: true })
+  await writeFile(
+    join(project, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: 'user',
+      sessionId,
+      message: { content: 'Original prompt' },
+    }) + '\n',
+  )
+  await writeFile(
+    join(project, sessionId, 'custom-title.json'),
+    JSON.stringify({ customTitle: 'Renamed chat' }),
+  )
+  const titleSmoke = join(home, 'claude-title-smoke.mjs')
+  await writeFile(
+    titleSmoke,
+    `
+    import assert from 'node:assert/strict'
+    import { readClaudeTitles } from ${JSON.stringify(pathToFileURL(join(companion, 'server', 'chats', 'claude-chat-title.js')).href)}
+    const root = process.env.CLAUDE_CONFIG_DIR
+    const titles = await readClaudeTitles(new Map([[root, new Set([${JSON.stringify(sessionId)}])]]))
+    assert.equal(titles.get(root)?.get(${JSON.stringify(sessionId)}), 'Renamed chat')
+  `,
+  )
+  run(node, [titleSmoke], options)
   run(launcher, ['--setup', '--config', config], {
     ...options,
     env: { ...env, PATH: bin + (platform === 'win32' ? ';' : ':') + env.PATH },
   })
   assert.equal(await readFile(hookFile, 'utf8'), hooks, 'setup is idempotent')
+  assert.equal(
+    await readFile(claudeHookFile, 'utf8'),
+    claudeHooks,
+    'Claude setup is idempotent',
+  )
   await writeFile(hookFile, '{malformed hooks')
   const invalidSetup = spawn.sync(launcher, ['--setup', '--config', config], {
     ...options,

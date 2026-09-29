@@ -58,7 +58,9 @@ Closing the worktree window quits ADE; closing only the editor window does not. 
 
 Open **ADE** in VS Code's Activity Bar to launch shells or chats in the current worktree. Launches require exactly one workspace folder. Chat terminals close when their command exits.
 
-For Codex activity tracking, start a new chat after setup and trust the added commands through `/hooks` when prompted. Click a sidebar chat or idle notification to open its terminal; navigation requires exactly one connected ADE desktop. Claude activity tracking is unavailable.
+For Codex and Claude activity tracking, start a new chat after setup and trust the added commands through `/hooks` when prompted. Click a sidebar chat or idle notification to open its terminal; navigation requires exactly one connected ADE desktop. Titles come from local session metadata; previews show the latest prompt or final response received through hooks.
+
+Use a current Claude Code CLI with [exec-form command hooks](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) that support `args`. Setup preserves existing provider settings and hooks.
 
 Customize commands through `adeTerminals.codexCommand` and `adeTerminals.claudeCommand` in the companion computer's VS Code User/Remote settings. Keep `--no-daemon` in the Codex command and run both commands in the foreground.
 
@@ -106,7 +108,7 @@ editor:
 
 If `code` is unavailable, run **Shell Command: Install 'code' command in PATH** from VS Code's Command Palette.
 
-After a Codex chat finishes a response, enable ADE in **System Settings > Notifications**.
+After a chat finishes a response, enable ADE in **System Settings > Notifications**.
 
 ## Logs
 
@@ -114,6 +116,6 @@ Check the companion terminal or `~/.ade-overlay/server.log` for errors. Set `ADE
 
 ## Upgrade or uninstall
 
-Save your work, stop the companion, and install the desktop and companion from the same release. Run `--setup` again, then restart both. Also rerun setup after moving the companion or changing the Codex home directory.
+Save your work, stop the companion, and install the desktop and companion from the same release. Run `--setup` again, then restart both. Also rerun setup after moving the companion or changing a provider home directory.
 
-Uninstalling leaves repositories and saved state intact. State lives in `~/.ade-overlay` and the desktop's application-data directory. To remove the integration, uninstall **ADE Terminals** from VS Code and remove only hook handlers marked `ADE chat activity` from `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`).
+Uninstalling leaves repositories and saved state intact. State lives in `~/.ade-overlay` and the desktop's application-data directory. To remove the integration, uninstall **ADE Terminals** from VS Code and remove only hook handlers marked `ADE chat activity` from `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) and `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`).
