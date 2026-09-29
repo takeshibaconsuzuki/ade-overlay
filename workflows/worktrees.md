@@ -81,17 +81,23 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Queued deletion begins]) --> Stop[Cancel startup or stop the worktree's editor]
-    Stop --> Remove[Ask Git to remove the worktree without force]
+    Stop --> Remove[Ask Git to remove the worktree, using force only after confirmation]
     Remove --> Result{Removal succeeded?}
     Result -->|Yes| Membership[Apply membership without this worktree]
-    Membership --> Success([Remove operation row and publish, branch remains])
-    Result -->|No| Failure([Keep worktree and row error, editor remains stopped])
+    Membership --> Branch[Delete the local branch if requested]
+    Branch --> Success([Remove operation row and publish])
+    Result -->|No| Failure[Keep worktree and error with its file list]
+    Failure --> Confirm{User confirms a force retry?}
+    Confirm -->|Yes, when Git permits force| Start
+    Confirm -->|No| Kept([Keep worktree, editor remains stopped])
     click Stop "editors.md#editor-process-lifetime"
     click Membership "worktrees.md#refresh-and-apply-membership"
 ```
 
 - Main and locked worktrees cannot be scheduled for deletion. Git can refuse removal, including when local changes make it unsafe.
-- After a failed removal, the user can address the error and reopen the editor. Deletion does not delete the branch.
+- The row menu offers worktree-only deletion or deletion of both the worktree and its local branch, including unmerged commits. Detached worktrees only offer worktree-only deletion.
+- A failed removal opens a popup for the requesting picker with changed, untracked, ignored, and submodule paths. When Git requires force, the user can confirm a retry with `--force`; cancelling preserves the worktree. Main and locked worktrees remain protected.
+- Branch deletion runs only after successful removal. If it fails, membership reflects the removed worktree and a retained error explains that the branch remains.
 
 ## Clear a retained error
 

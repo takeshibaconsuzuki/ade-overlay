@@ -20,12 +20,15 @@ export const createWorktreeInputSchema = z.object({
   branch: argumentSchema,
   path: textSchema,
 })
-export const deleteWorktreeInputSchema = z.object({
+export const openEditorInputSchema = z.object({
   project: textSchema,
   path: textSchema,
 })
-export const openEditorInputSchema = deleteWorktreeInputSchema
-export const setWorktreeErrorInputSchema = deleteWorktreeInputSchema.extend({
+export const deleteWorktreeInputSchema = openEditorInputSchema.extend({
+  deleteBranch: z.boolean().optional(),
+  force: z.boolean().optional(),
+})
+export const setWorktreeErrorInputSchema = openEditorInputSchema.extend({
   error: z.string().max(4096).optional(),
 })
 const editorSessionSchema = z.object({
@@ -46,6 +49,13 @@ const worktreeSchema = z.object({
   editorDetail: z.string().max(512).optional(),
   operation: z.enum(['creating', 'deleting']).optional(),
   error: z.string().optional(),
+  deletionFailure: z
+    .object({
+      files: z.array(z.string()),
+      canForce: z.boolean(),
+      deleteBranch: z.boolean(),
+    })
+    .optional(),
   missing: z.boolean().optional(),
 })
 const worktreeSnapshotSchema = z.object({

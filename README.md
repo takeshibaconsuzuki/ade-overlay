@@ -50,7 +50,7 @@ Press **Ctrl+Shift+Space** on Windows/Linux or **Cmd+Shift+Space** on macOS to t
 Click a worktree to open its editor. Opened worktrees are automatically trusted.
 
 - **Create worktree:** leave the branch name blank to check out the base branch. Relative paths start at the selected project.
-- **Delete:** removes the directory but keeps its branch. Main or locked worktrees, and those with uncommitted or untracked files, cannot be deleted.
+- **Worktree menu (⋯):** delete the worktree while keeping its branch, or delete both the worktree and its local branch (including unmerged commits). If Git refuses removal because of local files or submodules, review the listed files and confirm a retry with `--force` to discard them. Main and locked worktrees cannot be deleted.
 - **Refresh worktrees:** picks up external Git changes.
 
 Hover or focus an error row for details; click its red X to clear the error.

@@ -8,6 +8,7 @@ import {
   type HTMLAttributes,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   type SyntheticEvent,
 } from 'react'
 import {
@@ -99,6 +100,46 @@ export function ChoiceMenu({
             </DropdownMenu.RadioItem>
           ))}
         </DropdownMenu.RadioGroup>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  )
+}
+
+export function ActionMenu({
+  children,
+  items,
+  restoreFocus = true,
+}: {
+  children: ReactElement
+  items: readonly {
+    label: string
+    disabled?: boolean
+    onSelect: () => void
+    tone?: 'danger'
+  }[]
+  restoreFocus?: boolean
+}) {
+  const contentRef = useInteractionScopeRef()
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>{children}</DropdownMenu.Trigger>
+      <DropdownMenu.Content
+        ref={contentRef}
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (!restoreFocus) event.preventDefault()
+        }}
+      >
+        {items.map((item) => (
+          <DropdownMenu.Item
+            key={item.label}
+            disabled={item.disabled}
+            color={item.tone === 'danger' ? 'red' : undefined}
+            onSelect={item.onSelect}
+          >
+            {item.label}
+          </DropdownMenu.Item>
+        ))}
       </DropdownMenu.Content>
     </DropdownMenu.Root>
   )
@@ -294,34 +335,49 @@ export function SelectField({
   )
 }
 
-export function Modal({
-  title,
-  description,
-  open,
-  onOpenChange,
-  trigger,
-  children,
-}: {
-  title: string
-  description: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  trigger: ReactElement
-  children: ReactNode
-}) {
+function useInteractionScopeRef() {
   const suspend = useContext(InteractionScope)
   const release = useRef<(() => void) | undefined>(undefined)
-  const contentRef = useCallback(
+  return useCallback(
     (element: HTMLDivElement | null) => {
       release.current?.()
       release.current = element ? suspend?.() : undefined
     },
     [suspend],
   )
+}
+
+export function Modal({
+  title,
+  description,
+  open,
+  onOpenChange,
+  trigger,
+  returnFocusRef,
+  children,
+}: {
+  title: string
+  description: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  trigger?: ReactElement
+  returnFocusRef?: RefObject<HTMLElement | null>
+  children: ReactNode
+}) {
+  const contentRef = useInteractionScopeRef()
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Trigger>{trigger}</Dialog.Trigger>
-      <Dialog.Content ref={contentRef} maxWidth="520px">
+      {trigger && <Dialog.Trigger>{trigger}</Dialog.Trigger>}
+      <Dialog.Content
+        ref={contentRef}
+        maxWidth="520px"
+        onCloseAutoFocus={(event) => {
+          if (returnFocusRef?.current) {
+            event.preventDefault()
+            returnFocusRef.current.focus({ preventScroll: true })
+          }
+        }}
+      >
         <Dialog.Title>{title}</Dialog.Title>
         <Dialog.Description className="ui-dialog-description">
           {description}

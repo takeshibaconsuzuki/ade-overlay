@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Worktree, WorktreeSnapshot } from '../../../shared/companion'
 import { errorMessage } from '../use-companion'
 import {
+  ActionMenu,
   Button,
   Field,
   Modal,
@@ -165,12 +166,34 @@ export function DeleteWorktree({
   connected: boolean
 }) {
   const { open, busy, error, changeOpen, submit } = useSubmission()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [deleteBranch, setDeleteBranch] = useState(false)
+  const [watchFailure, setWatchFailure] = useState(false)
+  const failure =
+    watchFailure && !worktree.operation ? worktree.deletionFailure : undefined
+  const dialogOpen = open || !!failure
+  const removesBranch = failure?.deleteBranch ?? deleteBranch
+  const label = removesBranch ? 'Delete worktree and branch' : 'Delete worktree'
+
+  function select(removeBranch: boolean): void {
+    setWatchFailure(false)
+    setDeleteBranch(removeBranch)
+    changeOpen(true)
+  }
+
+  function dismiss(): void {
+    setWatchFailure(false)
+    changeOpen(false)
+  }
 
   async function remove(): Promise<void> {
+    setWatchFailure(true)
     await submit(() =>
       window.companion.deleteWorktree({
         project: worktree.project,
         path: worktree.path,
+        deleteBranch: removesBranch,
+        force: !!failure?.canForce,
       }),
     )
   }
@@ -179,17 +202,30 @@ export function DeleteWorktree({
     ? 'The main worktree cannot be deleted'
     : worktree.locked
       ? 'Unlock this worktree in Git before deleting it'
-      : `Delete ${worktree.branch ?? worktree.path}`
+      : `Actions for ${worktree.branch ?? worktree.path}`
 
   return (
-    <Modal
-      title="Delete worktree?"
-      description="Remove this working directory and keep its branch."
-      open={open}
-      onOpenChange={changeOpen}
-      trigger={
+    <>
+      <ActionMenu
+        restoreFocus={!dialogOpen}
+        items={[
+          {
+            label: 'Delete worktree',
+            tone: 'danger',
+            onSelect: () => select(false),
+          },
+          {
+            label: 'Delete worktree and branch',
+            tone: 'danger',
+            disabled: !worktree.branch,
+            onSelect: () => select(true),
+          },
+        ]}
+      >
         <Button
-          tone="danger"
+          ref={triggerRef}
+          tone="secondary"
+          className="worktree-menu-trigger"
           disabled={
             !connected ||
             worktree.main ||
@@ -200,25 +236,73 @@ export function DeleteWorktree({
           title={reason}
           aria-label={reason}
         >
-          Delete
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <circle cx="3" cy="9" r="1.5" />
+            <circle cx="9" cy="9" r="1.5" />
+            <circle cx="15" cy="9" r="1.5" />
+          </svg>
         </Button>
-      }
-    >
-      <p className="delete-path">{worktree.path}</p>
-      {error && <Notice>{error}</Notice>}
-      <div className="dialog-actions">
-        <Button tone="secondary" onClick={() => changeOpen(false)}>
-          Cancel
-        </Button>
-        <Button
-          tone="danger"
-          disabled={!connected}
-          busy={busy}
-          onClick={() => void remove()}
-        >
-          {busy ? 'Deleting…' : 'Delete worktree'}
-        </Button>
-      </div>
-    </Modal>
+      </ActionMenu>
+      <Modal
+        title={
+          failure
+            ? failure.canForce
+              ? 'Force delete worktree?'
+              : 'Could not delete worktree'
+            : `${label}?`
+        }
+        description={
+          failure?.canForce
+            ? `Git refused to remove this worktree. Retry with --force to permanently discard its local files and changes${removesBranch ? ' and delete its branch' : ''}?`
+            : failure
+              ? 'The worktree could not be removed. Review the error and files below.'
+              : removesBranch
+                ? 'Remove this working directory and delete its local branch, including any unmerged commits.'
+                : 'Remove this working directory and keep its branch.'
+        }
+        open={dialogOpen}
+        onOpenChange={(next) => {
+          if (!next) dismiss()
+        }}
+        returnFocusRef={triggerRef}
+      >
+        <p className="delete-path">{worktree.path}</p>
+        {removesBranch && (
+          <p className="delete-path">Branch: {worktree.branch}</p>
+        )}
+        {failure && worktree.error && <Notice>{worktree.error}</Notice>}
+        {!!failure?.files.length && (
+          <ul className="delete-files" aria-label="Files in the worktree">
+            {failure.files.map((file) => (
+              <li key={file}>
+                <code>{file}</code>
+              </li>
+            ))}
+          </ul>
+        )}
+        {error && <Notice>{error}</Notice>}
+        <div className="dialog-actions">
+          <Button tone="secondary" onClick={dismiss}>
+            Cancel
+          </Button>
+          {(!failure || failure.canForce) && (
+            <Button
+              tone="danger"
+              disabled={!connected || !!worktree.operation}
+              busy={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? 'Deleting…' : failure ? 'Delete with --force' : label}
+            </Button>
+          )}
+        </div>
+      </Modal>
+    </>
   )
 }

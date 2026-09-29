@@ -17,6 +17,7 @@ let holdOpen = false
 let finishOpen
 let holdMutation = false
 const mutations = []
+const deletions = []
 const deferMutation = () =>
   new Promise((resolve, reject) => mutations.push({ resolve, reject }))
 const worktree = (path, branch) => ({
@@ -135,6 +136,14 @@ async function clickMouse(selector) {
   })
   await delay(40)
 }
+async function openDeleteMenu(label = 'Delete worktree') {
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  await evaluate(
+    `[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === ${JSON.stringify(label)}).click()`,
+  )
+  await until("!!document.querySelector('[role=dialog]')")
+}
 async function assertListAlignment() {
   const bounds = await evaluate(`(() => {
     const search = document.querySelector('.worktree-search').getBoundingClientRect();
@@ -191,10 +200,18 @@ async function run() {
     ])
   })
   ipcMain.handle('test:delete', async (_event, value) => {
+    deletions.push(value)
     if (holdMutation) return deferMutation()
     await update(
       snapshot.worktrees.map((row) =>
-        row.path === value.path ? { ...row, operation: 'deleting' } : row,
+        row.path === value.path
+          ? {
+              ...row,
+              operation: 'deleting',
+              deletionFailure: undefined,
+              error: undefined,
+            }
+          : row,
       ),
     )
   })
@@ -494,11 +511,13 @@ async function run() {
   holdMutation = true
   for (const kind of ['create', 'delete']) {
     const reopen = async () => {
-      await evaluate(
-        kind === 'create'
-          ? "[...document.querySelectorAll('button')].find(button => button.textContent === 'Create worktree').click()"
-          : "document.querySelector('.worktree-delete button').click()",
-      )
+      if (kind === 'create') {
+        await evaluate(
+          "[...document.querySelectorAll('button')].find(button => button.textContent === 'Create worktree').click()",
+        )
+      } else {
+        await openDeleteMenu()
+      }
       await until("!!document.querySelector('[role=dialog]')")
       if (kind === 'create') {
         await evaluate(`(() => {
@@ -647,9 +666,48 @@ async function run() {
   await key('ENTER')
   assert.equal(opened.at(-1), enabledPath)
 
+  stage =
+    'worktree menu owns keyboard focus and disables branch deletion for detached HEAD'
+  await search('Alpha')
+  const beforeMenuOpens = opened.length
+  const beforeMenuHides = hideRequests
+  await evaluate("document.querySelector('.worktree-delete button').focus()")
+  await key('ENTER')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.equal(
+    await evaluate("!!document.activeElement.closest('[role=menu]')"),
+    true,
+  )
+  await key('DOWN')
+  assert.equal(
+    await evaluate('document.activeElement.textContent'),
+    'Delete worktree and branch',
+  )
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=menu]')")
+  assert.equal(
+    await evaluate(
+      "document.activeElement === document.querySelector('.worktree-delete button')",
+    ),
+    true,
+  )
+  assert.equal(opened.length, beforeMenuOpens)
+  assert.equal(hideRequests, beforeMenuHides)
+  await search('detached')
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.equal(
+    await evaluate(
+      "[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Delete worktree and branch').getAttribute('aria-disabled')",
+    ),
+    'true',
+  )
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=menu]')")
+
   stage = 'deletion closes its dialog while the existing row spins'
   await search('Alpha')
-  await evaluate("document.querySelector('.worktree-delete button').click()")
+  await openDeleteMenu()
   await until("!!document.querySelector('[role=dialog]')")
   await evaluate(
     "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === 'Delete worktree').click()",
@@ -665,6 +723,72 @@ async function run() {
     await evaluate("document.querySelector('.worktree-open').disabled"),
     true,
   )
+
+  stage = 'blocked deletion lists files and cancellation never forces removal'
+  const blocked = {
+    files: ['src/changed.ts', 'new file.txt', 'nested/未追跡.txt'],
+    canForce: true,
+    deleteBranch: false,
+  }
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.branch === 'main'
+        ? {
+            ...row,
+            operation: undefined,
+            error: 'Git refused deletion: untracked files',
+            deletionFailure: blocked,
+          }
+        : row,
+    ),
+  )
+  await until("!!document.querySelector('[role=dialog]')")
+  assert.deepEqual(
+    await evaluate(
+      "[...document.querySelectorAll('.delete-files li')].map(item => item.textContent)",
+    ),
+    blocked.files,
+  )
+  const deletionCount = deletions.length
+  const openedCount = opened.length
+  await key('DOWN')
+  assert.equal(
+    await evaluate("!!document.activeElement.closest('[role=dialog]')"),
+    true,
+  )
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=dialog]')")
+  assert.equal(deletions.length, deletionCount)
+  assert.equal(opened.length, openedCount)
+
+  stage =
+    'branch deletion preserves the action through explicit force confirmation'
+  await openDeleteMenu('Delete worktree and branch')
+  await evaluate(
+    "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === 'Delete worktree and branch').click()",
+  )
+  await until("!document.querySelector('[role=dialog]')")
+  assert.equal(deletions.at(-1).deleteBranch, true)
+  assert.equal(deletions.at(-1).force, false)
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.branch === 'main'
+        ? {
+            ...row,
+            operation: undefined,
+            error: 'Git refused deletion: untracked files',
+            deletionFailure: { ...blocked, deleteBranch: true },
+          }
+        : row,
+    ),
+  )
+  await until("!!document.querySelector('[role=dialog]')")
+  await evaluate(
+    "[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === 'Delete with --force').click()",
+  )
+  await until("!document.querySelector('[role=dialog]')")
+  assert.equal(deletions.at(-1).deleteBranch, true)
+  assert.equal(deletions.at(-1).force, true)
 
   stage = 'row failure tooltip and clearing without opening the editor'
   await update(

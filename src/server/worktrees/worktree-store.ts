@@ -35,6 +35,44 @@ type RowState = {
   target: WorktreeTarget
   operation?: Worktree['operation']
   error?: string
+  deletionFailure?: Worktree['deletionFailure']
+}
+
+class WorktreeRemovalError extends Error {
+  readonly details: NonNullable<Worktree['deletionFailure']>
+
+  constructor(
+    cause: unknown,
+    details: NonNullable<Worktree['deletionFailure']>,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.details = details
+  }
+}
+
+async function removalFiles(path: string): Promise<string[]> {
+  const status = await git(path, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+    '--ignored=matching',
+    '--ignore-submodules=none',
+  ])
+  const records = status.split('\0').filter(Boolean)
+  const files = new Set<string>()
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]
+    files.add(record.slice(3))
+    if (/[RC]/.test(record.slice(0, 2))) files.add(records[++index])
+  }
+  // Even clean submodules prevent removal without --force.
+  const tracked = await git(path, ['ls-files', '--stage', '-z'])
+  for (const record of tracked.split('\0')) {
+    if (record.startsWith('160000 '))
+      files.add(record.slice(record.indexOf('\t') + 1))
+  }
+  return [...files].sort()
 }
 
 async function git(project: string, args: string[]): Promise<string> {
@@ -43,7 +81,7 @@ async function git(project: string, args: string[]): Promise<string> {
       encoding: 'utf8',
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
     })
     return stdout
   } catch (error) {
@@ -214,6 +252,9 @@ export class WorktreeStore extends EventEmitter<{
       ...(!actual.has(key) && { missing: true }),
       operation: this.rows.get(key)?.operation,
       error: this.rows.get(key)?.error,
+      ...(this.rows.get(key)?.deletionFailure && {
+        deletionFailure: this.rows.get(key)!.deletionFailure,
+      }),
       editor: this.editors.status(target),
       editorDetail: this.editors.detail(target),
     }))
@@ -361,6 +402,8 @@ export class WorktreeStore extends EventEmitter<{
         this.publish()
       } catch (error) {
         state.operation = undefined
+        if (error instanceof WorktreeRemovalError)
+          state.deletionFailure = error.details
         state.error = (
           error instanceof Error ? error.message : String(error)
         ).slice(0, 4096)
@@ -448,15 +491,69 @@ export class WorktreeStore extends EventEmitter<{
     if (worktree.locked)
       throw new Error('Unlock this worktree in Git before deleting it.')
     return this.schedule(worktree, 'deleting', async () => {
-      // Never force removal or delete branches. A failed removal leaves the
-      // editor stopped; it can be reopened after the user handles the error.
-      await this.editors.stop(worktree)
-      await git(project, ['worktree', 'remove', '--', worktree.path])
+      // Recheck external Git changes before choosing which branch to delete.
+      let current: GitWorktree | undefined
+      try {
+        current = (await scan(project)).find(
+          (entry) => worktreeKey(entry) === worktreeKey(worktree),
+        )
+        if (!current)
+          throw new Error('Worktree no longer exists. Refresh the list first.')
+        if (current.main)
+          throw new Error('The main worktree cannot be deleted.')
+        if (current.locked)
+          throw new Error(
+            'This worktree is locked. Unlock it in Git before deleting it.',
+          )
+        if (input.deleteBranch && !current.branch)
+          throw new Error('This worktree has no branch to delete.')
+        if (input.deleteBranch && current.branch !== worktree.branch)
+          throw new Error(
+            'The worktree branch changed. Refresh the list before deleting its branch.',
+          )
+        await this.editors.stop(current)
+        await git(project, [
+          'worktree',
+          'remove',
+          ...(input.force ? ['--force'] : []),
+          '--',
+          current.path,
+        ])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        let files: string[] = []
+        let canForce =
+          !input.force &&
+          /contains modified or untracked files|working trees containing submodules/.test(
+            message,
+          )
+        try {
+          files = await removalFiles(worktree.path)
+        } catch {
+          // Do not offer a destructive retry when its contents cannot be shown.
+          canForce = false
+        }
+        throw new WorktreeRemovalError(error, {
+          files,
+          canForce,
+          deleteBranch: !!input.deleteBranch,
+        })
+      }
       await this.applyWorktrees(
         this.worktrees.filter(
           (entry) => worktreeKey(entry) !== worktreeKey(worktree),
         ),
       )
+      if (input.deleteBranch && current?.branch) {
+        try {
+          await git(project, ['branch', '-D', '--', current.branch])
+        } catch (error) {
+          throw new Error(
+            `Worktree removed, but branch "${current.branch}" could not be deleted: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          )
+        }
+      }
     })
   }
 }

@@ -1354,3 +1354,210 @@ test(
     }
   },
 )
+
+test('deletion reports local files over RPC and requires an explicit force retry, optionally deleting the branch', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  await writeFile(join(project, 'tracked.txt'), 'original')
+  await writeFile(join(project, 'rename me.txt'), 'rename')
+  await writeFile(join(project, '.gitignore'), 'ignored/\n')
+  await git(project, 'add', '.')
+  await git(
+    project,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.com',
+    'commit',
+    '--no-gpg-sign',
+    '-m',
+    'Files',
+  )
+  const path = join(root, 'dirty')
+  await git(project, 'worktree', 'add', '-b', 'dirty', path)
+  await writeFile(join(path, 'tracked.txt'), 'changed')
+  await git(path, 'mv', 'rename me.txt', 'renamed.txt')
+  await mkdir(join(path, 'nested'))
+  await writeFile(join(path, 'nested', '未追跡.txt'), 'keep')
+  // Windows does not allow newline characters in filenames.
+  const newlineFiles = process.platform === 'win32' ? [] : ['line\nbreak.txt']
+  for (const file of newlineFiles) await writeFile(join(path, file), 'keep')
+  await mkdir(join(path, 'ignored'))
+  await writeFile(join(path, 'ignored', 'local.txt'), 'keep')
+  const server = await startCompanionServer({
+    config: { projects: [{ mainWorktreePath: project }] },
+    port: 0,
+  })
+  t.after(() => server.close())
+  const client = await connectClient(t, server.url)
+  await assert.rejects(
+    completeDelete(client, { project, path, deleteBranch: true }),
+    /modified or untracked/,
+  )
+  const failed = (await client.listWorktrees()).worktrees.find(
+    (row) => row.path === path,
+  )!
+  assert.deepEqual(failed.deletionFailure, {
+    files: [
+      'ignored/',
+      ...newlineFiles,
+      'nested/未追跡.txt',
+      'rename me.txt',
+      'renamed.txt',
+      'tracked.txt',
+    ],
+    canForce: true,
+    deleteBranch: true,
+  })
+  assert.equal(await readFile(join(path, 'tracked.txt'), 'utf8'), 'changed')
+  assert.ok(await git(project, 'rev-parse', '--verify', 'refs/heads/dirty'))
+  const removed = await completeDelete(client, {
+    project,
+    path,
+    deleteBranch: true,
+    force: true,
+  })
+  assert.ok(!removed.worktrees.some((row) => row.path === path))
+  await assert.rejects(access(path))
+  await assert.rejects(
+    git(project, 'rev-parse', '--verify', 'refs/heads/dirty'),
+  )
+})
+
+test('force removal keeps the branch by default and still protects main and locked worktrees', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const path = join(root, 'dirty')
+  await git(project, 'worktree', 'add', '-b', 'dirty', path)
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    new WorktreeEditors(),
+  )
+  await writeFile(join(path, 'untracked.txt'), 'keep')
+  await assert.rejects(
+    store.startDelete({
+      project,
+      path: project,
+      force: true,
+      deleteBranch: true,
+    }),
+    /main worktree/,
+  )
+  await git(project, 'worktree', 'lock', path)
+  await store.startDelete({ project, path, force: true, deleteBranch: true })
+  await store.settled()
+  const failed = store.list().worktrees.find((row) => row.path === path)!
+  assert.match(failed.error!, /Unlock/)
+  assert.equal(failed.deletionFailure?.canForce, false)
+  await access(join(path, 'untracked.txt'))
+  await git(project, 'worktree', 'unlock', path)
+  await store.startDelete({ project, path, force: true })
+  await store.settled()
+  assert.ok(!store.list().worktrees.some((row) => row.path === path))
+  assert.ok(await git(project, 'rev-parse', '--verify', 'refs/heads/dirty'))
+})
+
+test('branch deletion removes unmerged branches and preserves accurate membership on branch deletion failure', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const path = join(root, 'unmerged')
+  await git(project, 'worktree', 'add', '-b', 'unmerged', path)
+  await git(
+    path,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.com',
+    'commit',
+    '--no-gpg-sign',
+    '--allow-empty',
+    '-m',
+    'Unmerged',
+  )
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    new WorktreeEditors(),
+  )
+  await store.startDelete({ project, path, deleteBranch: true })
+  await store.settled()
+  assert.ok(!store.list().worktrees.some((row) => row.path === path))
+  await assert.rejects(
+    git(project, 'rev-parse', '--verify', 'refs/heads/unmerged'),
+  )
+
+  const shared = join(root, 'shared')
+  const other = join(root, 'other')
+  await git(project, 'worktree', 'add', '-b', 'shared', shared)
+  await git(project, 'worktree', 'add', '--force', other, 'shared')
+  await store.refresh()
+  await store.startDelete({ project, path: shared, deleteBranch: true })
+  await store.settled()
+  const failed = store.list().worktrees.find((row) => row.path === shared)!
+  assert.equal(failed.missing, true)
+  assert.match(
+    failed.error!,
+    /Worktree removed, but branch "shared" could not be deleted/,
+  )
+  assert.equal(failed.deletionFailure, undefined)
+  await assert.rejects(access(shared))
+  assert.ok(
+    store.list().worktrees.some((row) => row.path === other && !row.missing),
+  )
+  assert.ok(await git(project, 'rev-parse', '--verify', 'refs/heads/shared'))
+})
+
+test('clean submodules are listed before a confirmed force removal', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const module = await makeProject('module')
+  await git(
+    project,
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'add',
+    module,
+    'sub',
+  )
+  await git(
+    project,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.com',
+    'commit',
+    '--no-gpg-sign',
+    '-am',
+    'Submodule',
+  )
+  const path = join(root, 'with-submodule')
+  await git(project, 'worktree', 'add', '-b', 'with-submodule', path)
+  await git(
+    path,
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'update',
+    '--init',
+  )
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    new WorktreeEditors(),
+  )
+  await store.startDelete({ project, path })
+  await store.settled()
+  const failed = store.list().worktrees.find((row) => row.path === path)!
+  assert.deepEqual(failed.deletionFailure, {
+    files: ['sub'],
+    canForce: true,
+    deleteBranch: false,
+  })
+  await access(join(path, 'sub', '.git'))
+  await store.startDelete({ project, path, force: true })
+  await store.settled()
+  assert.ok(!store.list().worktrees.some((row) => row.path === path))
+  await assert.rejects(access(path))
+  assert.ok(
+    await git(project, 'rev-parse', '--verify', 'refs/heads/with-submodule'),
+  )
+})

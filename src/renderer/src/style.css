@@ -125,3 +125,16 @@ body {
   overflow-wrap: anywhere;
   font-size: 13px;
 }
+
+.worktree-menu-trigger {
+  width: 32px;
+  padding: 0;
+}
+.delete-files {
+  max-height: 240px;
+  overflow: auto;
+  padding-left: 24px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
