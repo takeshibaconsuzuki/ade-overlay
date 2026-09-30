@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { basename, delimiter, join } from 'node:path'
 import { homedir } from 'node:os'
 import { execa } from 'execa'
 import which from 'which'
@@ -33,6 +33,13 @@ export function codeEnvironment(): NodeJS.ProcessEnv {
       ].includes(name.toUpperCase())
     )
       delete env[name]
+    else if (name.toUpperCase() === 'PATH')
+      // Terminals opened by VS Code Server put its remote-cli helper first. It
+      // needs the stripped window route, so it cannot report the local CLI.
+      env[name] = env[name]
+        ?.split(delimiter)
+        .filter((entry) => basename(entry) !== 'remote-cli')
+        .join(delimiter)
   return env
 }
 
@@ -60,12 +67,17 @@ export async function findLocalCode(
   signal?: AbortSignal,
 ): Promise<LocalCode> {
   signal?.throwIfAborted()
-  const command = await which('code', { nothrow: true })
+  const path = Object.entries(codeEnvironment()).find(
+    ([name]) => name.toUpperCase() === 'PATH',
+  )?.[1]
+  const command = await which('code', { nothrow: true, path })
   if (!command) throw new Error('Install stable VS Code and put code on PATH.')
   const version = await commandOutput(command, ['--version'], signal)
   const commit = version.match(/\b[a-f0-9]{40}\b/)?.[0]
   if (!commit || /insider/i.test(version))
-    throw new Error('VS Code CLI must report a stable release commit.')
+    throw new Error(
+      `VS Code CLI must report a stable release commit. ${command} --version printed: ${version.trim().slice(0, 500) || '(nothing)'}`,
+    )
   const help = await commandOutput(command, ['serve-web', '--help'], signal)
   for (const option of [
     '--cli-data-dir',

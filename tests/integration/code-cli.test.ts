@@ -49,8 +49,17 @@ test('editor child environments remove credentials and profile overrides without
     watch_report_dependencies: '1',
     ADE_ENV_TEST: 'keep-this',
   }
+  for (const name of Object.keys(process.env))
+    if (name.toUpperCase() === 'PATH') delete process.env[name]
+  const local = join(sep, 'usr', 'bin')
+  process.env.PATH = [
+    join(sep, 'server', 'bin', 'remote-cli'),
+    local,
+    join(sep, 'other', 'bin', 'remote-cli') + sep,
+  ].join(delimiter)
   const child = codeEnvironment()
   assert.equal(child.ADE_ENV_TEST, 'keep-this')
+  assert.equal(child.PATH, local)
   for (const name of [
     'ADE_COMPANION_TOKEN',
     'ade_companion_token',
@@ -307,7 +316,18 @@ test(
     }
     for (const name of Object.keys(childEnvironment))
       if (name.toUpperCase() === 'PATH') delete childEnvironment[name]
+    // A VS Code Server terminal's helper is first on PATH and must be skipped.
+    const remoteCli = join(root, 'server', 'bin', 'remote-cli')
+    await mkdir(remoteCli, { recursive: true })
+    await writeFile(
+      join(remoteCli, process.platform === 'win32' ? 'code.cmd' : 'code'),
+      process.platform === 'win32'
+        ? '@echo Command is only available in a VS Code terminal.\r\n'
+        : '#!/bin/sh\necho Command is only available in a VS Code terminal.\n',
+      { mode: 0o755 },
+    )
     childEnvironment.PATH = [
+      remoteCli,
       bin,
       process.platform === 'win32'
         ? join(environment.SystemRoot!, 'System32')
@@ -349,7 +369,22 @@ test(
       'sanitizes the actual child environment and supports CLI paths with spaces',
       async () => {
         await scenario('success')
-        assert.equal((await findLocalCode(silentLogger)).commit, 'a'.repeat(40))
+        const code = await findLocalCode(silentLogger)
+        assert.equal(code.command, command)
+        assert.equal(code.commit, 'a'.repeat(40))
+      },
+    )
+    await t.test(
+      'reports the CLI and its output without a commit',
+      async () => {
+        await scenario('uncommitted')
+        await assert.rejects(
+          findLocalCode(silentLogger),
+          (error) =>
+            error instanceof Error &&
+            error.message.includes(command) &&
+            error.message.includes('only available in a Visual Studio Code'),
+        )
       },
     )
     await t.test('retains failure diagnostics', async () => {

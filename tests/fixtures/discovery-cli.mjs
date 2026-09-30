@@ -20,6 +20,8 @@ if (mode === 'failure') {
   })
   writeFileSync(record, JSON.stringify([process.pid, child.pid]))
   setInterval(() => {}, 1000)
+} else if (mode === 'uncommitted' && process.argv.includes('--version')) {
+  console.log('Command is only available in a Visual Studio Code terminal.')
 } else if (process.argv.includes('--version')) {
   console.log(`1.99.0\n${'a'.repeat(40)}\nx64`)
 } else {
