@@ -45,8 +45,10 @@ test('terminal launches require one folder and use project chat commands or defa
     pathToFileURL(join(root, 'launcher.mjs')).href
   )
   const registrations: unknown[][] = []
-  const launcher = new TerminalLauncher((...args: unknown[]) => {
-    registrations.push(args)
+  const launcher = new TerminalLauncher({
+    register: (...args: unknown[]) => registrations.push(args),
+    id: () => undefined,
+    onDidChange: () => ({ dispose() {} }),
   })
   t.after(() => launcher.dispose())
   const folder = { uri: { fsPath: '/worktree' } }

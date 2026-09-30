@@ -6,7 +6,8 @@ import {
   defaultChatCommands,
 } from '../../../src/shared/chat-commands.ts'
 
-import type { LaunchKind, LaunchProvider } from '../../../src/shared/sidebar.ts'
+import type { LaunchKind } from '../../../src/shared/sidebar.ts'
+import type { TerminalIdentities } from './terminal-identities.js'
 
 const groupOrdinals = [
   'First',
@@ -41,23 +42,57 @@ export class TerminalLauncher implements vscode.Disposable {
   private readonly tabs = new Map<vscode.Tab, vscode.Terminal>()
   private selectedTerminal?: vscode.Terminal
   private readonly subscriptions: vscode.Disposable[]
+  private reattachTimer?: ReturnType<typeof setTimeout>
   constructor(
-    private readonly registerTerminal: (
-      terminal: vscode.Terminal,
-      terminalId: string,
-      provider: LaunchProvider,
-    ) => void,
+    private readonly identities: Pick<
+      TerminalIdentities,
+      'register' | 'id' | 'onDidChange'
+    >,
   ) {
     this.subscriptions = [
       vscode.window.tabGroups.onDidChangeTabs((event) => {
         for (const tab of event.closed) this.tabs.delete(tab)
-        this.updateSelection()
+        this.changed()
       }),
-      vscode.window.tabGroups.onDidChangeTabGroups(() =>
-        this.updateSelection(),
-      ),
-      vscode.window.onDidCloseTerminal(() => this.updateSelection()),
+      vscode.window.tabGroups.onDidChangeTabGroups(() => this.changed()),
+      vscode.window.onDidCloseTerminal(() => this.changed()),
+      vscode.window.onDidChangeActiveTerminal(() => this.changed()),
+      identities.onDidChange(() => this.changed()),
     ]
+  }
+
+  private changed(): void {
+    this.updateSelection()
+    // Tab and terminal activation arrive as separate events; pair them only
+    // after both have been delivered.
+    this.reattachTimer ??= setTimeout(() => {
+      this.reattachTimer = undefined
+      this.reattach()
+    }, 100)
+  }
+
+  // VS Code does not link restored tabs to terminals, so tabs from an earlier
+  // activation are learned when a chat is focused: an active editor terminal
+  // is the active tab of the active group. Its group then receives new chats.
+  // Accepted limitation: chats moved to the panel are unsupported. The API
+  // cannot tell panel terminals apart, so focusing one may claim the active
+  // editor tab.
+  private reattach(): void {
+    const terminal = vscode.window.activeTerminal
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+    if (
+      !terminal ||
+      !this.identities.id(terminal) ||
+      !(tab?.input instanceof vscode.TabInputTerminal)
+    )
+      return
+    if (this.tabs.get(tab) !== terminal) {
+      for (const [known, owner] of this.tabs)
+        if (owner === terminal) this.tabs.delete(known)
+      this.tabs.set(tab, terminal)
+    }
+    this.chatGroup = tab.group
+    this.updateSelection()
   }
   private queue: Promise<unknown> = Promise.resolve()
   private chatGroup?: vscode.TabGroup
@@ -82,6 +117,7 @@ export class TerminalLauncher implements vscode.Disposable {
   }
 
   dispose(): void {
+    clearTimeout(this.reattachTimer)
     for (const subscription of this.subscriptions) subscription.dispose()
     this.selectionChanges.dispose()
     this.tabs.clear()
@@ -162,8 +198,8 @@ export class TerminalLauncher implements vscode.Disposable {
         }[kind]
       : undefined
 
-    // Ownership lasts only for this launcher activation and ends when the group
-    // is removed or emptied. Placement is independent of saved chat identities.
+    // Ownership ends when the group is removed or emptied, until a chat is
+    // focused again.
     if (
       this.chatGroup &&
       (!vscode.window.tabGroups.all.includes(this.chatGroup) ||
@@ -194,7 +230,7 @@ export class TerminalLauncher implements vscode.Disposable {
       iconPath: new vscode.ThemeIcon(chat ? 'comment-discussion' : 'terminal'),
     })
     if (terminalId && kind !== 'terminal')
-      this.registerTerminal(terminal, terminalId, kind)
+      this.identities.register(terminal, terminalId, kind)
     try {
       terminal.show()
       const tab = await waitFor(

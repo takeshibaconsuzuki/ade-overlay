@@ -27,6 +27,7 @@ export const window = {
   },
   terminals: [],
   onDidCloseTerminal: disposable,
+  onDidChangeActiveTerminal: disposable,
   createTerminal(options) {
     effects.push('createTerminal')
     const terminal = {

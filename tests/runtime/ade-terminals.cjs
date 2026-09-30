@@ -1,6 +1,7 @@
 /* eslint @typescript-eslint/no-require-imports: "off" -- VS Code loads extension tests as CommonJS. */
 const assert = require('node:assert/strict')
 const { access, readFile, writeFile } = require('node:fs/promises')
+const { randomUUID } = require('node:crypto')
 const { join } = require('node:path')
 const vscode = require('vscode')
 
@@ -235,13 +236,11 @@ exports.run = async () => {
     },
   }
   const freshIdentities = new TerminalIdentities(identityStorage)
-  const fresh = new TerminalLauncher((terminal, id, provider) =>
-    freshIdentities.register(terminal, id, provider),
-  )
+  const fresh = new TerminalLauncher(freshIdentities)
   assert.equal(
     fresh.getSelectedTerminal(),
     undefined,
-    'new activation does not adopt old groups for selection',
+    'new activation does not adopt old groups before a chat is focused',
   )
   assert.equal(vscode.window.tabGroups.all.length, 1)
   assert.deepEqual([...vscode.window.terminals], previousTerminals)
@@ -313,6 +312,43 @@ exports.run = async () => {
     undefined,
     'closing the owned group clears selection',
   )
+
+  // Focusing a recovered chat reattaches its tab and group for later chats.
+  const reattachedIdentities = new TerminalIdentities(identityStorage)
+  const reattached = new TerminalLauncher(reattachedIdentities)
+  try {
+    const [olderChatTerminal, oldChatTerminal] = previousTerminals
+    reattachedIdentities.register(olderChatTerminal, randomUUID(), 'claude')
+    reattachedIdentities.register(oldChatTerminal, randomUUID(), 'codex')
+    assert.equal(reattached.getSelectedTerminal(), undefined)
+    olderChatTerminal.show()
+    await eventually(
+      () => reattached.getSelectedTerminal() === olderChatTerminal,
+      'focused recovered chat is selected',
+    )
+    oldChatTerminal.show()
+    await eventually(
+      () => reattached.getSelectedTerminal() === oldChatTerminal,
+      'another recovered chat is selected',
+    )
+    olderChatTerminal.show()
+    await eventually(
+      () => reattached.getSelectedTerminal() === olderChatTerminal,
+      'reattached tabs stay linked',
+    )
+    const reattachedChatTerminal = await reattached.open('claude')
+    assert.equal(vscode.window.tabGroups.activeTabGroup, previousChat)
+    assert.equal(previousChat.tabs.length, 3)
+    assert.equal(reattached.getSelectedTerminal(), reattachedChatTerminal)
+    reattachedChatTerminal.dispose()
+    await eventually(
+      () => previousChat.tabs.length === 2,
+      'reattached chat closes',
+    )
+  } finally {
+    reattached.dispose()
+    reattachedIdentities.dispose()
+  }
 
   // VS Code uses focusLastEditorGroup for column nine, not focusNinthEditorGroup.
   while (vscode.window.tabGroups.all.length < 9) {
