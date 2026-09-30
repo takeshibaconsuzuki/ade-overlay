@@ -203,9 +203,13 @@ export function WorktreeActions({
   }
 
   const reason = `Actions for ${worktree.branch ?? worktree.path}`
-  const deletion = worktree.locked
-    ? 'Unlock this worktree in Git before deleting it'
-    : undefined
+  const deletion = worktree.main
+    ? 'The main worktree cannot be deleted'
+    : worktree.locked
+      ? 'Unlock this worktree in Git before deleting it'
+      : undefined
+  const branchDeletion =
+    deletion ?? (worktree.branch ? undefined : 'This worktree has no branch')
 
   return (
     <>
@@ -217,24 +221,20 @@ export function WorktreeActions({
             disabled: worktree.editor !== 'running' || opening,
             onSelect: onStopEditor,
           },
-          ...(worktree.main
-            ? []
-            : [
-                {
-                  label: 'Delete worktree',
-                  tone: 'danger' as const,
-                  disabled: worktree.locked,
-                  title: deletion,
-                  onSelect: () => select(false),
-                },
-                {
-                  label: 'Delete worktree and branch',
-                  tone: 'danger' as const,
-                  disabled: worktree.locked || !worktree.branch,
-                  title: deletion,
-                  onSelect: () => select(true),
-                },
-              ]),
+          {
+            label: 'Delete worktree',
+            tone: 'danger',
+            disabled: !!deletion,
+            title: deletion,
+            onSelect: () => select(false),
+          },
+          {
+            label: 'Delete worktree and branch',
+            tone: 'danger',
+            disabled: !!branchDeletion,
+            title: branchDeletion,
+            onSelect: () => select(true),
+          },
         ]}
       >
         <Button

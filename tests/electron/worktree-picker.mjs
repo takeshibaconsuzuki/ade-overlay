@@ -745,7 +745,8 @@ async function run() {
   await key('ESCAPE')
   await until("!document.querySelector('[role=menu]')")
 
-  stage = 'main worktrees only offer stopping a running VS Code server'
+  stage =
+    'main worktrees disable deletion and offer stopping a running VS Code server'
   const menuItems = () =>
     evaluate(
       "[...document.querySelectorAll('[role=menuitem]')].map(item => [item.textContent, item.getAttribute('aria-disabled') === 'true'])",
@@ -777,7 +778,11 @@ async function run() {
   )
   await clickMouse('.worktree-delete button')
   await until("!!document.querySelector('[role=menu]')")
-  assert.deepEqual(await menuItems(), [['Stop VS Code server', true]])
+  assert.deepEqual(await menuItems(), [
+    ['Stop VS Code server', true],
+    ['Delete worktree', true],
+    ['Delete worktree and branch', true],
+  ])
   await key('ESCAPE')
   await until("!document.querySelector('[role=menu]')")
   await update(
@@ -787,7 +792,11 @@ async function run() {
   )
   await clickMouse('.worktree-delete button')
   await until("!!document.querySelector('[role=menu]')")
-  assert.deepEqual(await menuItems(), [['Stop VS Code server', false]])
+  assert.deepEqual(await menuItems(), [
+    ['Stop VS Code server', false],
+    ['Delete worktree', true],
+    ['Delete worktree and branch', true],
+  ])
   await evaluate(
     "[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Stop VS Code server').click()",
   )

@@ -98,7 +98,7 @@ flowchart TD
 ```
 
 - Main and locked worktrees cannot be scheduled for deletion. Git can refuse removal, including when local changes make it unsafe.
-- The row menu offers worktree-only deletion or deletion of both the worktree and its local branch, including unmerged commits. Detached worktrees only offer worktree-only deletion. The main worktree's menu only offers [stopping its editor](editors.md#editor-process-lifetime).
+- The row menu offers worktree-only deletion or deletion of both the worktree and its local branch, including unmerged commits. The menu always lists every action and disables unavailable ones: branch deletion for detached worktrees, and both deletions for main and locked worktrees. It also offers [stopping the editor](editors.md#editor-process-lifetime).
 - A failed removal opens a popup for the requesting picker with changed, untracked, ignored, and submodule paths. When Git requires force, the user can confirm a retry with `--force`; cancelling preserves the worktree. Main and locked worktrees remain protected.
 - Branch deletion runs only after successful removal. If it fails, membership reflects the removed worktree and a retained error explains that the branch remains.
 
