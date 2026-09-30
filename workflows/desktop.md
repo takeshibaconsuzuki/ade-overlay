@@ -7,7 +7,10 @@
 
 ```mermaid
 flowchart TD
-    Launch([Desktop launched]) --> Config[Load desktop connection configuration]
+    Launch([Desktop launched]) --> Running{Desktop already running for this profile?}
+    Running -->|Yes| Handoff[Show and focus its existing picker, then exit the new process]
+    Handoff --> Reused([Existing desktop keeps its connection and editors])
+    Running -->|No| Config[Load desktop connection configuration]
     Config --> Shortcut{Register global picker shortcut}
     Shortcut -->|Succeeded| Start[Show picker and start connection]
     Shortcut -->|Failed| Normal[Keep picker as a normal window]
@@ -28,6 +31,7 @@ flowchart TD
     click Settings "settings.md#schedule-synchronization"
 ```
 
+- Main claims a single-instance lock before loading configuration or creating desktop state. Later launches restore the existing picker if minimized and show it even when already focused; they do not replace the running desktop's configuration.
 - File configuration supplies the companion URL and optional token; environment configuration overrides it. Invalid configuration prevents desktop startup.
 - A connection must complete protocol discovery before other companion events are accepted. The companion [authenticates the connection](companion.md#admit-connections).
 - Reconnect resets snapshot ordering. Retained editor pages stay alive while the companion connection is unavailable.

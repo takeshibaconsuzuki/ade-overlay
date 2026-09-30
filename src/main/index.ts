@@ -25,6 +25,10 @@ import { WorktreeNotifications } from './worktree-notifications.ts'
 app.setName('ade-overlay')
 if (process.platform === 'win32')
   app.setAppUserModelId('io.github.takeshibaconsuzuki.ade-overlay')
+// One desktop owns the shortcut and Chromium storage for this user-data path.
+// A later launch must hand off before loading configuration or creating state.
+if (!app.requestSingleInstanceLock()) app.exit(0)
+
 let configuration: ReturnType<typeof loadDesktopConfig> = {}
 let configurationError: unknown
 try {
@@ -35,6 +39,7 @@ try {
 
 const trustedRenderers = new Set<WebContents>()
 let pickerWindow: PickerWindow | undefined
+app.on('second-instance', () => pickerWindow?.show())
 const companion = new CompanionClient(configuration)
 const chatNotifications = new ChatNotifications(
   (options) =>

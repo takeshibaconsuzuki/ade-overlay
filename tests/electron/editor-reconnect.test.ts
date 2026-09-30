@@ -10,7 +10,7 @@ import electron from 'electron'
 import { bundleMain } from '../helpers/bundle-main.ts'
 
 test(
-  'reconnect lists clean up retained editors, stale replies are ignored, and closing the picker quits',
+  'desktop relaunch reuses its windows, reconnect reconciles editors, and picker close quits',
   {
     timeout: 30_000,
     skip: process.platform === 'linux' && !process.env.DISPLAY,

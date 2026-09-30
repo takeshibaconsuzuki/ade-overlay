@@ -47,6 +47,8 @@ Running editors accepts the [VS Code Server license terms](https://aka.ms/vscode
 
 Press **Ctrl+Shift+Space** on Windows/Linux or **Cmd+Shift+Space** on macOS to toggle the worktree window. **Esc** in the search bar or clicking elsewhere hides it.
 
+Launching ADE again shows the existing worktree window.
+
 Click a worktree to open its editor. Opened worktrees are automatically trusted.
 
 - **Create worktree:** leave the branch name blank to check out the base branch. Relative paths start at the selected project.

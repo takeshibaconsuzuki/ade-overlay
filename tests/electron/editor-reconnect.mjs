@@ -1,8 +1,10 @@
 import { app, BaseWindow, BrowserWindow, webContents } from 'electron'
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { Server } from 'socket.io'
 
 const input = JSON.parse(
@@ -149,6 +151,56 @@ async function run() {
     (window) => window !== pickerWindow,
   )
   assert.ok(editor)
+
+  stage = 'relaunching ADE reuses the picker, connection and retained editors'
+  const show = pickerWindow.show.bind(pickerWindow)
+  const focus = pickerWindow.focus.bind(pickerWindow)
+  const isFocused = pickerWindow.isFocused.bind(pickerWindow)
+  let shown = 0
+  let focused = 0
+  pickerWindow.show = () => {
+    shown++
+    show()
+  }
+  pickerWindow.focus = () => {
+    focused++
+    focus()
+  }
+  const beforeRelaunch = connections
+  for (const alreadyFocused of [false, true]) {
+    // Windows stay hidden in this fixture. Exercise both picker states without
+    // taking focus from the developer's active application.
+    pickerWindow.isFocused = () => alreadyFocused
+    const beforeShow = shown
+    const beforeFocus = focused
+    await promisify(execFile)(
+      process.execPath,
+      [fileURLToPath(new URL('./second-instance.mjs', import.meta.url))],
+      {
+        env: {
+          ...process.env,
+          // Existing configuration wins over a later launch's configuration.
+          ADE_COMPANION_URL: alreadyFocused
+            ? 'invalid companion URL'
+            : process.env.ADE_COMPANION_URL,
+        },
+        windowsHide: true,
+        timeout: 8000,
+      },
+    )
+    await until(() => shown > beforeShow && focused > beforeFocus)
+    assert.equal(connections, beforeRelaunch)
+    assert.deepEqual(
+      new Set(BaseWindow.getAllWindows()),
+      new Set([pickerWindow, editor]),
+    )
+    assert.equal(view('a'), first)
+    assert.equal(view('b'), second)
+  }
+  pickerWindow.show = show
+  pickerWindow.focus = focus
+  pickerWindow.isFocused = isFocused
+
   stage =
     'chat navigation selects retained and fresh worktrees through the real desktop handler'
   for (const path of ['a', 'c']) {
@@ -318,6 +370,9 @@ async function run() {
   heldPage.writeHead(502, { 'Content-Type': 'text/html' })
   heldPage.end('Old page failed')
   await until(() => chatReplies.has('stale-failure'))
+  // Supersession acknowledges the chat before the old page finishes failing.
+  // Let that page close before reusing its worktree in the next scenario.
+  await until(() => !view('f'))
   assert.equal(rowErrors.length, 1)
 
   stage = 'server errors do not get duplicated as desktop page failures'
