@@ -136,7 +136,17 @@ test('page injection preserves scripts and CSP nonce while safely encoding profi
   const config = JSON.parse(
     page('#vscode-workbench-web-configuration').attr('data-settings')!,
   )
-  assert.deepEqual(config, { remoteAuthority: 'localhost:1234', profile })
+  assert.deepEqual(config, {
+    remoteAuthority: 'localhost:1234',
+    profile,
+    defaultLayout: {
+      views: [{ id: 'adeTerminals.sidebar' }],
+      force: true,
+    },
+    configurationDefaults: {
+      'workbench.secondarySideBar.defaultVisibility': 'hidden',
+    },
+  })
   assert.equal(page('script:not([src])').text(), script)
   assert.equal(page('script[src]').attr('nonce'), 'test-nonce')
   assert.equal(

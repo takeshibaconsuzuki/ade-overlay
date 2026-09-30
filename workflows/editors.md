@@ -91,7 +91,7 @@ sequenceDiagram
     alt Main workbench document
         Proxy->>Code: Fetch document
         Code-->>Proxy: Workbench HTML
-        Proxy->>Proxy: Attach initial profile, settings bridge, and<br/>chat activation baseline
+        Proxy->>Proxy: Attach initial profile, startup layout,<br/>settings bridge, and chat activation baseline
         Proxy-->>Page: Prepared document
     else Other editor resource or WebSocket
         Proxy->>Code: Forward authenticated traffic
@@ -101,4 +101,5 @@ sequenceDiagram
 
 - Main supplies credentials only for the matching companion origin and editor path. The proxy removes the app authorization header before forwarding to VS Code and preserves other browser cookies, including display language.
 - The [initial profile](settings.md#initialize-the-browser-profile) seeds a new browser profile. The activation baseline makes [chat navigation](chats.md#navigate-to-a-chat) wait for an extension belonging to the new document.
+- Each fresh document opens the ADE sidebar through VS Code's startup layout. The secondary sidebar containing Chat starts hidden by default; explicit settings and saved visibility take precedence, so later user changes are remembered.
 - Authenticated settings requests are handled by the companion's [settings service](settings.md#synchronize-one-snapshot) rather than forwarded to VS Code.
