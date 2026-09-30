@@ -1,8 +1,24 @@
 import { readPaste, type PasteInput } from './paste-content'
-import type { PasteBridge } from '../shared/paste'
+import { MAX_PASTE_BYTES, type PasteBridge } from '../shared/paste'
 
 function terminalTarget(target: EventTarget | null): target is Element {
   return target instanceof Element && !!target.closest('.xterm')
+}
+
+// A dragged file hovers over one of VS Code's drop overlays, not the terminal:
+// the editor group's overlay for terminal tabs, or the terminal's own overlay
+// (panel terminals, or Shift held). Both are siblings of the content they cover.
+function dropTerminal(target: EventTarget | null): Element | null {
+  if (!(target instanceof Element)) return null
+  const covered = target.closest(
+    '#monaco-workbench-editor-drop-overlay, .terminal-drop-overlay',
+  )?.parentElement
+  if (!covered) return target.closest('.xterm')
+  return (
+    Array.from(covered.querySelectorAll('.xterm')).find((terminal) =>
+      terminal.checkVisibility(),
+    ) ?? null
+  )
 }
 
 export function installChatPaste(
@@ -12,8 +28,8 @@ export function installChatPaste(
   let closed = false
   let queue = Promise.resolve()
   const released = new WeakSet<ClipboardEvent>()
-  // Reserve now, while focus and the paste gesture are current. Serialize only
-  // delivery, so slow image reads cannot let a later paste overtake this one.
+  // Reserve now, while focus and the paste or drop gesture are current.
+  // Serialize only delivery, so slow reads cannot let a later paste overtake.
   const gate = (
     input: Promise<PasteInput>,
     ordinary: (text: string) => void,
@@ -74,6 +90,44 @@ export function installChatPaste(
   }
   document.addEventListener('paste', paste, true)
 
+  // The browser workbench cannot resolve local paths for files dropped from
+  // the OS onto a terminal. Upload them into chat drafts instead; ordinary
+  // terminals receive nothing.
+  const drop = (event: DragEvent) => {
+    const terminal = dropTerminal(event.target)
+    const data = event.dataTransfer
+    // Workbench drags (Explorer, editors) keep VS Code's path insertion.
+    // Browsers lowercase custom drag types.
+    if (
+      !terminal ||
+      !data?.files.length ||
+      data.types.some((type) => ['resourceurls', 'codefiles'].includes(type))
+    )
+      return
+    // Consume the drop: VS Code would try to open the files as editors, which
+    // fails without local file access. Ending the drag removes its overlays,
+    // whose listeners sit above the drop target and above the terminal.
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    // DataTransfer is readable only during dispatch, before any IPC awaits.
+    const files = Array.from(data.files)
+    const folder = Array.from(data.items).some(
+      (item) => item.webkitGetAsEntry()?.isDirectory,
+    )
+    for (const element of [event.target, terminal])
+      element?.dispatchEvent(new DragEvent('dragend', { bubbles: true }))
+    if (folder)
+      return console.warn('[ADE paste] Folders cannot be dropped into a chat.')
+    if (files.reduce((size, file) => size + file.size, 0) > MAX_PASTE_BYTES)
+      return console.warn('[ADE paste] Dropped files exceed 32 MiB.')
+    // Like VS Code's native drop, target the terminal under the pointer.
+    terminal.querySelector('textarea')?.focus()
+    void gate(Promise.resolve({ text: '', html: '', images: [], files }), () =>
+      console.warn('[ADE paste] Dropped files upload only to ADE chats.'),
+    )
+  }
+  document.addEventListener('drop', drop, true)
+
   // VS Code's keyboard/context-menu command reads text directly. Capture rich
   // formats during that same gesture, then hold its result behind the same gate.
   const clipboard = navigator.clipboard
@@ -118,6 +172,7 @@ export function installChatPaste(
   const dispose = () => {
     closed = true
     document.removeEventListener('paste', paste, true)
+    document.removeEventListener('drop', drop, true)
     if (clipboard?.readText === readText) clipboard.readText = original
     removeEventListener('pagehide', dispose)
   }

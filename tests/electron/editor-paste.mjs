@@ -29,13 +29,21 @@ async function run() {
     const logs = []
     const reservations = new Map()
     const documents = []
+    let focusable = true
+    const focused = []
     const dispose = installEditorPaste(
       contents,
       () => active,
       (url) => url?.protocol === 'file:',
+      () => {
+        if (!focusable) return
+        window.focus()
+        contents.focus()
+      },
       async (documentId) => {
         calls++
         documents.push(documentId)
+        focused.push(await contents.executeJavaScript('document.hasFocus()'))
         if (target === null) return null
         const id = randomUUID()
         reservations.set(id, { documentId, target })
@@ -130,6 +138,46 @@ async function run() {
       await contents.executeJavaScript('adePaste.reservePaste()', true),
       null,
     )
+    // A trusted drop proves the gesture without DOM activation. A drag from
+    // another application leaves the window in the background, so main focuses
+    // the page before the extension is asked for its active terminal.
+    target = 'chat-drop'
+    window.showInactive()
+    assert.equal(
+      await contents.executeJavaScript(`(() => {
+        document.addEventListener('dragover', (event) => event.preventDefault());
+        document.addEventListener('drop', (event) => {
+          event.preventDefault();
+          globalThis.dropped = adePaste.reservePaste().then((id) => ({ id }), (error) => ({ error: String(error) }));
+        });
+        return document.hasFocus();
+      })()`),
+      false,
+    )
+    contents.debugger.attach()
+    const drop = async () => {
+      const data = {
+        items: [],
+        files: [join(root, 'index.html')],
+        dragOperationsMask: 1,
+      }
+      for (const type of ['dragEnter', 'dragOver', 'drop'])
+        await contents.debugger.sendCommand('Input.dispatchDragEvent', {
+          type,
+          x: 20,
+          y: 20,
+          data,
+        })
+      return contents.executeJavaScript('dropped')
+    }
+    focusable = false
+    const before = calls
+    assert.match((await drop()).error, /could not be focused/)
+    assert.equal(calls, before, 'an unfocused drop never queries a target')
+    focusable = true
+    assert.equal(reservations.get((await drop()).id)?.target, 'chat-drop')
+    assert.equal(focused.at(-1), true, 'the page is focused before the query')
+    contents.debugger.detach()
     dispose()
     window.destroy()
     writeFileSync(join(root, 'result.json'), JSON.stringify({ ok: true }))

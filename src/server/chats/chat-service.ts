@@ -2,7 +2,6 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
-import { join } from 'node:path'
 import { Server as Engine } from 'engine.io'
 import getRawBody from 'raw-body'
 import { Server as SocketServer, type Socket } from 'socket.io'
@@ -95,7 +94,7 @@ export class ChatService {
   constructor(
     logger: Logger = silentLogger,
     store = new ChatStore(),
-    pasteDirectory = join(editorDataDir(), 'paste-images'),
+    pasteDirectory = editorDataDir(),
   ) {
     this.pasteDirectory = pasteDirectory
     this.logger = logger

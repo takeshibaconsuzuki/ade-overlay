@@ -4,11 +4,22 @@ import { pasteItemsSchema } from '../shared/paste-schema.ts'
 import type { PastePart } from '../shared/paste.ts'
 import { pasteChannels } from '../shared/paste.ts'
 
+// Focus events reach the page in the task that focuses it; poll between tasks.
+const pageFocused = `new Promise((resolve) => {
+  const deadline = Date.now() + 1000
+  const poll = () =>
+    document.hasFocus() || Date.now() > deadline
+      ? resolve(document.hasFocus())
+      : setTimeout(poll, 10)
+  poll()
+})`
+
 // Main supplies document identity; the companion owns reservations and targets.
 export function installEditorPaste(
   contents: WebContents,
   isActive: () => boolean,
   isEditorUrl: (url: URL | null) => boolean,
+  focus: () => void,
   reserve: (documentId: string) => Promise<string | null>,
   submit: (
     documentId: string,
@@ -29,11 +40,19 @@ export function installEditorPaste(
   }
   contents.ipc.handle(
     pasteChannels.reserve,
-    async (event, trustedPaste: unknown) => {
+    async (event, trustedTransfer: unknown) => {
       assertSender(event)
       const document = documentId
-      if (
-        trustedPaste !== true &&
+      if (trustedTransfer === 'drop') {
+        // A drag from another application leaves this window in the
+        // background, where the page cannot focus the dropped terminal. The
+        // extension targets VS Code's active terminal, so wait for that focus.
+        focus()
+        if ((await contents.executeJavaScript(pageFocused)) !== true)
+          throw new Error('The editor window could not be focused.')
+        assertSender(event)
+      } else if (
+        trustedTransfer !== 'paste' &&
         (await contents.executeJavaScript(
           'navigator.userActivation.isActive',
         )) !== true

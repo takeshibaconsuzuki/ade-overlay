@@ -15,6 +15,7 @@ const manifest = {
   engines: { node: '>=22.22.3' },
   dependencies: {
     'file-type': app.dependencies['file-type'],
+    filenamify: app.dependencies.filenamify,
     '@anthropic-ai/claude-agent-sdk':
       app.dependencies['@anthropic-ai/claude-agent-sdk'],
     'smol-toml': app.dependencies['smol-toml'],

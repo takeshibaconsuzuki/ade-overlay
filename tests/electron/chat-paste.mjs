@@ -291,6 +291,96 @@ async function run() {
       'holdSubmissions = false; pendingSubmissions.forEach(resolve => resolve()); restoreConcurrentFixture()',
     )
 
+    // Files dropped from the OS use the same reservation gate. Dropping onto
+    // either VS Code overlay targets and focuses the terminal beneath it, and
+    // VS Code sees only the end of the drag, never the drop.
+    await contents.executeJavaScript(`(() => {
+      const split = document.createElement('div');
+      split.innerHTML = '<div class="xterm"><textarea id="split"></textarea></div><div class="terminal-drop-overlay"></div>';
+      const group = document.createElement('div');
+      group.innerHTML = '<div class="xterm" hidden><textarea></textarea></div><div class="xterm"><textarea id="tab"></textarea></div><div id="monaco-workbench-editor-drop-overlay"><div class="editor-group-overlay-indicator"></div></div>';
+      document.body.append(split, group);
+      globalThis.workbench = { drop: 0, dragend: 0 };
+      for (const type of ['drop', 'dragend']) document.body.addEventListener(type, () => workbench[type]++);
+      globalThis.drop = (target, files, types = []) => {
+        const data = new DataTransfer();
+        for (const file of files) data.items.add(file);
+        for (const type of types) data.setData(type, '[]');
+        const event = new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+    })()`)
+    const dropCount = await contents.executeJavaScript('submitted.length')
+    assert.equal(
+      await contents.executeJavaScript(
+        `drop(document.querySelector('.terminal-drop-overlay'), [new File([new Uint8Array([5, 6])], 'report one.pdf'), new File(['notes'], 'notes.txt')])`,
+      ),
+      true,
+    )
+    assert.equal(
+      await contents.executeJavaScript('document.activeElement.id'),
+      'split',
+    )
+    assert.deepEqual(await contents.executeJavaScript('workbench'), {
+      drop: 0,
+      dragend: 2,
+    })
+    await contents.executeJavaScript(`reservations.shift().resolve('drop-1')`)
+    await until(`submitted.length === ${dropCount + 1}`)
+    assert.deepEqual(
+      await contents.executeJavaScript(`(({ id, items }) => ({
+        id, items: items.map(part => ({ ...part, data: Array.from(part.data) })),
+      }))(submitted.at(-1))`),
+      {
+        id: 'drop-1',
+        items: [
+          { type: 'file', name: 'report one.pdf', data: [5, 6] },
+          { type: 'file', name: 'notes.txt', data: [110, 111, 116, 101, 115] },
+        ],
+      },
+    )
+    // A terminal tab is covered by the editor group's overlay. Its drop is
+    // consumed before the target is known; ordinary terminals receive nothing.
+    assert.equal(
+      await contents.executeJavaScript(
+        `drop(document.querySelector('.editor-group-overlay-indicator'), [new File(['x'], 'x.txt')])`,
+      ),
+      true,
+    )
+    assert.equal(
+      await contents.executeJavaScript('document.activeElement.id'),
+      'tab',
+    )
+    assert.deepEqual(await contents.executeJavaScript('workbench'), {
+      drop: 0,
+      dragend: 4,
+    })
+    await contents.executeJavaScript('reservations.shift().resolve(null)')
+    // Workbench drags, drops outside terminals and empty drops stay with VS
+    // Code; oversized drops never reserve a target.
+    for (const expression of [
+      `drop(terminal, [new File(['x'], 'x.txt')], ['ResourceURLs'])`,
+      `drop(document.querySelector('#editor'), [new File(['x'], 'x.txt')])`,
+      `drop(terminal, [])`,
+    ])
+      assert.equal(await contents.executeJavaScript(expression), false)
+    assert.equal(await contents.executeJavaScript('workbench.drop'), 3)
+    assert.equal(
+      await contents.executeJavaScript(
+        `drop(terminal, [new File([new Uint8Array(32 * 1024 * 1024 + 1)], 'big.bin')])`,
+      ),
+      true,
+    )
+    await contents.executeJavaScript(
+      'new Promise(resolve => setTimeout(resolve, 20))',
+    )
+    assert.equal(
+      await contents.executeJavaScript('submitted.length'),
+      dropCount + 1,
+    )
+    assert.equal(await contents.executeJavaScript('reservations.length'), 0)
+
     await contents.executeJavaScript(
       `document.querySelector('#editor').focus()`,
     )

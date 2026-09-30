@@ -47,12 +47,19 @@ export interface ChatProvider {
 export const codexProvider: ChatProvider = {
   id: 'codex',
   // Codex accepts file URLs as a single dropped image path, including spaces.
+  // Other files have no attachment form; their paths stay in the draft text.
   preparePaste: (parts) =>
     bracketedPaste(
       parts.map((part) =>
         part.type === 'image'
           ? { ...part, data: pathToFileURL(part.data).href }
-          : part,
+          : part.type === 'file'
+            ? {
+                type: 'text',
+                data:
+                  (/\s/.test(part.data) ? `"${part.data}"` : part.data) + ' ',
+              }
+            : part,
       ),
     ),
   hookFile: (env) =>
@@ -115,7 +122,7 @@ export const claudeProvider: ChatProvider = {
   id: 'claude',
   // Image-path paste events resolve asynchronously in Claude and can move past
   // later text. Inline file mentions keep their source positions in one draft;
-  // Claude reads the images when the user submits it.
+  // Claude reads the images and files when the user submits it.
   preparePaste: (parts) =>
     bracketedPaste([
       {

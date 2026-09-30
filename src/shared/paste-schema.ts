@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import type { PastePart } from './paste.ts'
+import { MAX_PASTE_BYTES, type PastePart } from './paste.ts'
 
-export const MAX_PASTE_BYTES = 32 * 1024 * 1024
+export { MAX_PASTE_BYTES }
 // Allow JSON framing/escaping in addition to the bounded binary/text content.
 export const MAX_PASTE_MESSAGE_BYTES = 64 * 1024 * 1024
 export const pasteItemsSchema: z.ZodType<PastePart[]> = z
@@ -11,6 +11,11 @@ export const pasteItemsSchema: z.ZodType<PastePart[]> = z
       z.object({
         type: z.literal('image'),
         data: z.union([z.string(), z.instanceof(Uint8Array)]),
+      }),
+      z.object({
+        type: z.literal('file'),
+        name: z.string().min(1).max(1024),
+        data: z.instanceof(Uint8Array),
       }),
     ]),
   )

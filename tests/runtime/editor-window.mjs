@@ -2,7 +2,7 @@ import { app, BrowserWindow, BaseWindow, webContents } from 'electron'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { commandOrControl, key } from '../helpers/keyboard.mjs'
 const input = JSON.parse(
   readFileSync(process.env.ADE_EDITOR_TEST_INPUT, 'utf8'),
@@ -170,6 +170,14 @@ async function run() {
           throw error
         }
       }
+      const frames = (text) =>
+        text
+          .split('\x1b[200~')
+          .slice(1)
+          .map((part) => {
+            assert.ok(part.endsWith('\x1b[201~'), 'no Enter appended')
+            return part.slice(0, -6)
+          })
       await editor.executeJavaScript(`(() => {
         const read = navigator.clipboard.read;
         navigator.clipboard.read = async () => [new ClipboardItem({
@@ -246,13 +254,7 @@ async function run() {
                 )
                 const result = deliveries().at(-1)
                 assert.equal(result.terminalId, `fixture-${provider}`)
-                const parts = result.text
-                  .split('\x1b[200~')
-                  .slice(1)
-                  .map((part) => {
-                    assert.ok(part.endsWith('\x1b[201~'), 'no Enter appended')
-                    return part.slice(0, -6)
-                  })
+                const parts = frames(result.text)
                 let paths
                 if (provider === 'codex') {
                   assert.equal(parts.length, 5)
@@ -281,6 +283,71 @@ async function run() {
                     readFileSync(path),
                     Buffer.from(png, 'base64'),
                   )
+              }
+            }
+            if (setting === 'default') {
+              // Drop desktop files where the pointer would land: on the
+              // overlay VS Code raises over the terminal tab while dragging.
+              assert.deepEqual(
+                await editor.executeJavaScript(
+                  `(() => {
+                const data = new DataTransfer();
+                data.items.add(new File(['ADE_DROP_TEXT'], 'ADE drop.txt', { type: 'text/plain' }));
+                data.items.add(new File([Uint8Array.from(atob(${JSON.stringify(png)}), character => character.charCodeAt(0))], 'drop.png', { type: 'image/png' }));
+                const terminal = document.querySelector('.editor-group-container.active .xterm');
+                const bounds = terminal.getBoundingClientRect();
+                const options = { dataTransfer: data, bubbles: true, cancelable: true, clientX: bounds.x + bounds.width / 2, clientY: bounds.y + bounds.height / 2 };
+                terminal.dispatchEvent(new DragEvent('dragenter', options));
+                const target = document.elementFromPoint(options.clientX, options.clientY);
+                const overlay = target?.closest('#monaco-workbench-editor-drop-overlay, .terminal-drop-overlay');
+                target?.dispatchEvent(new DragEvent('drop', options));
+                return {
+                  target: overlay?.id || overlay?.className || target?.className || null,
+                  remaining: document.querySelectorAll('#monaco-workbench-editor-drop-overlay, .terminal-drop-overlay').length,
+                };
+              })()`,
+                  true,
+                ),
+                // A plain drop lands on the editor group's overlay, and
+                // consuming it leaves no VS Code overlay behind.
+                {
+                  target: 'monaco-workbench-editor-drop-overlay',
+                  remaining: 0,
+                },
+              )
+              if (provider === 'ordinary') {
+                await delay(500)
+                assert.equal(deliveries().length, count)
+              } else {
+                count++
+                await until(
+                  () => deliveries().length >= count,
+                  `dropped files delivered to terminal (${provider})`,
+                )
+                const result = deliveries().at(-1)
+                assert.equal(result.terminalId, `fixture-${provider}`)
+                const parts = frames(result.text)
+                let paths
+                if (provider === 'codex') {
+                  assert.equal(parts.length, 2)
+                  assert.match(parts[0], /^".+" $/)
+                  paths = [parts[0].slice(1, -2), new URL(parts[1])]
+                } else {
+                  assert.equal(parts.length, 1)
+                  paths = parts[0]
+                    .split('\r')
+                    .filter(Boolean)
+                    .map((mention) => {
+                      assert.ok(mention.startsWith('@'))
+                      return JSON.parse(mention.slice(1))
+                    })
+                }
+                assert.equal(basename(paths[0]), 'ADE drop.txt')
+                assert.equal(readFileSync(paths[0], 'utf8'), 'ADE_DROP_TEXT')
+                assert.deepEqual(
+                  readFileSync(paths[1]),
+                  Buffer.from(png, 'base64'),
+                )
               }
             }
             await command(editor, 'ADE: Paste Fixture close')

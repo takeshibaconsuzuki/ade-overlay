@@ -127,6 +127,10 @@ export class EditorWindow {
             view.webContents,
             () => this.active?.view === view,
             isEditorUrl,
+            () => {
+              this.window?.focus()
+              view.webContents.focus()
+            },
             (documentId) =>
               this.pasteBridge!.reservePaste(editor.id, documentId),
             (documentId, reservationId, items) =>

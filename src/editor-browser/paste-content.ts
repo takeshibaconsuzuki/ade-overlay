@@ -2,6 +2,8 @@ export interface PasteInput {
   text: string
   html: string
   images: Blob[]
+  // Dropped files follow any text and images, keeping their names.
+  files?: File[]
 }
 
 import type { PastePart } from '../shared/paste'
@@ -103,6 +105,22 @@ export function parsePaste(input: PasteInput): SourcePart[] {
 }
 
 export async function readPaste(input: PasteInput): Promise<PastePart[]> {
+  const [parts, files] = await Promise.all([
+    readSources(input),
+    Promise.all(
+      (input.files ?? []).map(
+        async (file): Promise<PastePart> => ({
+          type: 'file',
+          name: file.name,
+          data: new Uint8Array(await file.arrayBuffer()),
+        }),
+      ),
+    ),
+  ])
+  return [...parts, ...files]
+}
+
+function readSources(input: PasteInput): Promise<PastePart[]> {
   // Promise.all keeps document order even if images finish in a different order.
   return Promise.all(
     parsePaste(input).map(async (part): Promise<PastePart> => {

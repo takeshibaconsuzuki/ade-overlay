@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { EventEmitter, once } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, isAbsolute } from 'node:path'
+import { basename, dirname, join, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { materializePaste } from '../../src/server/chats/chat-paste.ts'
 import { chatProviders } from '../../src/server/chats/chat-providers.ts'
@@ -91,6 +91,60 @@ test('providers prepare ordered bracketed text and image paths without Enter', a
     materializePaste([{ type: 'image', data: 'file:///secret.png' }], root),
     /HTTP/,
   )
+})
+
+test('dropped files keep safe names; supported images become images', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'ade-paste-files-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const pdf = Buffer.from('%PDF-1.4\n')
+  const parts = await materializePaste(
+    [
+      { type: 'file', name: 'report one.pdf', data: pdf },
+      { type: 'file', name: '../notes.txt', data: Buffer.from('notes') },
+      { type: 'file', name: 'screenshot.png', data: png },
+      // Valid UTF-16 lengths can exceed file-system byte limits.
+      {
+        type: 'file',
+        name: '資'.repeat(82) + '👍🏽'.repeat(3) + '.txt',
+        data: pdf,
+      },
+    ],
+    root,
+  )
+  const long = basename(parts.pop()!.data)
+  assert.ok(Buffer.byteLength(long) <= 200, long)
+  assert.match(long, /^資+(👍🏽)*\.txt$/u)
+  assert.deepEqual(
+    parts.map((part) => [part.type, basename(part.data)]),
+    [
+      ['file', 'report one.pdf'],
+      ['file', '_notes.txt'],
+      ['image', basename(parts[2].data)],
+    ],
+  )
+  assert.deepEqual(await readFile(parts[0].data), pdf)
+  assert.equal(dirname(dirname(parts[1].data)), join(root, 'paste-files'))
+  assert.equal(dirname(parts[2].data), join(root, 'paste-images'))
+  for (const provider of chatProviders)
+    assert.deepEqual(
+      frames(provider.preparePaste(parts)),
+      provider.id === 'codex'
+        ? [
+            `"${parts[0].data}" `,
+            `${parts[1].data} `,
+            pathToFileURL(parts[2].data).href,
+          ]
+        : [
+            parts
+              .map(
+                (part) =>
+                  '\n@' +
+                  JSON.stringify(part.data.replaceAll('\\', '/')) +
+                  '\n',
+              )
+              .join(''),
+          ],
+    )
 })
 
 test(
@@ -234,6 +288,21 @@ test(
     )
     assert.equal(deliveries[1].provider, 'claude')
     assert.deepEqual(frames(deliveries[1].text), ['text before first prompt'])
+    // Dropped files travel through the same binary transport and reservation.
+    assert.equal(
+      await paste(await reserve(), [
+        { type: 'file', name: 'drop.txt', data: Buffer.from('dropped') },
+      ]),
+      null,
+    )
+    const [dropped] = frames(deliveries[2].text)
+    assert.equal(deliveries[2].terminalId, 'different-focus')
+    assert.match(dropped, /^\n@".*[\\/]drop\.txt"\n$/)
+    assert.equal(
+      await readFile(JSON.parse(dropped.slice(2, -1)), 'utf8'),
+      'dropped',
+    )
+    deliveries.pop()
     assert.deepEqual(
       chats.store.list().chats,
       [],

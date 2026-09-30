@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Logger } from 'pino'
@@ -45,7 +44,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     new ChatStore(undefined, (worktree) =>
       editors.status(worktree) === 'stopped' ? undefined : colors.get(worktree),
     ),
-    join(editorDataDir(config.editor), 'paste-images'),
+    editorDataDir(config.editor),
   )
   const editors = new EditorManager(
     chats,

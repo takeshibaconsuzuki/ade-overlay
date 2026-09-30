@@ -1,26 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { pasteChannels, type PasteBridge } from '../shared/paste'
 
-// Native menu pastes can be trusted clipboard events without transient DOM
+// Native menu pastes and file drops are trusted events without transient DOM
 // activation. Track that proof in the isolated world, never in page arguments.
-let nativePaste = false
-document.addEventListener(
-  'paste',
-  (event) => {
-    if (!event.isTrusted) return
-    nativePaste = true
-    setTimeout(() => {
-      nativePaste = false
-    })
-  },
-  true,
-)
+let trustedTransfer: string | undefined
+for (const type of ['paste', 'drop'])
+  document.addEventListener(
+    type,
+    (event) => {
+      if (!event.isTrusted) return
+      trustedTransfer = type
+      setTimeout(() => {
+        trustedTransfer = undefined
+      })
+    },
+    true,
+  )
 
 const bridge: PasteBridge = {
   reservePaste: () => {
-    const trustedPaste = nativePaste
-    nativePaste = false
-    return ipcRenderer.invoke(pasteChannels.reserve, trustedPaste)
+    const trusted = trustedTransfer
+    trustedTransfer = undefined
+    return ipcRenderer.invoke(pasteChannels.reserve, trusted)
   },
   paste: (id, items) => ipcRenderer.invoke(pasteChannels.paste, id, items),
 }
