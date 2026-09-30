@@ -1,8 +1,8 @@
 import { exec, execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { realpath } from 'node:fs/promises'
+import { chmod, lstat, readdir, realpath } from 'node:fs/promises'
 import os from 'node:os'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import type {
   CreateWorktreeInput,
@@ -74,6 +74,19 @@ async function removalFiles(path: string): Promise<string[]> {
       files.add(record.slice(record.indexOf('\t') + 1))
   }
   return [...files].sort()
+}
+
+// Tools such as envtest install read-only directories, whose entries Git
+// cannot unlink. Windows does not restrict deletion by directory mode.
+async function makeDirectoriesWritable(path: string): Promise<void> {
+  const { mode } = await lstat(path)
+  if ((mode & 0o700) !== 0o700) await chmod(path, mode | 0o700)
+  const entries = await readdir(path, { withFileTypes: true })
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => makeDirectoriesWritable(join(path, entry.name))),
+  )
 }
 
 async function git(project: string, args: string[]): Promise<string> {
@@ -544,6 +557,9 @@ export class WorktreeStore extends EventEmitter<{
             'The worktree branch changed. Refresh the list before deleting its branch.',
           )
         await this.editors.stop(current)
+        if (process.platform !== 'win32')
+          // Git reports any directory that still cannot be removed.
+          await makeDirectoriesWritable(current.path).catch(() => {})
         await git(project, [
           'worktree',
           'remove',

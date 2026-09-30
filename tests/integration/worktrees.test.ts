@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import {
   access,
+  chmod,
   copyFile,
   cp,
   mkdir,
@@ -436,6 +437,30 @@ test('async mutations preserve cache on failure, serialize conflicts and protect
     await git(project, 'rev-parse', '--verify', 'refs/heads/feature/test'),
   )
 })
+
+test(
+  'deletion removes read-only directories left by tools',
+  { skip: process.platform === 'win32' },
+  async (t) => {
+    const { root, makeProject } = await fixture(t)
+    const project = await makeProject('project')
+    const path = join(root, 'tools')
+    await git(project, 'worktree', 'add', '-b', 'tools', path)
+    const store = await WorktreeStore.open(
+      [{ mainWorktreePath: project }],
+      new WorktreeEditors(),
+    )
+    const binaries = join(path, 'bin', 'k8s')
+    await mkdir(binaries, { recursive: true })
+    await writeFile(join(binaries, 'etcd'), '')
+    await chmod(join(binaries, 'etcd'), 0o555)
+    await chmod(binaries, 0o555)
+    await store.startDelete({ project, path, force: true })
+    await store.settled()
+    assert.ok(!store.list().worktrees.some((row) => row.path === path))
+    await assert.rejects(access(path), { code: 'ENOENT' })
+  },
+)
 
 test('stopping an editor keeps membership and allows reopening, including the main worktree', async (t) => {
   const { root, makeProject } = await fixture(t)
