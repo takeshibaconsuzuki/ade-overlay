@@ -59,7 +59,7 @@ sequenceDiagram
     Dialog->>Dialog: Leave empty; enable autofill on the next variable change
 ```
 
-- The effective branch is the trimmed new branch name, falling back to the base branch. Each project may configure a Liquid path template; the default appends a filename-safe branch to the main worktree path.
+- The effective branch is the trimmed new branch name, falling back to the Git ref. Each project may configure a Liquid path template; the default appends a filename-safe branch to the main worktree path.
 - The initial template response fills the path from the current inputs unless the user has edited or cleared it. Branch edits and project changes require no additional requests or debounce; local hashing and path helpers preserve companion platform behavior.
 - Suggestions do not change Git membership or reserve a destination. Manual edits (including clearing), project/branch changes, and dismissal suppress obsolete results. Clearing waits for the project or effective branch to change before rendering another suggestion. Template errors allow a manually entered path.
 
@@ -91,7 +91,10 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    Start([Queued creation begins]) --> Add[Add the worktree, creating a new branch if requested]
+    Start([Queued creation begins]) --> Ref[Resolve Git ref in the selected project]
+    Ref --> Check{Local branch or new branch name supplied?}
+    Check -->|Yes| Add[Check out the local branch or create a new branch at the resolved commit]
+    Check -->|No| Failure
     Add --> Run[If Git succeeds, run any configured project bootstrap and wait]
     Run --> Result{Creation completed?}
     Result -->|Yes| Reconcile[Refresh project membership and reconcile editors]
@@ -104,6 +107,8 @@ flowchart TD
 
 - Connected desktops [notify when creation finishes](desktop.md#notify-when-worktree-creation-finishes), after the configured bootstrap and membership refresh succeed or fail. Clicking opens the worktree if it remains available.
 - Paths are on the companion machine; relative paths start at the selected project. Creation resolves physical path identity before reserving the row.
+- Git ref suggestions load local and remote-tracking branches for the selected project and filter as the user types. The shared picker navigation supports mouse selection, arrows, and Enter. Enter selects the active result; with **No results**, it closes the dropdown and preserves the text without submitting. Stale project responses are ignored; loading failures still allow manual entry.
+- Local branch names take precedence over same-named tags; explicit `refs/tags/` refs select tags. Remote refs, tags, commits, and expressions require a new branch name. The companion enforces this when queued creation runs, so this flow never intentionally creates a detached worktree.
 - A failing Git hook or project bootstrap can leave a real worktree. The row remains usable after the operation ends; a failure with no worktree remains as a synthetic error row.
 
 ## Delete a worktree

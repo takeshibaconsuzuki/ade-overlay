@@ -15,6 +15,8 @@ const argumentSchema = z
   .max(4096)
   .refine((value) => !value.includes('\0'), 'Must not contain a null byte.')
 const textSchema = argumentSchema.regex(/\S/, 'Must not be blank.')
+const worktreeBranchSchema = z.object({ name: textSchema, local: z.boolean() })
+export type WorktreeBranch = z.infer<typeof worktreeBranchSchema>
 
 export const createWorktreeInputSchema = z.object({
   project: textSchema,
@@ -101,6 +103,12 @@ export const companionRequests = {
   ),
   activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),
   list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
+  branches: requestSpec(
+    'worktrees:branches',
+    z.object({ project: textSchema }),
+    z.array(worktreeBranchSchema),
+    5_000,
+  ),
   pathTemplates: requestSpec(
     'worktrees:path-templates',
     z.null(),

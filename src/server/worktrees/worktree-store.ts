@@ -5,6 +5,7 @@ import os from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import type {
+  WorktreeBranch,
   CreateWorktreeInput,
   WorktreePathTemplates,
   DeleteWorktreeInput,
@@ -116,6 +117,23 @@ async function creationPath(path: string): Promise<string> {
     // ancestor so pending state uses the same physical path Git will report.
     return resolve(await creationPath(parent), basename(path))
   }
+}
+
+async function branchRefs(project: string): Promise<string[]> {
+  const output = await git(project, [
+    'for-each-ref',
+    '--format=%(refname)%09%(symref)',
+    '--sort=refname',
+    'refs/heads/',
+    'refs/remotes/',
+  ])
+  return output
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      const [ref, symbolic] = line.trimEnd().split('\t')
+      return symbolic ? [] : [ref]
+    })
 }
 
 async function scan(project: string): Promise<GitWorktree[]> {
@@ -310,6 +328,30 @@ export class WorktreeStore extends EventEmitter<{
     }
   }
 
+  branches(path: string): Promise<WorktreeBranch[]> {
+    this.accepting()
+    const project = this.project(path)
+    return this.serialize(async () => {
+      const refs = await branchRefs(project)
+      const refNames = new Set(refs)
+      return refs.map((ref) => {
+        const local = ref.startsWith('refs/heads/')
+        const name = ref.slice(
+          local ? 'refs/heads/'.length : 'refs/remotes/'.length,
+        )
+        // Keep suggestions unambiguous with explicit refs and local branches.
+        return {
+          name:
+            name.startsWith('refs/') ||
+            (!local && refNames.has(`refs/heads/${name}`))
+              ? ref
+              : name,
+          local,
+        }
+      })
+    })
+  }
+
   // All Git membership changes pass here. Status-only broadcasts use publish
   // directly, so stopping a process cannot recursively trigger reconciliation.
   private async applyWorktrees(
@@ -489,7 +531,30 @@ export class WorktreeStore extends EventEmitter<{
     }
     return this.schedule(target, 'creating', async () => {
       try {
-        let args = ['worktree', 'add', '--', path, input.baseBranch]
+        const refs = await branchRefs(project)
+        const gitRef = input.baseBranch.trim()
+        const localRef = gitRef.startsWith('refs/')
+          ? gitRef
+          : `refs/heads/${gitRef}`
+        const local =
+          localRef.startsWith('refs/heads/') && refs.includes(localRef)
+        const remoteRef = `refs/remotes/${gitRef}`
+        const startRef = local
+          ? localRef
+          : !gitRef.startsWith('refs/') && refs.includes(remoteRef)
+            ? remoteRef
+            : gitRef
+        if (!branch && !local)
+          throw new Error(
+            'A new branch name is required unless Git ref names an existing local branch.',
+          )
+        let args = [
+          'worktree',
+          'add',
+          '--',
+          path,
+          localRef.slice('refs/heads/'.length),
+        ]
         if (branch) {
           if (branch.startsWith('-'))
             throw new Error('Branch names cannot start with a dash.')
@@ -499,7 +564,7 @@ export class WorktreeStore extends EventEmitter<{
               'rev-parse',
               '--verify',
               '--end-of-options',
-              `${input.baseBranch}^{commit}`,
+              `${startRef}^{commit}`,
             ])
           ).trim()
           args = ['worktree', 'add', '-b', branch, '--', path, commit]

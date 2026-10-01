@@ -345,6 +345,52 @@ test('path templates expose project configuration once without changing membersh
   assert.deepEqual(await client.listWorktrees(), before)
 })
 
+test('branch search lists local and remote branches for only the configured project', async (t) => {
+  const { makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const other = await makeProject('other')
+  await git(project, 'branch', 'feature/search')
+  await git(project, 'tag', 'feature/search')
+  await git(project, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+  await git(
+    project,
+    'symbolic-ref',
+    'refs/remotes/origin/HEAD',
+    'refs/remotes/origin/main',
+  )
+  await git(project, 'tag', 'not-a-branch')
+  await git(other, 'branch', 'other-only')
+  const server = await startCompanionServer({
+    config: {
+      projects: [{ mainWorktreePath: project }, { mainWorktreePath: other }],
+    },
+    port: 0,
+  })
+  t.after(() => server.close())
+  const client = await connectClient(t, server.url)
+  const before = await client.listWorktrees()
+  assert.deepEqual(await client.getWorktreeBranches(project), [
+    { name: 'feature/search', local: true },
+    { name: 'main', local: true },
+    { name: 'origin/main', local: false },
+  ])
+  assert.deepEqual(await client.getWorktreeBranches(other), [
+    { name: 'main', local: true },
+    { name: 'other-only', local: true },
+  ])
+  await git(project, 'branch', 'new-branch')
+  assert.ok(
+    (await client.getWorktreeBranches(project)).some(
+      ({ name }) => name === 'new-branch',
+    ),
+  )
+  await assert.rejects(
+    client.getWorktreeBranches(join(project, 'unknown')),
+    /not configured/,
+  )
+  assert.deepEqual(await client.listWorktrees(), before)
+})
+
 test('startup cache covers all repositories and sync list stays cached until refresh', async (t) => {
   const { root, makeProject } = await fixture(t)
   const first = await makeProject('first project')
@@ -940,6 +986,78 @@ test(
     assert.equal(creator.getStatus().state, 'connected')
   },
 )
+
+test('Git refs prefer local branches over tags and require a new branch for other refs', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const initial = await git(project, 'rev-parse', 'HEAD')
+  await git(project, 'tag', 'feature')
+  await git(project, 'update-ref', 'refs/remotes/origin/feature', initial)
+  await git(project, 'update-ref', 'refs/remotes/origin/main', initial)
+  await git(
+    project,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.com',
+    'commit',
+    '--no-gpg-sign',
+    '--allow-empty',
+    '-m',
+    'Second',
+  )
+  const latest = await git(project, 'rev-parse', 'HEAD')
+  await git(project, 'update-ref', 'refs/remotes/refs/tags/feature', latest)
+  await git(project, 'branch', 'feature')
+  await git(project, 'branch', 'origin/feature')
+  const server = await startCompanionServer({
+    port: 0,
+    config: { projects: [{ mainWorktreePath: project }] },
+  })
+  t.after(() => server.close())
+  const client = await connectClient(t, server.url)
+  assert.deepEqual(await client.getWorktreeBranches(project), [
+    { name: 'feature', local: true },
+    { name: 'main', local: true },
+    { name: 'origin/feature', local: true },
+    { name: 'refs/remotes/origin/feature', local: false },
+    { name: 'origin/main', local: false },
+    { name: 'refs/remotes/refs/tags/feature', local: false },
+  ])
+  for (const [index, [baseBranch, branch, expected]] of [
+    ['feature', '', latest],
+    ['feature', 'from-local', latest],
+    ['refs/heads/origin/feature', '', latest],
+    ['refs/tags/feature', 'from-tag', initial],
+    ['refs/remotes/origin/feature', 'from-remote', initial],
+    ['origin/main', 'from-remote-short', initial],
+    ['refs/remotes/refs/tags/feature', 'from-ref-like-remote', latest],
+    ['HEAD~1', 'from-expression', initial],
+    [initial, 'from-commit', initial],
+  ].entries()) {
+    const path = join(root, `created-${index}`)
+    await completeCreate(client, { project, path, baseBranch, branch })
+    assert.equal(
+      await git(path, 'symbolic-ref', 'HEAD'),
+      `refs/heads/${branch || baseBranch.replace(/^refs\/heads\//, '')}`,
+    )
+    assert.equal(await git(path, 'rev-parse', 'HEAD'), expected)
+  }
+  for (const [index, baseBranch] of [
+    'refs/tags/feature',
+    'refs/remotes/origin/feature',
+    'origin/main',
+    'HEAD~1',
+    initial,
+  ].entries()) {
+    const path = join(root, `rejected-${index}`)
+    await assert.rejects(
+      completeCreate(client, { project, path, baseBranch, branch: '' }),
+      /new branch name is required/,
+    )
+    await assert.rejects(access(path))
+  }
+})
 
 test('bootstrap uses the account shell for shell-specific commands', async (t) => {
   const { root, makeProject } = await fixture(t)

@@ -158,6 +158,10 @@ app.whenReady().then(() => {
     assertTrustedSender(event)
     return companion.getWorktreePathTemplates()
   })
+  ipcMain.handle(companionChannels.getWorktreeBranches, (event, project) => {
+    assertTrustedSender(event)
+    return companion.getWorktreeBranches(project)
+  })
   ipcMain.handle(companionChannels.deleteWorktree, (event, input) => {
     assertTrustedSender(event)
     return companionState.deleteWorktree(input)

@@ -22,7 +22,7 @@ projects:
 
 Each `mainWorktreePath` points to a repository's main worktree. Relative paths resolve from the configuration file. The optional `bootstrapCommand` runs in new worktrees; failures leave the worktree available for inspection. Restart the companion after configuration changes.
 
-`worktreePathTemplate` autofills the create-worktree path using [Liquid syntax](https://liquidjs.com/filters/overview.html); the example above is the default when omitted. Templates receive the resolved `mainWorktreePath` and `branchName` (the trimmed new branch name, or the base branch when blank). Opening the dialog fetches all project templates once; edits render locally without further requests or a debounce, using the companion's path rules. Relative results start at the selected project. The current path stays visible until a suggestion is ready. Editing the path pauses autofill; clearing it leaves the field empty and resumes autofill on the next project or effective branch change.
+`worktreePathTemplate` autofills the create-worktree path using [Liquid syntax](https://liquidjs.com/filters/overview.html); the example above is the default when omitted. Templates receive the resolved `mainWorktreePath` and `branchName` (the trimmed new branch name, or the Git ref when blank). Opening the dialog fetches all project templates once; edits render locally without further requests or a debounce, using the companion's path rules. Relative results start at the selected project. The current path stays visible until a suggestion is ready. Editing the path pauses autofill; clearing it leaves the field empty and resumes autofill on the next project or effective branch change.
 
 ### Start ADE
 
@@ -54,7 +54,7 @@ Launching ADE again shows the existing worktree window.
 
 Click a worktree to open its editor. Opened worktrees are automatically trusted.
 
-- **Create worktree:** leave the branch name blank to check out the base branch. Relative paths start at the selected project.
+- **Create worktree:** Git ref searches the selected project's local and remote-tracking branches as you type, and also accepts tags, commits, and Git expressions. Leave the new branch name blank only to check out an existing local branch; other refs require a new branch name. Local branches take precedence over same-named tags; use `refs/tags/<name>` to select a tag explicitly. Relative paths start at the selected project.
 - **Worktree menu (⋯):** delete the worktree while keeping its branch, or delete both the worktree and its local branch (including unmerged commits). If Git refuses removal because of local files or submodules, review the listed files and confirm a retry with `--force` to discard them. Main and locked worktrees cannot be deleted.
 - **Refresh worktrees:** picks up external Git changes.
 

@@ -157,6 +157,9 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     )
     register(companionRequests.list, () => worktrees.list())
     register(companionRequests.pathTemplates, () => worktrees.pathTemplates())
+    register(companionRequests.branches, ({ project }) =>
+      worktrees.branches(project),
+    )
     register(companionRequests.refresh, () => worktrees.refresh())
     register(companionRequests.create, (input) => worktrees.startCreate(input))
     register(companionRequests.delete, (input) => worktrees.startDelete(input))

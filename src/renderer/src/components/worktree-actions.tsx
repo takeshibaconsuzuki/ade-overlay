@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type {
+  WorktreeBranch,
   Worktree,
   WorktreeSnapshot,
   WorktreePathTemplates,
 } from '../../../shared/companion'
 import { renderWorktreePath } from '../../../shared/worktree-path-template'
 import { errorMessage } from '../use-companion'
+import { SearchableField } from '../../../shared/ui/searchable-field'
 import {
   ActionMenu,
   Button,
@@ -64,6 +66,11 @@ export function CreateWorktree({
   } = useSubmission()
   const [project, setProject] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
+  const [branchSuggestions, setBranchSuggestions] = useState<{
+    project: string
+    values: WorktreeBranch[]
+    error?: string
+  } | null>(null)
   const [branch, setBranch] = useState('')
   const [path, setPath] = useState('')
   const [templates, setTemplates] = useState<WorktreePathTemplates | null>(null)
@@ -80,6 +87,38 @@ export function CreateWorktree({
   const suggestionKey = JSON.stringify([project, branchName])
   const pathError =
     suggestionError.key === suggestionKey ? suggestionError.message : ''
+  const knownBranches =
+    branchSuggestions?.project === project ? branchSuggestions : null
+  const requiresNewBranch =
+    !!knownBranches &&
+    !knownBranches.error &&
+    !knownBranches.values.some(
+      ({ name, local }) =>
+        local &&
+        (baseBranch.trim() === name ||
+          baseBranch.trim() === `refs/heads/${name}`),
+    )
+
+  useEffect(() => {
+    if (!open || !connected || !project) return
+    let active = true
+    void window.companion.getWorktreeBranches(project).then(
+      (values) => {
+        if (active) setBranchSuggestions({ project, values })
+      },
+      (cause) => {
+        if (active)
+          setBranchSuggestions({
+            project,
+            values: [],
+            error: errorMessage(cause),
+          })
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [open, connected, project])
 
   useEffect(() => {
     if (!open || !templates || !project || !autofill.current) return
@@ -135,6 +174,7 @@ export function CreateWorktree({
 
   function selectProject(value: string): void {
     setProject(value)
+    setBranchSuggestions(null)
     setBaseBranch(
       snapshot?.worktrees.find((entry) => entry.project === value && entry.main)
         ?.branch ?? 'HEAD',
@@ -178,7 +218,7 @@ export function CreateWorktree({
   return (
     <Modal
       title="Create worktree"
-      description="Leave the new branch name blank to check out the base branch."
+      description="Leave the new branch name blank to check out an existing local branch. Other Git refs require a new branch name."
       open={open}
       onOpenChange={changeOpen}
       trigger={
@@ -198,19 +238,31 @@ export function CreateWorktree({
           }))}
           disabled={busy}
         />
-        <Field
-          label="Base branch"
+        <SearchableField
+          label="Git ref"
           value={baseBranch}
-          onChange={(event) => setBaseBranch(event.target.value)}
+          onChange={setBaseBranch}
           placeholder="main"
+          autoComplete="off"
+          suggestions={
+            branchSuggestions?.project === project
+              ? branchSuggestions.values.map(({ name }) => name)
+              : []
+          }
+          hint={
+            branchSuggestions?.project === project && branchSuggestions.error
+              ? `Could not load branches: ${branchSuggestions.error} Enter a branch or reference manually.`
+              : 'Type to search branches or enter a Git reference.'
+          }
           required
           disabled={busy}
         />
         <Field
-          label="New branch name (optional)"
+          label="New branch name"
           value={branch}
           onChange={(event) => setBranch(event.target.value)}
           placeholder="feature/my-change"
+          required={requiresNewBranch}
           disabled={busy}
         />
         <Field
@@ -236,7 +288,11 @@ export function CreateWorktree({
             type="submit"
             busy={busy}
             disabled={
-              !connected || !project || !baseBranch.trim() || !path.trim()
+              !connected ||
+              !project ||
+              !baseBranch.trim() ||
+              !path.trim() ||
+              (requiresNewBranch && !branch.trim())
             }
           >
             Create worktree

@@ -1,4 +1,5 @@
 import type {
+  WorktreeBranch,
   CreateWorktreeInput,
   WorktreePathTemplates,
   DeleteWorktreeInput,
@@ -24,6 +25,7 @@ export const companionChannels = {
   refreshWorktrees: 'companion:worktrees:refresh',
   createWorktree: 'companion:worktrees:create',
   getWorktreePathTemplates: 'companion:worktrees:path-templates',
+  getWorktreeBranches: 'companion:worktrees:branches',
   deleteWorktree: 'companion:worktrees:delete',
   setWorktreeError: 'companion:worktrees:set-error',
   openEditor: 'companion:editor:open',
@@ -50,6 +52,7 @@ export interface CompanionAPI {
   refreshWorktrees(): Promise<void>
   createWorktree(input: CreateWorktreeInput): Promise<void>
   getWorktreePathTemplates(): Promise<WorktreePathTemplates>
+  getWorktreeBranches(project: string): Promise<WorktreeBranch[]>
   deleteWorktree(input: DeleteWorktreeInput): Promise<void>
   setWorktreeError(input: SetWorktreeErrorInput): Promise<void>
   openEditor(input: OpenEditorInput): Promise<void>

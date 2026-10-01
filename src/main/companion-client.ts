@@ -9,6 +9,7 @@ import {
   companionRequests,
   companionEvents,
   type WorktreeSnapshot,
+  type WorktreeBranch,
   type CreateWorktreeInput,
   type WorktreePathTemplates,
   type DeleteWorktreeInput,
@@ -197,6 +198,9 @@ export class CompanionClient extends EventEmitter<{
   }
   getWorktreePathTemplates(): Promise<WorktreePathTemplates> {
     return this.request(companionRequests.pathTemplates, null)
+  }
+  getWorktreeBranches(project: string): Promise<WorktreeBranch[]> {
+    return this.request(companionRequests.branches, { project })
   }
   deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot> {
     return this.request(companionRequests.delete, input)

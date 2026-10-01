@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('companion', {
   openEditor: (input) => ipcRenderer.invoke('test:open', input),
   createWorktree: (input) => ipcRenderer.invoke('test:create', input),
   getWorktreePathTemplates: () => ipcRenderer.invoke('test:path-templates'),
+  getWorktreeBranches: (project) =>
+    ipcRenderer.invoke('test:branches', project),
   deleteWorktree: (input) => ipcRenderer.invoke('test:delete', input),
   setWorktreeError: (input) => ipcRenderer.invoke('test:error', input),
   stopEditor: (input) => ipcRenderer.invoke('test:stop', input),

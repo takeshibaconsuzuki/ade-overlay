@@ -18,6 +18,8 @@ let holdOpen = false
 let finishOpen
 let holdMutation = false
 const mutations = []
+const creations = []
+let failBranchLoad = false
 const deletions = []
 const stops = []
 let holdTemplates = false
@@ -206,6 +208,7 @@ async function run() {
       })
   })
   ipcMain.handle('test:create', async (_event, value) => {
+    creations.push(value)
     if (holdMutation) return deferMutation()
     await update([
       ...snapshot.worktrees,
@@ -223,6 +226,16 @@ async function run() {
         templateLoads.push({ resolve, reject }),
       )
     return pathTemplates()
+  })
+  ipcMain.handle('test:branches', (_event, project) => {
+    if (failBranchLoad) throw new Error('Branch loading failed')
+    return project === 'C:/demo'
+      ? [
+          { name: 'main', local: true },
+          { name: 'release/v1', local: true },
+          { name: 'origin/feature/search', local: false },
+        ]
+      : [{ name: 'other-branch', local: true }]
   })
   ipcMain.handle('test:delete', async (_event, value) => {
     deletions.push(value)
@@ -563,6 +576,12 @@ async function run() {
     true,
   )
   await key('ESCAPE')
+  await until("!document.querySelector('.ui-field-dropdown')")
+  assert.equal(
+    await evaluate("!!document.querySelector('[role=dialog]')"),
+    true,
+  )
+  await key('ESCAPE')
   await until("!document.querySelector('[role=dialog]')")
   assert.equal(
     hideRequests,
@@ -580,6 +599,7 @@ async function run() {
   const setCreateField = async (index, value) => {
     await evaluate(`(() => {
       const field = document.querySelectorAll('[role=dialog] input')[${index}];
+      field.focus();
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, ${JSON.stringify(value)});
       field.dispatchEvent(new Event('input', {bubbles:true}));
     })()`)
@@ -600,7 +620,91 @@ async function run() {
   await openCreate()
   await until(pathEquals('C:/demo-HEAD'))
   assert.equal(templateRequests, requestsBeforeOpen + 1)
+  await setCreateField(0, '')
+  await window.webContents.insertText('ReLeAsE')
+  await until(
+    "document.querySelectorAll('.ui-field-dropdown [role=option]').length === 1",
+  )
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.ui-field-dropdown [role=option]').textContent",
+    ),
+    'release/v1',
+  )
+  assert.equal(
+    await evaluate(
+      "document.activeElement === document.querySelector('input[role=combobox]')",
+    ),
+    true,
+  )
+  await key('ENTER')
+  await until("!document.querySelector('.ui-field-dropdown')")
+  await until(pathEquals('C:/demo-release-v1'))
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('[role=dialog] input')[1].required",
+    ),
+    false,
+  )
+  assert.equal(
+    await evaluate("!!document.querySelector('[role=dialog]')"),
+    true,
+  )
+  await setCreateField(0, '')
+  await until(
+    "document.querySelectorAll('.ui-field-dropdown [role=option]').length === 3",
+  )
+  await key('DOWN')
+  await until(
+    "document.querySelector('.ui-field-dropdown [aria-selected=true]')?.textContent === 'release/v1'",
+  )
+  await key('UP')
+  await until(
+    "document.querySelector('.ui-field-dropdown [aria-selected=true]')?.textContent === 'main'",
+  )
+  await moveMouse('.ui-field-dropdown li:first-child button')
+  await moveMouse('.ui-field-dropdown li:last-child button')
+  await until(
+    "document.querySelector('.ui-field-dropdown [aria-selected=true]')?.textContent === 'origin/feature/search'",
+  )
+  await clickMouse('.ui-field-dropdown li:last-child button')
+  await until(pathEquals('C:/demo-origin-feature-search'))
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('[role=dialog] input')[1].required",
+    ),
+    true,
+  )
+  await until("!document.querySelector('.ui-field-dropdown')")
+  await setCreateField(1, 'manual-ref')
+  await setCreateField(0, 'HEAD~1')
+  await until(
+    "document.querySelector('.ui-field-picker-empty')?.textContent === 'No results'",
+  )
+  const creationsBeforeNoResults = creations.length
+  await key('ENTER')
+  await until("!document.querySelector('.ui-field-dropdown')")
+  assert.equal(creations.length, creationsBeforeNoResults)
+  assert.equal(
+    await evaluate("!!document.querySelector('[role=dialog]')"),
+    true,
+  )
+  assert.equal(
+    await evaluate("document.querySelector('input[role=combobox]').value"),
+    'HEAD~1',
+  )
+  await key('DOWN')
+  await until("!!document.querySelector('.ui-field-dropdown')")
+  await key('TAB')
+  await until("!document.querySelector('.ui-field-dropdown')")
+  assert.equal(
+    await evaluate(
+      "document.activeElement === document.querySelectorAll('[role=dialog] input')[1]",
+    ),
+    true,
+  )
   await setCreateField(0, 'release/v1')
+  await setCreateField(1, '')
   await until(pathEquals('C:/demo-release-v1'))
   await setCreateField(1, 'feature/login')
   await until(pathEquals('C:/demo-feature-login'))
@@ -638,6 +742,12 @@ async function run() {
   }
   await setCreateField(2, '../manual-again')
   await selectCreateProject('C:/second')
+  await setCreateField(0, '')
+  await until(
+    "document.querySelector('.ui-field-dropdown [role=option]')?.textContent === 'other-branch'",
+  )
+  await key('ESCAPE')
+  await until("!document.querySelector('.ui-field-dropdown')")
   assert.equal(await evaluate(pathEquals('../manual-again')), true)
   await setCreateField(2, '')
   await delay(50)
@@ -670,6 +780,29 @@ async function run() {
   snapshot.projects = ['C:/demo']
   await update(snapshot.worktrees)
   await closeCreate()
+
+  stage =
+    'Enter accepts manual Git refs after branch loading fails without submitting'
+  failBranchLoad = true
+  await openCreate()
+  await until(
+    "document.querySelector('[role=dialog]').textContent.includes('Could not load branches')",
+  )
+  await setCreateField(1, 'manual-after-failure')
+  await setCreateField(0, 'HEAD~1')
+  await until(
+    "document.querySelector('.ui-field-picker-empty')?.textContent === 'No results'",
+  )
+  const creationsBeforeFailure = creations.length
+  await key('ENTER')
+  await until("!document.querySelector('.ui-field-dropdown')")
+  assert.equal(creations.length, creationsBeforeFailure)
+  assert.equal(
+    await evaluate("document.querySelector('input[role=combobox]').value"),
+    'HEAD~1',
+  )
+  await closeCreate()
+  failBranchLoad = false
 
   stage = 'template loading preserves manual paths and waits after clearing'
   holdTemplates = true

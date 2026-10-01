@@ -12,6 +12,7 @@ export function usePickerNavigation(
   resultsKey: string,
   search: string,
   resetVersion: number,
+  { focusOnWindowFocus = true }: { focusOnWindowFocus?: boolean } = {},
 ) {
   const rootRef = useRef<HTMLElement>(null)
   const entries = useRef(
@@ -115,6 +116,15 @@ export function usePickerNavigation(
     syncHighlightVisibility()
   }, [syncHighlightVisibility, targets])
 
+  const mountList = useCallback(
+    (element: HTMLUListElement | null) => {
+      listRef.current = element
+      // Dropdown content may mount after its owner has run layout effects.
+      if (element) selectFirst()
+    },
+    [selectFirst],
+  )
+
   useLayoutEffect(() => {
     const list = listRef.current
     if (!list) return
@@ -151,7 +161,7 @@ export function usePickerNavigation(
     const onFocus = () => {
       resetPointer()
       // A modal owns focus until it closes, including across window switches.
-      if (suspended.current === 0) {
+      if (suspended.current === 0 && focusOnWindowFocus) {
         searchRef.current?.focus({ preventScroll: true })
       }
       syncHighlightVisibility()
@@ -168,7 +178,7 @@ export function usePickerNavigation(
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', resetPointer)
     }
-  }, [syncHighlightVisibility])
+  }, [focusOnWindowFocus, syncHighlightVisibility])
 
   function onPointerMove(event: PointerEvent<HTMLElement>) {
     if (event.pointerType !== 'mouse') return
@@ -289,7 +299,7 @@ export function usePickerNavigation(
       },
     },
     listProps: {
-      ref: listRef,
+      ref: mountList,
       'data-navigation': highlight.mode,
       'data-highlight-visible': highlightVisible,
       onFocus: (event: FocusEvent<HTMLUListElement>) => {

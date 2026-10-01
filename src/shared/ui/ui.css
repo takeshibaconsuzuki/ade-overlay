@@ -44,6 +44,34 @@
   min-width: 0;
   max-width: 100%;
 }
+.ui-field-dropdown {
+  z-index: 1;
+  width: var(--radix-popover-trigger-width);
+  padding: 4px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-3);
+  background: var(--color-panel-solid);
+  box-shadow: var(--shadow-4);
+}
+.ui-field-dropdown .ui-scrollbox {
+  max-height: min(240px, var(--radix-popover-content-available-height));
+}
+.ui-field-dropdown [role='option'] {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  padding: 6px 8px;
+  color: var(--app-text);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.ui-field-picker-empty {
+  color: var(--app-muted);
+  margin: 0;
+}
 .ui-select .rt-SelectTriggerInner {
   overflow: hidden;
   text-overflow: ellipsis;
