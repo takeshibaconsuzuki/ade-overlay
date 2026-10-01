@@ -184,7 +184,11 @@ export function CreateWorktree({
     pathGeneration.current++
     const generation = ++templateGeneration.current
     if (next) {
-      selectProject(snapshot?.projects[0] ?? '')
+      selectProject(
+        snapshot?.projects.includes(project)
+          ? project
+          : (snapshot?.projects[0] ?? ''),
+      )
       setBranch('')
       autofill.current = true
       clearedVariables.current = null
