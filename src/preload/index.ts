@@ -14,6 +14,8 @@ const companion: CompanionAPI = {
     ipcRenderer.invoke(companionChannels.refreshWorktrees),
   createWorktree: (input) =>
     ipcRenderer.invoke(companionChannels.createWorktree, input),
+  getWorktreePathTemplates: () =>
+    ipcRenderer.invoke(companionChannels.getWorktreePathTemplates),
   deleteWorktree: (input) =>
     ipcRenderer.invoke(companionChannels.deleteWorktree, input),
   setWorktreeError: (input) =>

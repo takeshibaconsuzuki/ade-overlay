@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -19,6 +20,21 @@ let holdMutation = false
 const mutations = []
 const deletions = []
 const stops = []
+let holdTemplates = false
+let templateRequests = 0
+const templateLoads = []
+const pathTemplates = () => ({
+  pathStyle: 'posix',
+  projects: [
+    { mainWorktreePath: 'C:/demo' },
+    {
+      mainWorktreePath: 'C:/second',
+      worktreePathTemplate:
+        '{{ mainWorktreePath }}/{{ branchName | hash | slice: 0, 8 }}',
+    },
+    { mainWorktreePath: 'C:/invalid', worktreePathTemplate: '{{ unknown }}' },
+  ],
+})
 const deferMutation = () =>
   new Promise((resolve, reject) => mutations.push({ resolve, reject }))
 const worktree = (path, branch) => ({
@@ -199,6 +215,14 @@ async function run() {
         missing: true,
       },
     ])
+  })
+  ipcMain.handle('test:path-templates', () => {
+    templateRequests++
+    if (holdTemplates)
+      return new Promise((resolve, reject) =>
+        templateLoads.push({ resolve, reject }),
+      )
+    return pathTemplates()
   })
   ipcMain.handle('test:delete', async (_event, value) => {
     deletions.push(value)
@@ -545,6 +569,156 @@ async function run() {
     hidesBeforeDialog,
     'dialog Escape keeps the picker open',
   )
+
+  stage = 'creation path autofill follows branches and respects manual paths'
+  const openCreate = async () => {
+    await evaluate(
+      "[...document.querySelectorAll('button')].find(button => button.textContent === 'Create worktree').click()",
+    )
+    await until("!!document.querySelector('[role=dialog] input')")
+  }
+  const setCreateField = async (index, value) => {
+    await evaluate(`(() => {
+      const field = document.querySelectorAll('[role=dialog] input')[${index}];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, ${JSON.stringify(value)});
+      field.dispatchEvent(new Event('input', {bubbles:true}));
+    })()`)
+  }
+  const pathEquals = (value) =>
+    `document.querySelectorAll('[role=dialog] input')[2]?.value === ${JSON.stringify(value)}`
+  const closeCreate = async () => {
+    await key('ESCAPE')
+    await until("!document.querySelector('[role=dialog]')")
+  }
+  const waitTemplateLoad = async () => {
+    const end = Date.now() + 5000
+    while (!templateLoads.length && Date.now() < end) await delay(25)
+    assert.ok(templateLoads.length, 'template request arrived')
+    return templateLoads.shift()
+  }
+  const requestsBeforeOpen = templateRequests
+  await openCreate()
+  await until(pathEquals('C:/demo-HEAD'))
+  assert.equal(templateRequests, requestsBeforeOpen + 1)
+  await setCreateField(0, 'release/v1')
+  await until(pathEquals('C:/demo-release-v1'))
+  await setCreateField(1, 'feature/login')
+  await until(pathEquals('C:/demo-feature-login'))
+  await setCreateField(0, 'main')
+  await until(pathEquals('C:/demo-feature-login'))
+  await setCreateField(2, '../manual')
+  await setCreateField(1, 'feature/next')
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('../manual')), true)
+  await setCreateField(2, '')
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('')), true)
+  await setCreateField(0, 'different-base')
+  await delay(50)
+  assert.equal(
+    await evaluate(pathEquals('')),
+    true,
+    'unchanged effective branch leaves a cleared path empty',
+  )
+  await setCreateField(0, 'main')
+  await setCreateField(1, ' ')
+  await until(pathEquals('C:/demo-main'))
+
+  stage = 'project switching and hashing use cached templates locally'
+  snapshot.projects = ['C:/demo', 'C:/second', 'C:/invalid']
+  await update(snapshot.worktrees)
+  const selectCreateProject = async (project) => {
+    await evaluate(
+      "document.querySelector('[role=dialog] [role=combobox]').click()",
+    )
+    await until("!!document.querySelector('[role=option]')")
+    await evaluate(
+      `[...document.querySelectorAll('[role=option]')].find(option => option.textContent === ${JSON.stringify(project)}).click()`,
+    )
+  }
+  await setCreateField(2, '../manual-again')
+  await selectCreateProject('C:/second')
+  assert.equal(await evaluate(pathEquals('../manual-again')), true)
+  await setCreateField(2, '')
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('')), true)
+  await setCreateField(1, 'pending')
+  const hash = createHash('sha256').update('pending').digest('hex').slice(0, 8)
+  await until(pathEquals(`C:/second/${hash}`))
+  await selectCreateProject('C:/demo')
+  await until(pathEquals('C:/demo-pending'))
+  assert.equal(
+    templateRequests,
+    requestsBeforeOpen + 1,
+    'typing and project switching never request another template',
+  )
+
+  stage = 'local template failures allow manual entry'
+  await selectCreateProject('C:/invalid')
+  await until(
+    "document.querySelector('[role=dialog]').textContent.includes('Invalid worktreePathTemplate')",
+  )
+  assert.equal(
+    await evaluate(pathEquals('C:/demo-pending')),
+    true,
+    'failed rendering preserves the previous path',
+  )
+  await setCreateField(2, '../manual-fallback')
+  await until(
+    "!document.querySelector('[role=dialog]').textContent.includes('Invalid worktreePathTemplate')",
+  )
+  snapshot.projects = ['C:/demo']
+  await update(snapshot.worktrees)
+  await closeCreate()
+
+  stage = 'template loading preserves manual paths and waits after clearing'
+  holdTemplates = true
+  await openCreate()
+  const pendingTemplates = await waitTemplateLoad()
+  await setCreateField(1, 'old')
+  await setCreateField(2, '../manual-loading')
+  pendingTemplates.resolve(pathTemplates())
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('../manual-loading')), true)
+  await setCreateField(2, '')
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('')), true)
+  await setCreateField(1, 'new')
+  await until(pathEquals('C:/demo-new'))
+  await closeCreate()
+
+  await openCreate()
+  const clearedTemplates = await waitTemplateLoad()
+  await setCreateField(2, '../clear-me')
+  await setCreateField(2, '')
+  clearedTemplates.resolve(pathTemplates())
+  await delay(50)
+  assert.equal(
+    await evaluate(pathEquals('')),
+    true,
+    'loading completion cannot refill a cleared path',
+  )
+  await setCreateField(1, 'after-clear')
+  await until(pathEquals('C:/demo-after-clear'))
+  await closeCreate()
+
+  stage = 'dismissed template loads cannot change a reopened dialog'
+  await openCreate()
+  const dismissedTemplates = await waitTemplateLoad()
+  await closeCreate()
+  holdTemplates = false
+  await openCreate()
+  await until(pathEquals('C:/demo-HEAD'))
+  dismissedTemplates.reject(new Error('Obsolete template failure'))
+  await delay(50)
+  assert.equal(await evaluate(pathEquals('C:/demo-HEAD')), true)
+  assert.equal(
+    await evaluate(
+      "document.querySelector('[role=dialog]').textContent.includes('Obsolete template failure')",
+    ),
+    false,
+  )
+  await closeCreate()
 
   stage = 'dismissed submissions cannot mutate a reopened dialog'
   await search('')

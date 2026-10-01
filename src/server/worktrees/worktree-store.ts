@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import type {
   CreateWorktreeInput,
+  WorktreePathTemplates,
   DeleteWorktreeInput,
   Worktree,
   WorktreeSnapshot,
@@ -295,6 +296,18 @@ export class WorktreeStore extends EventEmitter<{
     const project = this.projects.get(pathKey(path))
     if (!project) throw new Error('Project is not configured on this server.')
     return project.mainWorktreePath
+  }
+
+  pathTemplates(): WorktreePathTemplates {
+    return {
+      pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+      projects: [...this.projects.values()].map(
+        ({ mainWorktreePath, worktreePathTemplate }) => ({
+          mainWorktreePath,
+          worktreePathTemplate,
+        }),
+      ),
+    }
   }
 
   // All Git membership changes pass here. Status-only broadcasts use publish

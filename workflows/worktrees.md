@@ -36,6 +36,33 @@ sequenceDiagram
 - Every accepted membership change uses the same reconciliation order, including deletion's known removal. Synthetic rows are excluded from the editor retention list.
 - Desktop main [accepts newer snapshots](desktop.md#accept-shared-state) and reconciles retained pages before updating the picker.
 
+## Autofill a creation path
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Dialog
+    participant Companion
+    User->>Dialog: Open creation
+    Dialog->>Companion: Request all project path templates once
+    Companion-->>Dialog: Templates, main paths, and platform path rules
+    Note over Dialog: Render initial suggestion from current inputs
+    User->>Dialog: Change project or branch
+    alt Path autofill is enabled
+        Dialog->>Dialog: Render cached template locally with current variables
+        Note over Dialog: Keep the current path until rendering completes
+        Dialog-->>User: Show result if input is still current
+    else Path was manually edited
+        Dialog-->>User: Keep the entered path
+    end
+    User->>Dialog: Clear the path
+    Dialog->>Dialog: Leave empty; enable autofill on the next variable change
+```
+
+- The effective branch is the trimmed new branch name, falling back to the base branch. Each project may configure a Liquid path template; the default appends a filename-safe branch to the main worktree path.
+- The initial template response fills the path from the current inputs unless the user has edited or cleared it. Branch edits and project changes require no additional requests or debounce; local hashing and path helpers preserve companion platform behavior.
+- Suggestions do not change Git membership or reserve a destination. Manual edits (including clearing), project/branch changes, and dismissal suppress obsolete results. Clearing waits for the project or effective branch to change before rendering another suggestion. Template errors allow a manually entered path.
+
 ## Schedule a mutation
 
 ```mermaid

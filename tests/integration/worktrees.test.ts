@@ -220,6 +220,8 @@ test('config arguments and YAML validate projects and resolve home/relative path
         {
           mainWorktreePath: './relative repo',
           bootstrapCommand: 'npm install',
+          worktreePathTemplate:
+            '{{ mainWorktreePath }}-{{ branchName | hash | slice: 0, 8 }}',
           chatCommands: {
             codex: 'custom-codex --no-daemon',
             claude: 'custom-claude',
@@ -234,6 +236,8 @@ test('config arguments and YAML validate projects and resolve home/relative path
       {
         mainWorktreePath: join(root, 'relative repo'),
         bootstrapCommand: 'npm install',
+        worktreePathTemplate:
+          '{{ mainWorktreePath }}-{{ branchName | hash | slice: 0, 8 }}',
         chatCommands: {
           codex: 'custom-codex --no-daemon',
           claude: 'custom-claude',
@@ -270,6 +274,21 @@ test('config arguments and YAML validate projects and resolve home/relative path
     )
     await assert.rejects(loadServerConfig(path), /Invalid config/)
   }
+  for (const worktreePathTemplate of [
+    42,
+    null,
+    '',
+    'bad\0path',
+    'a'.repeat(16385),
+  ]) {
+    await writeFile(
+      path,
+      stringify({
+        projects: [{ mainWorktreePath: '.', worktreePathTemplate }],
+      }),
+    )
+    await assert.rejects(loadServerConfig(path), /Invalid config/)
+  }
   for (const chatCommands of [
     {},
     { codex: 'codex --no-daemon' },
@@ -290,6 +309,40 @@ test('config arguments and YAML validate projects and resolve home/relative path
   )
   await writeFile(path, 'projects: []')
   assert.deepEqual(await loadServerConfig(path), { projects: [] })
+})
+
+test('path templates expose project configuration once without changing membership', async (t) => {
+  const { makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const other = await makeProject('other')
+  const server = await startCompanionServer({
+    config: {
+      projects: [
+        {
+          mainWorktreePath: project,
+          worktreePathTemplate:
+            '../trees/{{ branchName | filename | truncate: 12, "" }}',
+        },
+        { mainWorktreePath: other },
+      ],
+    },
+    port: 0,
+  })
+  t.after(() => server.close())
+  const client = await connectClient(t, server.url)
+  const before = await client.listWorktrees()
+  assert.deepEqual(await client.getWorktreePathTemplates(), {
+    pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+    projects: [
+      {
+        mainWorktreePath: project,
+        worktreePathTemplate:
+          '../trees/{{ branchName | filename | truncate: 12, "" }}',
+      },
+      { mainWorktreePath: other },
+    ],
+  })
+  assert.deepEqual(await client.listWorktrees(), before)
 })
 
 test('startup cache covers all repositories and sync list stays cached until refresh', async (t) => {

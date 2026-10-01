@@ -45,6 +45,12 @@ export const serverConfigSchema = z.object({
             'Project paths must not contain a null byte.',
           ),
         chatCommands: chatCommandsSchema.optional(),
+        worktreePathTemplate: z
+          .string()
+          .min(1)
+          .max(16 * 1024)
+          .refine((value) => !value.includes('\0'))
+          .optional(),
         bootstrapCommand: z
           .string()
           .refine((value) => !value.includes('\0'))

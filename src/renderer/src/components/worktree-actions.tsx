@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import type { Worktree, WorktreeSnapshot } from '../../../shared/companion'
+import type {
+  Worktree,
+  WorktreeSnapshot,
+  WorktreePathTemplates,
+} from '../../../shared/companion'
+import { renderWorktreePath } from '../../../shared/worktree-path-template'
 import { errorMessage } from '../use-companion'
 import {
   ActionMenu,
@@ -61,6 +66,72 @@ export function CreateWorktree({
   const [baseBranch, setBaseBranch] = useState('')
   const [branch, setBranch] = useState('')
   const [path, setPath] = useState('')
+  const [templates, setTemplates] = useState<WorktreePathTemplates | null>(null)
+  const [templateError, setTemplateError] = useState('')
+  const templateGeneration = useRef(0)
+  const [suggestionError, setSuggestionError] = useState({
+    key: '',
+    message: '',
+  })
+  const autofill = useRef(true)
+  const clearedVariables = useRef<string | null>(null)
+  const pathGeneration = useRef(0)
+  const branchName = branch.trim() || baseBranch.trim()
+  const suggestionKey = JSON.stringify([project, branchName])
+  const pathError =
+    suggestionError.key === suggestionKey ? suggestionError.message : ''
+
+  useEffect(() => {
+    if (!open || !templates || !project || !autofill.current) return
+    if (clearedVariables.current === suggestionKey) return
+    clearedVariables.current = null
+    const generation = ++pathGeneration.current
+    let active = true
+    const config = templates.projects.find(
+      (entry) => entry.mainWorktreePath === project,
+    )
+    if (!config) return
+    void renderWorktreePath(
+      config.worktreePathTemplate,
+      config.mainWorktreePath,
+      branchName,
+      templates.pathStyle,
+    ).then(
+      (path) => {
+        if (active && generation === pathGeneration.current) {
+          setPath(path)
+          setSuggestionError({ key: suggestionKey, message: '' })
+        }
+      },
+      (cause) => {
+        if (active && generation === pathGeneration.current)
+          setSuggestionError({
+            key: suggestionKey,
+            message: errorMessage(cause),
+          })
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [open, templates, project, branchName, suggestionKey])
+
+  useEffect(
+    () => () => {
+      templateGeneration.current++
+    },
+    [],
+  )
+
+  function editPath(value: string): void {
+    // Clearing arms the next variable change, without starting a request now.
+    pathGeneration.current++
+    autofill.current = value === ''
+    clearedVariables.current = value === '' ? suggestionKey : null
+    setPath(value)
+    setSuggestionError({ key: '', message: '' })
+    setTemplateError('')
+  }
 
   function selectProject(value: string): void {
     setProject(value)
@@ -70,10 +141,26 @@ export function CreateWorktree({
     )
   }
   function changeOpen(next: boolean): void {
+    pathGeneration.current++
+    const generation = ++templateGeneration.current
     if (next) {
       selectProject(snapshot?.projects[0] ?? '')
       setBranch('')
+      autofill.current = true
+      clearedVariables.current = null
       setPath('')
+      setSuggestionError({ key: '', message: '' })
+      setTemplates(null)
+      setTemplateError('')
+      void window.companion.getWorktreePathTemplates().then(
+        (value) => {
+          if (generation === templateGeneration.current) setTemplates(value)
+        },
+        (cause) => {
+          if (generation === templateGeneration.current && autofill.current)
+            setTemplateError(errorMessage(cause))
+        },
+      )
     }
     changeSubmission(next)
   }
@@ -129,12 +216,14 @@ export function CreateWorktree({
         <Field
           label="Worktree path"
           value={path}
-          onChange={(event) => setPath(event.target.value)}
+          onChange={(event) => editPath(event.target.value)}
           placeholder="../my-change"
-          hint="Path on the server. Relative paths start at the selected project."
+          hint="Path on the server. Relative paths start at the selected project. Clear to autofill on the next project or branch change."
           required
           disabled={busy}
         />
+        {pathError && <Notice>{pathError}</Notice>}
+        {templateError && <Notice>{templateError}</Notice>}
         {error && <Notice>{error}</Notice>}
         {!connected && (
           <Notice>Reconnect to the server to create a worktree.</Notice>

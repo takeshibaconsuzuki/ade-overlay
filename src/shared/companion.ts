@@ -26,6 +26,20 @@ export const openEditorInputSchema = z.object({
   project: textSchema,
   path: textSchema,
 })
+const worktreePathTemplatesSchema = z.object({
+  pathStyle: z.enum(['win32', 'posix']),
+  projects: z.array(
+    z.object({
+      mainWorktreePath: textSchema,
+      worktreePathTemplate: z
+        .string()
+        .min(1)
+        .max(16 * 1024)
+        .refine((value) => !value.includes('\0'))
+        .optional(),
+    }),
+  ),
+})
 export const deleteWorktreeInputSchema = openEditorInputSchema.extend({
   deleteBranch: z.boolean().optional(),
   force: z.boolean().optional(),
@@ -87,6 +101,12 @@ export const companionRequests = {
   ),
   activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),
   list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
+  pathTemplates: requestSpec(
+    'worktrees:path-templates',
+    z.null(),
+    worktreePathTemplatesSchema,
+    5_000,
+  ),
   refresh: requestSpec(
     'worktrees:refresh',
     z.null(),
@@ -144,6 +164,7 @@ export const companionEvents = {
 }
 
 export type CreateWorktreeInput = z.infer<typeof createWorktreeInputSchema>
+export type WorktreePathTemplates = z.infer<typeof worktreePathTemplatesSchema>
 export type DeleteWorktreeInput = z.infer<typeof deleteWorktreeInputSchema>
 export type OpenEditorInput = z.infer<typeof openEditorInputSchema>
 export type SetWorktreeErrorInput = z.infer<typeof setWorktreeErrorInputSchema>

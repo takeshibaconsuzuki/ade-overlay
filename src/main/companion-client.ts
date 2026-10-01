@@ -10,6 +10,7 @@ import {
   companionEvents,
   type WorktreeSnapshot,
   type CreateWorktreeInput,
+  type WorktreePathTemplates,
   type DeleteWorktreeInput,
   type SetWorktreeErrorInput,
   type OpenEditorInput,
@@ -193,6 +194,9 @@ export class CompanionClient extends EventEmitter<{
   }
   createWorktree(input: CreateWorktreeInput): Promise<WorktreeSnapshot> {
     return this.request(companionRequests.create, input)
+  }
+  getWorktreePathTemplates(): Promise<WorktreePathTemplates> {
+    return this.request(companionRequests.pathTemplates, null)
   }
   deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot> {
     return this.request(companionRequests.delete, input)

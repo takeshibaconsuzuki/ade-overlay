@@ -13,6 +13,7 @@ Create `~/.ade-overlay/server.yaml` on the companion computer:
 ```yaml
 projects:
   - mainWorktreePath: ~/code/my-project
+    worktreePathTemplate: '{{ mainWorktreePath }}-{{ branchName | filename }}'
     bootstrapCommand: npm install
     chatCommands:
       codex: codex --no-daemon
@@ -20,6 +21,8 @@ projects:
 ```
 
 Each `mainWorktreePath` points to a repository's main worktree. Relative paths resolve from the configuration file. The optional `bootstrapCommand` runs in new worktrees; failures leave the worktree available for inspection. Restart the companion after configuration changes.
+
+`worktreePathTemplate` autofills the create-worktree path using [Liquid syntax](https://liquidjs.com/filters/overview.html); the example above is the default when omitted. Templates receive the resolved `mainWorktreePath` and `branchName` (the trimmed new branch name, or the base branch when blank). Opening the dialog fetches all project templates once; edits render locally without further requests or a debounce, using the companion's path rules. Relative results start at the selected project. The current path stays visible until a suggestion is ready. Editing the path pauses autofill; clearing it leaves the field empty and resumes autofill on the next project or effective branch change.
 
 ### Start ADE
 
