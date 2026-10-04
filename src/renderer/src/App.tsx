@@ -23,14 +23,12 @@ export default function App() {
     error,
     refresh,
     reconnect,
-    opening,
     openEditor,
+    openBootstrapLog,
     stopEditor,
-    rowErrors,
     clearError,
   } = useCompanion()
   const [search, setSearch] = useState('')
-  const [recentPicks, setRecentPicks] = useState<string[]>([])
   const [resetVersion, setResetVersion] = useState(0)
   useEffect(
     () =>
@@ -47,17 +45,12 @@ export default function App() {
         basename(worktree.path).toLowerCase().includes(query) ||
         (worktree.branch ?? '').toLowerCase().includes(query),
     ) ?? []
-  const pickOrder = new Map(recentPicks.map((key, index) => [key, index]))
   const worktrees = [...matches].sort((a, b) => {
-    const aOpen = a.editor !== 'stopped'
-    const bOpen = b.editor !== 'stopped'
+    const aOpen = a.editorServer !== 'stopped'
+    const bOpen = b.editorServer !== 'stopped'
     if (aOpen !== bOpen) return aOpen ? -1 : 1
     if (!aOpen) return 0
-    return (
-      (pickOrder.get(JSON.stringify([a.project, a.path])) ??
-        recentPicks.length) -
-      (pickOrder.get(JSON.stringify([b.project, b.path])) ?? recentPicks.length)
-    )
+    return (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0)
   })
   // Reset selection and scroll when results reorder, but not for progress alone.
   const resultsKey = JSON.stringify([
@@ -84,19 +77,16 @@ export default function App() {
             !connected ||
             worktree.prunable ||
             worktree.operation ||
+            worktree.editorServer === 'stopping' ||
             worktree.missing
           )
         }
         resultsKey={resultsKey}
         resetVersion={resetVersion}
-        onActivate={(worktree) => {
-          if (opening === worktree.path) return
-          const key = JSON.stringify([worktree.project, worktree.path])
-          setRecentPicks((current) => [
-            key,
-            ...current.filter((entry) => entry !== key),
-          ])
-          void openEditor(worktree)
+        onOpen={(worktree) => {
+          // Intentional: a row stays unavailable for as long as it is opening,
+          // including while its page loads after another row was selected.
+          if (!worktree.opening) openEditor(worktree)
         }}
         search={{
           className: 'worktree-search',
@@ -116,14 +106,14 @@ export default function App() {
         header={
           <>
             <div className="toolbar">
-              <Button tone="secondary" onClick={() => void reconnect()}>
+              <Button tone="secondary" onClick={reconnect}>
                 Reconnect
               </Button>
               <Button
                 tone="secondary"
                 busy={loading && connected}
                 disabled={!connected}
-                onClick={() => void refresh()}
+                onClick={refresh}
               >
                 Refresh worktrees
               </Button>
@@ -140,23 +130,29 @@ export default function App() {
         listId="worktree-results"
         busy={loading}
         renderItem={(worktree, { tooltipDismissVersion }) => {
-          const key = JSON.stringify([worktree.project, worktree.path])
-          const isOpening = opening === worktree.path
-          const rowError = rowErrors[key] || worktree.error
+          const isOpening = !!worktree.opening
+          const rowError = worktree.error
+          const stopping = worktree.editorServer === 'stopping'
           const starting =
-            !!worktree.operation || isOpening || worktree.editor === 'starting'
+            !!worktree.operation ||
+            isOpening ||
+            stopping ||
+            worktree.editorServer === 'starting'
           const showError = !!rowError && !starting
           const unavailable =
             !connected ||
             worktree.prunable ||
             !!worktree.operation ||
+            stopping ||
             worktree.missing
           const detail =
             worktree.operation === 'creating'
               ? 'Creating worktree'
               : worktree.operation === 'deleting'
                 ? 'Deleting worktree'
-                : (worktree.editorDetail ?? 'Opening VS Code')
+                : stopping
+                  ? 'Stopping VS Code'
+                  : (worktree.editorServerDetail ?? 'Opening VS Code')
           return (
             <>
               <Tooltip
@@ -203,14 +199,14 @@ export default function App() {
                           ? detail
                           : showError
                             ? 'Worktree error'
-                            : `Editor ${worktree.editor}`
+                            : `Editor ${worktree.editorServer}`
                       }
                     >
                       {starting ? (
                         <Spinner />
                       ) : (
                         <span
-                          className={`editor-dot ${worktree.editor === 'running' ? 'running' : ''}`}
+                          className={`editor-dot ${worktree.editorServer === 'running' ? 'running' : ''}`}
                         />
                       )}
                     </span>
@@ -230,7 +226,8 @@ export default function App() {
                   worktree={worktree}
                   connected={connected}
                   opening={isOpening}
-                  onStopEditor={() => void stopEditor(worktree)}
+                  onStopEditor={() => stopEditor(worktree)}
+                  onOpenBootstrapLog={() => openBootstrapLog(worktree)}
                 />
               </div>
             </>

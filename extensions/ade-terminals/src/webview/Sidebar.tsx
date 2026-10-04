@@ -85,7 +85,7 @@ export function Sidebar({
               <li key={chat.id}>
                 <button
                   className="chat-row"
-                  onClick={() => send({ type: 'activate', chatId: chat.id })}
+                  onClick={() => send({ type: 'open', chatId: chat.id })}
                   aria-label={`Open ${chat.title || 'chat'} in ${worktree}`}
                   aria-current={
                     state.activeChatId === chat.id ? 'true' : undefined

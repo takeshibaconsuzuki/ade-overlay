@@ -64,10 +64,12 @@ export class TerminalLauncher implements vscode.Disposable {
   private changed(): void {
     this.updateSelection()
     // Tab and terminal activation arrive as separate events; pair them only
-    // after both have been delivered.
+    // after both have been delivered. A launch changes them one at a time, so
+    // pairing waits until it has finished.
     this.reattachTimer ??= setTimeout(() => {
       this.reattachTimer = undefined
-      this.reattach()
+      if (this.launching) this.changed()
+      else this.reattach()
     }, 100)
   }
 
@@ -95,6 +97,7 @@ export class TerminalLauncher implements vscode.Disposable {
     this.updateSelection()
   }
   private queue: Promise<unknown> = Promise.resolve()
+  private launching = false
   private chatGroup?: vscode.TabGroup
 
   getSelectedTerminal(): vscode.Terminal | undefined {
@@ -124,7 +127,14 @@ export class TerminalLauncher implements vscode.Disposable {
   }
 
   open(kind: LaunchKind): Promise<vscode.Terminal> {
-    return this.run(() => this.launch(kind))
+    return this.run(async () => {
+      this.launching = true
+      try {
+        return await this.launch(kind)
+      } finally {
+        this.launching = false
+      }
+    })
   }
 
   run<T>(operation: () => Promise<T>): Promise<T> {

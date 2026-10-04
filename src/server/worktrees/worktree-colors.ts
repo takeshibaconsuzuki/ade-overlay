@@ -2,7 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import writeFileAtomic from 'write-file-atomic'
 import { z } from 'zod'
-import type { OpenEditorInput } from '../../shared/companion.ts'
+import type { WorktreeRef } from '../../shared/companion.ts'
 import {
   worktreeColorSchema,
   type WorktreeColor,
@@ -11,10 +11,11 @@ import { worktreeKey } from './worktree-identity.ts'
 
 const colorsSchema = z.record(z.string(), worktreeColorSchema)
 
-// Assignments are owned by the worktree operation queue and outlive editors.
+// Assignments are chosen and saved one at a time, and outlive editors.
 export class WorktreeColors {
   private colors = new Map<string, WorktreeColor>()
   private file?: string
+  private saving: Promise<void> = Promise.resolve()
 
   static async open(dataDir: string): Promise<WorktreeColors> {
     const store = new WorktreeColors()
@@ -31,11 +32,17 @@ export class WorktreeColors {
     return store
   }
 
-  get(worktree: OpenEditorInput): WorktreeColor | undefined {
+  get(worktree: WorktreeRef): WorktreeColor | undefined {
     return this.colors.get(worktreeKey(worktree))
   }
 
-  async assign(worktree: OpenEditorInput): Promise<void> {
+  assign(worktree: WorktreeRef): Promise<void> {
+    const saved = this.saving.then(() => this.save(worktree))
+    this.saving = saved.catch(() => {})
+    return saved
+  }
+
+  private async save(worktree: WorktreeRef): Promise<void> {
     if (this.get(worktree)) return
     const counts = new Map(
       worktreeColorSchema.options.map((color) => [color, 0]),

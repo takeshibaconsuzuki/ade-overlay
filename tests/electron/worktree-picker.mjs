@@ -22,6 +22,7 @@ const creations = []
 let failBranchLoad = false
 const deletions = []
 const stops = []
+const bootstrapLogs = []
 let holdTemplates = false
 let templateRequests = 0
 const templateLoads = []
@@ -47,7 +48,7 @@ const worktree = (path, branch) => ({
   main: false,
   locked: false,
   prunable: false,
-  editor: 'stopped',
+  editorServer: 'stopped',
 })
 let snapshot = {
   revision: 0,
@@ -62,12 +63,31 @@ let snapshot = {
   ],
 }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// Desktop main owns per-worktree local state and publishes it on the rows.
+const local = new Map()
+let openClock = 0
 const companionState = () => ({
   status: { state: 'connected', url: 'ws://test.invalid/companion' },
-  snapshot,
+  snapshot: {
+    ...snapshot,
+    worktrees: snapshot.worktrees.map((row) => ({
+      ...row,
+      ...local.get(row.path),
+    })),
+  },
   loading: false,
   error: '',
 })
+async function open(path) {
+  local.set(path, { lastOpenedAt: ++openClock, opening: true })
+  window.webContents.send('test:update', companionState())
+  if (holdOpen)
+    await new Promise((resolve) => {
+      finishOpen = resolve
+    })
+  local.set(path, { ...local.get(path), opening: undefined })
+  window.webContents.send('test:update', companionState())
+}
 const evaluate = (code) => window.webContents.executeJavaScript(code)
 async function until(code) {
   const end = Date.now() + 5_000
@@ -202,10 +222,7 @@ async function run() {
   })
   ipcMain.handle('test:open', (_event, value) => {
     opened.push(value.path)
-    if (holdOpen)
-      return new Promise((resolve) => {
-        finishOpen = resolve
-      })
+    return open(value.path)
   })
   ipcMain.handle('test:create', async (_event, value) => {
     creations.push(value)
@@ -253,12 +270,16 @@ async function run() {
       ),
     )
   })
+  ipcMain.handle('test:bootstrap-log', (_event, value) => {
+    bootstrapLogs.push(value.path)
+    return open(value.path)
+  })
   ipcMain.handle('test:stop', async (_event, value) => {
     stops.push(value.path)
     await update(
       snapshot.worktrees.map((row) =>
         row.path === value.path
-          ? { ...row, editor: 'stopped', color: undefined }
+          ? { ...row, editorServer: 'stopped', color: undefined }
           : row,
       ),
     )
@@ -295,7 +316,7 @@ async function run() {
   const grey = await nameColor()
   await update(
     snapshot.worktrees.map((row, index) =>
-      index === 0 ? { ...row, editor: 'running', color: 'blue' } : row,
+      index === 0 ? { ...row, editorServer: 'running', color: 'blue' } : row,
     ),
   )
   const blue = await nameColor()
@@ -308,7 +329,7 @@ async function run() {
   )
   await update(
     snapshot.worktrees.map((row, index) =>
-      index === 0 ? { ...row, editor: 'stopped', color: undefined } : row,
+      index === 0 ? { ...row, editorServer: 'stopped', color: undefined } : row,
     ),
   )
   assert.equal(await nameColor(), grey, 'closed names return to grey')
@@ -369,13 +390,15 @@ async function run() {
   await update(
     snapshot.worktrees.map((w) => ({
       ...w,
-      editor: 'starting',
-      editorDetail: 'Starting VS Code',
+      editorServer: 'starting',
+      editorServerDetail: 'Starting VS Code',
     })),
   )
   assert.deepEqual(await state(), before)
-  // Keep the focus scenarios independent of recency reordering on activation.
-  await update(snapshot.worktrees.map((row) => ({ ...row, editor: 'stopped' })))
+  // Keep the focus scenarios independent of recency reordering on open.
+  await update(
+    snapshot.worktrees.map((row) => ({ ...row, editorServer: 'stopped' })),
+  )
   assert.deepEqual(await state(), before)
   stage = 'window reactivation preserves scrolled selection'
   await focusWindow(false)
@@ -1026,6 +1049,7 @@ async function run() {
     true,
   )
   await key('DOWN')
+  await key('DOWN')
   assert.equal(
     await evaluate('document.activeElement.textContent'),
     'Delete worktree and branch',
@@ -1063,6 +1087,7 @@ async function run() {
   await until("!!document.querySelector('[role=menu]')")
   assert.deepEqual(await menuItems(), [
     ['Stop VS Code server', true],
+    ['Open bootstrap log', true],
     ['Delete worktree', false],
     ['Delete worktree and branch', true],
   ])
@@ -1072,14 +1097,14 @@ async function run() {
   await update(
     snapshot.worktrees.map((row) =>
       row.path === mainPath
-        ? { ...row, main: true, editor: 'running', color: 'blue' }
+        ? { ...row, main: true, editorServer: 'running', color: 'blue' }
         : row,
     ),
   )
   await update(
     snapshot.worktrees.map((row) =>
       row.path === mainPath
-        ? { ...row, main: true, editor: 'starting', color: 'blue' }
+        ? { ...row, main: true, editorServer: 'starting', color: 'blue' }
         : row,
     ),
   )
@@ -1087,6 +1112,7 @@ async function run() {
   await until("!!document.querySelector('[role=menu]')")
   assert.deepEqual(await menuItems(), [
     ['Stop VS Code server', true],
+    ['Open bootstrap log', true],
     ['Delete worktree', true],
     ['Delete worktree and branch', true],
   ])
@@ -1094,13 +1120,65 @@ async function run() {
   await until("!document.querySelector('[role=menu]')")
   await update(
     snapshot.worktrees.map((row) =>
-      row.path === mainPath ? { ...row, editor: 'running' } : row,
+      row.path === mainPath
+        ? { ...row, editorServer: 'running', operation: 'creating' }
+        : row,
+    ),
+  )
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.deepEqual(
+    await menuItems(),
+    [
+      ['Stop VS Code server', true],
+      ['Open bootstrap log', true],
+      ['Delete worktree', true],
+      ['Delete worktree and branch', true],
+    ],
+    'a row with an operation opens its menu with every action disabled',
+  )
+  await key('ESCAPE')
+  await until("!document.querySelector('[role=menu]')")
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath
+        ? { ...row, operation: undefined, bootstrapFailed: true }
+        : row,
+    ),
+  )
+  await clickMouse('.worktree-delete button')
+  await until("!!document.querySelector('[role=menu]')")
+  assert.deepEqual(
+    (await menuItems())[1],
+    ['Open bootstrap log', false],
+    'only a bootstrap error enables its log',
+  )
+  // The action hides the picker; showing it again must focus the search.
+  await evaluate(
+    "[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Open bootstrap log').click()",
+  )
+  assert.equal(bootstrapLogs.at(-1), mainPath)
+  await focusWindow(false)
+  window.webContents.send('test:hidden')
+  await delay(60)
+  await focusWindow(true)
+  await until("!document.querySelector('[role=menu]')")
+  assert.equal(
+    (await state()).searchFocused,
+    true,
+    'a menu action that hides the picker leaves the search focused on show',
+  )
+  await search('detached')
+  await update(
+    snapshot.worktrees.map((row) =>
+      row.path === mainPath ? { ...row, bootstrapFailed: undefined } : row,
     ),
   )
   await clickMouse('.worktree-delete button')
   await until("!!document.querySelector('[role=menu]')")
   assert.deepEqual(await menuItems(), [
     ['Stop VS Code server', false],
+    ['Open bootstrap log', true],
     ['Delete worktree', true],
     ['Delete worktree and branch', true],
   ])
@@ -1110,7 +1188,7 @@ async function run() {
   await until("!document.querySelector('[role=menu]')")
   assert.deepEqual(stops, [mainPath])
   assert.equal(
-    snapshot.worktrees.find((row) => row.path === mainPath).editor,
+    snapshot.worktrees.find((row) => row.path === mainPath).editorServer,
     'stopped',
   )
   assert.equal(opened.length, beforeMenuOpens)
@@ -1211,7 +1289,7 @@ async function run() {
       row.branch === 'main'
         ? {
             ...row,
-            editor: 'stopped',
+            editorServer: 'stopped',
             operation: undefined,
             error: 'Git refused deletion: untracked files',
           }
@@ -1267,14 +1345,14 @@ async function run() {
     true,
     'opening preserves the failure',
   )
-  for (const [editor, operation] of [
+  for (const [editorServer, operation] of [
     ['starting', undefined],
     ['running', 'creating'],
     ['running', 'deleting'],
   ]) {
     await update(
       snapshot.worktrees.map((row) =>
-        row.branch === 'main' ? { ...row, editor, operation } : row,
+        row.branch === 'main' ? { ...row, editorServer, operation } : row,
       ),
     )
     assert.equal(
@@ -1292,7 +1370,7 @@ async function run() {
   await update(
     snapshot.worktrees.map((row) =>
       row.branch === 'main'
-        ? { ...row, editor: 'running', operation: undefined }
+        ? { ...row, editorServer: 'running', operation: undefined }
         : row,
     ),
   )
@@ -1345,8 +1423,8 @@ async function run() {
   await update(
     ['tooltip-a', 'tooltip-b'].map((name) => ({
       ...worktree(`C:/demo/${name}`, name),
-      editor: 'starting',
-      editorDetail: 'Starting test editor',
+      editorServer: 'starting',
+      editorServerDetail: 'Starting test editor',
     })),
   )
   await search('tooltip')
@@ -1411,8 +1489,8 @@ async function run() {
   stage = 'open worktrees precede unopened worktrees in pick order'
   await update([
     worktree('C:/demo/order-closed', 'order'),
-    { ...worktree('C:/demo/order-a', 'order'), editor: 'running' },
-    { ...worktree('C:/demo/order-b', 'order'), editor: 'starting' },
+    { ...worktree('C:/demo/order-a', 'order'), editorServer: 'running' },
+    { ...worktree('C:/demo/order-b', 'order'), editorServer: 'starting' },
     worktree('C:/demo/order-unpicked', 'order'),
   ])
   await search('order')
@@ -1440,7 +1518,9 @@ async function run() {
   await key('DOWN')
   await update(
     snapshot.worktrees.map((row) =>
-      row.path === 'C:/demo/order-a' ? { ...row, editor: 'stopped' } : row,
+      row.path === 'C:/demo/order-a'
+        ? { ...row, editorServer: 'stopped' }
+        : row,
     ),
   )
   assert.equal((await state()).index, 0)
@@ -1452,7 +1532,9 @@ async function run() {
     'C:/demo/order-a',
     'C:/demo/order-unpicked',
   ])
-  await update(snapshot.worktrees.map((row) => ({ ...row, editor: 'running' })))
+  await update(
+    snapshot.worktrees.map((row) => ({ ...row, editorServer: 'running' })),
+  )
   window.webContents.send('test:hidden')
   await until("document.querySelector('input[type=search]').value===''")
   assert.deepEqual(await rowPaths(), [
@@ -1467,13 +1549,13 @@ async function run() {
   await update(
     Array.from({ length: 40 }, (_, index) => ({
       ...worktree(`C:/demo/long-${index}`, 'long'),
-      editor: 'running',
+      editorServer: 'running',
     })),
   )
   await search('long')
   await update(
     snapshot.worktrees.map((row, index) =>
-      index === 0 ? { ...row, editor: 'stopped' } : row,
+      index === 0 ? { ...row, editorServer: 'stopped' } : row,
     ),
   )
   assert.equal((await state()).index, 0)
@@ -1491,7 +1573,7 @@ async function run() {
   )
   await update(
     snapshot.worktrees.map((row) =>
-      row.path === selectedLongPath ? { ...row, editor: 'stopped' } : row,
+      row.path === selectedLongPath ? { ...row, editorServer: 'stopped' } : row,
     ),
   )
   assert.equal((await state()).index, 0)

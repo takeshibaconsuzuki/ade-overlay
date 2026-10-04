@@ -10,25 +10,25 @@ sequenceDiagram
     participant Companion
     participant Extension as Workspace extension
     User->>Browser: Keyboard or context-menu paste, or file drop
-    Browser->>Browser: Capture clipboard or dropped files; hold native paste; consume drop
+    Browser->>Browser: Capture clipboard or dropped files, hold native paste, consume drop
     Browser->>Main: reservePaste()
     Main->>Main: For a drop, focus the editor window and wait for page focus
     Main->>Companion: reservePaste(editor ID, document ID)
     Companion->>Extension: Query active terminal
-    Extension->>Extension: Capture target; wait for launch command dispatch
+    Extension->>Extension: Capture target, wait for launch command dispatch
     Extension-->>Companion: Chat terminal ID and provider, or ordinary terminal
     alt Ordinary terminal
         Companion-->>Browser: Release ordinary paste (via main)
-        Browser->>Browser: Deliver captured plain text through normal paste; discard drops
+        Browser->>Browser: Deliver captured plain text through normal paste, discard drops
     else ADE chat terminal
         Companion->>Companion: Reserve target for desktop, editor and document
         Companion-->>Browser: Opaque reservation ID (via main)
         Browser->>Browser: Extract text, images and files in source order
         Browser->>Main: paste(reservation ID, items)
         Main->>Companion: paste(editor ID, document ID, reservation ID, items)
-        Companion->>Companion: Consume reservation; store images and files; provider formats draft
+        Companion->>Companion: Consume reservation, store images and files, provider formats draft
         Companion->>Extension: Paste final payload into reserved terminal ID
-        Extension->>Extension: Verify terminal and provider; send without Enter
+        Extension->>Extension: Verify terminal and provider, send without Enter
         Extension-->>Browser: Acknowledge delivery (via companion and main)
     end
 ```

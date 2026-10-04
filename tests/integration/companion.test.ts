@@ -76,10 +76,10 @@ for (const ending of ['timeout', 'disconnect']) {
         receivedAll = resolve
       })
       const { url } = await socketServer(t, (peer) => {
-        peer.on('editor:open', () => {
+        peer.on('companionStartEditorServer', () => {
           if (++count === 32) receivedAll()
         })
-        peer.on('worktrees:list', (_input, ack) =>
+        peer.on('companionListWorktrees', (_input, ack) =>
           ack({ ok: true, value: emptySnapshot }),
         )
       })
@@ -88,7 +88,7 @@ for (const ending of ['timeout', 'disconnect']) {
         const controller = new AbortController()
         const request = callRpc(
           socket,
-          companionRequests.openEditor,
+          companionRequests.companionStartEditorServer,
           { project: '/project', path: '/project' },
           { signal: controller.signal, timeout: 1000 },
         )
@@ -97,7 +97,7 @@ for (const ending of ['timeout', 'disconnect']) {
       }
       await received
       await assert.rejects(
-        callRpc(socket, companionRequests.list, null),
+        callRpc(socket, companionRequests.companionListWorktrees, null),
         /Too many pending requests/,
       )
       if (ending === 'timeout') await delay(1100)
@@ -110,7 +110,7 @@ for (const ending of ['timeout', 'disconnect']) {
         await connected
       }
       assert.deepEqual(
-        await callRpc(socket, companionRequests.list, null),
+        await callRpc(socket, companionRequests.companionListWorktrees, null),
         emptySnapshot,
       )
     },
@@ -127,11 +127,11 @@ test('cancelled editor requests keep acknowledgement capacity until late replies
   const url = await fixture(t, (connected) => {
     peer = connected
     peer.emit('hello', hello)
-    peer.on('editor:open', (_input, ack) => {
+    peer.on('companionStartEditorServer', (_input, ack) => {
       requests.push(ack)
       if (requests.length === 32) receivedAll()
     })
-    peer.on('worktrees:list', (_input, ack) =>
+    peer.on('companionListWorktrees', (_input, ack) =>
       ack({ ok: true, value: emptySnapshot }),
     )
   })
@@ -141,20 +141,29 @@ test('cancelled editor requests keep acknowledgement capacity until late replies
   const worktree = { project: '/project', path: '/project/branch' }
   const stopped = new AbortController()
   stopped.abort()
-  await assert.rejects(client.openEditor(worktree, stopped.signal), {
-    name: 'AbortError',
-  })
+  await assert.rejects(
+    client.companionStartEditorServer(worktree, stopped.signal),
+    {
+      name: 'AbortError',
+    },
+  )
   for (let i = 0; i < 32; i++) {
     const controller = new AbortController()
-    const opening = client.openEditor(worktree, controller.signal)
+    const opening = client.companionStartEditorServer(
+      worktree,
+      controller.signal,
+    )
     controller.abort()
     await assert.rejects(opening, { name: 'AbortError' })
   }
   await received
-  await assert.rejects(client.listWorktrees(), /Too many pending requests/)
+  await assert.rejects(
+    client.companionListWorktrees(),
+    /Too many pending requests/,
+  )
   for (let i = 0; i < 8; i++)
     await assert.rejects(
-      client.openEditor(worktree),
+      client.companionStartEditorServer(worktree),
       /Too many pending requests/,
     )
   assert.equal(requests.length, 32)
@@ -169,10 +178,10 @@ test('cancelled editor requests keep acknowledgement capacity until late replies
     ),
   )
   // The same ordered stream delivers this notification after the late replies.
-  const settled = once(client, 'worktreesUpdated')
-  peer.emit('worktrees:updated', emptySnapshot)
+  const settled = once(client, 'desktopUpdateWorktrees')
+  peer.emit('desktopUpdateWorktrees', emptySnapshot)
   await settled
-  await client.listWorktrees()
+  await client.companionListWorktrees()
   assert.equal(client.getStatus().state, 'connected')
 })
 
@@ -191,9 +200,9 @@ test(
       clients.map((client) => waitForStatus(client, 'connected')),
     )
     const results = await Promise.all([
-      clients[0].listWorktrees(),
-      clients[0].listWorktrees(),
-      clients[1].listWorktrees(),
+      clients[0].companionListWorktrees(),
+      clients[0].companionListWorktrees(),
+      clients[1].companionListWorktrees(),
     ])
     for (const result of results) {
       assert.deepEqual(result, emptySnapshot)
@@ -214,7 +223,7 @@ test(
     for (const input of ['{', [], { project: 'repo' }, Buffer.from('binary')]) {
       const reply = await socket
         .timeout(1000)
-        .emitWithAck('worktrees:create', input)
+        .emitWithAck('companionCreateWorktree', input)
       assert.equal(reply.ok, false)
     }
     assert.equal(
@@ -222,13 +231,13 @@ test(
       false,
     )
     assert.deepEqual(
-      await socket.timeout(1000).emitWithAck('worktrees:list', null),
+      await socket.timeout(1000).emitWithAck('companionListWorktrees', null),
       { ok: true, value: emptySnapshot },
     )
     const closed = new Promise<void>((resolve) =>
       socket.once('disconnect', () => resolve()),
     )
-    socket.emit('worktrees:list', 'x'.repeat(MAX_MESSAGE_BYTES + 1))
+    socket.emit('companionListWorktrees', 'x'.repeat(MAX_MESSAGE_BYTES + 1))
     await closed
   },
 )
@@ -281,7 +290,7 @@ test(
     const client = makeClient(t, server.url, { token: 'test-secret' })
     client.connect()
     await waitForStatus(client, 'connected')
-    await client.listWorktrees()
+    await client.companionListWorktrees()
   },
 )
 
@@ -392,7 +401,7 @@ test(
     })
     t.after(() => server.close())
     await waitForStatus(client, 'connected')
-    await client.listWorktrees()
+    await client.companionListWorktrees()
     await server.close()
     await waitForStatus(client, 'reconnecting')
     const restarted = await startCompanionServer({
@@ -401,10 +410,10 @@ test(
     })
     t.after(() => restarted.close())
     await waitForStatus(client, 'connected')
-    await client.listWorktrees()
+    await client.companionListWorktrees()
     client.stop()
     assert.equal(client.getStatus().state, 'disconnected')
-    await assert.rejects(client.listWorktrees(), /Connect to/)
+    await assert.rejects(client.companionListWorktrees(), /Connect to/)
   },
 )
 
@@ -417,7 +426,7 @@ test('shutdown cancels retries', { timeout: 5_000 }, async (t) => {
   const client = makeClient(t, server.url)
   client.connect()
   await waitForStatus(client, 'connected')
-  await client.listWorktrees()
+  await client.companionListWorktrees()
   await server.close()
   await waitForStatus(client, 'reconnecting')
   client.stop()
@@ -439,7 +448,10 @@ test(
     const client = makeClient(t, url)
     client.connect()
     await waitForStatus(client, 'connected')
-    const pending = assert.rejects(client.listWorktrees(), /Disconnected/)
+    const pending = assert.rejects(
+      client.companionListWorktrees(),
+      /Disconnected/,
+    )
     const closed = once(sockets[0], 'disconnect')
     client.connect()
     assert.equal(client.getStatus().state, 'connecting')
@@ -477,8 +489,11 @@ test(
     const client = makeClient(t, url, { requestTimeoutMs: 50 })
     client.connect()
     await waitForStatus(client, 'connected')
-    await assert.rejects(client.listWorktrees(), /timed out/)
-    const pending = assert.rejects(client.listWorktrees(), /Disconnected/)
+    await assert.rejects(client.companionListWorktrees(), /timed out/)
+    const pending = assert.rejects(
+      client.companionListWorktrees(),
+      /Disconnected/,
+    )
     client.stop()
     await pending
   },

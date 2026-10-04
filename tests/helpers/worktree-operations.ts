@@ -12,14 +12,14 @@ export function completeCreate(
   client: CompanionClient,
   input: CreateWorktreeInput,
 ) {
-  return complete(client, input, () => client.createWorktree(input))
+  return complete(client, input, () => client.companionCreateWorktree(input))
 }
 
 export function completeDelete(
   client: CompanionClient,
   input: DeleteWorktreeInput,
 ) {
-  return complete(client, input, () => client.deleteWorktree(input))
+  return complete(client, input, () => client.companionDeleteWorktree(input))
 }
 
 function complete(
@@ -36,7 +36,7 @@ function complete(
     )
     function finish(error?: unknown, snapshot?: WorktreeSnapshot) {
       clearTimeout(timer)
-      client.off('worktreesUpdated', update)
+      client.off('desktopUpdateWorktrees', update)
       if (error) reject(error)
       else resolveResult(snapshot!)
     }
@@ -54,7 +54,7 @@ function complete(
       latest = value
       check()
     }
-    client.on('worktreesUpdated', update)
+    client.on('desktopUpdateWorktrees', update)
     void start().then(
       (snapshot) => {
         accepted = snapshot

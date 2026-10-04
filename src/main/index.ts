@@ -44,7 +44,7 @@ const companion = new CompanionClient(configuration)
 const chatNotifications = new ChatNotifications(
   (options) =>
     Notification.isSupported() ? new Notification(options) : undefined,
-  (id) => companion.activateChat(id),
+  (id) => companion.companionOpenChat(id),
   (error) =>
     dialog.showErrorBox(
       'Could not open chat',
@@ -156,11 +156,11 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(companionChannels.getWorktreePathTemplates, (event) => {
     assertTrustedSender(event)
-    return companion.getWorktreePathTemplates()
+    return companion.companionGetPathTemplates()
   })
   ipcMain.handle(companionChannels.getWorktreeBranches, (event, project) => {
     assertTrustedSender(event)
-    return companion.getWorktreeBranches(project)
+    return companion.companionListBranches(project)
   })
   ipcMain.handle(companionChannels.deleteWorktree, (event, input) => {
     assertTrustedSender(event)
@@ -168,15 +168,29 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(companionChannels.setWorktreeError, (event, input) => {
     assertTrustedSender(event)
-    return companionState.setWorktreeError(input)
+    if (!input.error) companionState.setLocalError(input)
+    return companionState.rowRequest(input, () =>
+      companionState.setWorktreeError(input),
+    )
   })
-  ipcMain.handle(companionChannels.openEditor, (event, input) => {
+  ipcMain.handle(companionChannels.openEditor, async (event, input) => {
     assertTrustedSender(event)
-    return editorNavigation.openWorktree(input)
+    await editorNavigation.openWorktree(input)
+  })
+  ipcMain.handle(companionChannels.openBootstrapLog, async (event, input) => {
+    assertTrustedSender(event)
+    // The log opens in the worktree's editor page. Without a ready page, a
+    // failed open keeps its own row error and a superseded one adds none.
+    if (!(await editorNavigation.openWorktree(input))) return
+    await companionState.rowRequest(input, () =>
+      companion.companionOpenBootstrapLog(input),
+    )
   })
   ipcMain.handle(companionChannels.stopEditor, (event, input) => {
     assertTrustedSender(event)
-    return companionState.stopEditor(input)
+    return companionState.rowRequest(input, () =>
+      companionState.stopEditor(input),
+    )
   })
   companionState.on('snapshot', (snapshot) => editorWindow.reconcile(snapshot))
   companionState.on('snapshot', (snapshot) =>
@@ -187,13 +201,13 @@ app.whenReady().then(() => {
       if (!renderer.isDestroyed()) renderer.send(companionChannels.state, state)
     }
   })
-  companion.on('chatActivate', ({ id, input }) => {
+  companion.on('desktopOpenChat', ({ id, input }) => {
     void editorNavigation.openChat(id, input)
   })
-  companion.on('chatFinished', (id) => {
-    editorNavigation.finishChat(id)
+  companion.on('desktopFinishOpenChat', (id) => {
+    editorNavigation.finishOpenChat(id)
   })
-  companion.on('chatIdle', (chat) => chatNotifications.show(chat))
+  companion.on('desktopNotifyChatIdle', (chat) => chatNotifications.show(chat))
   companion.on('status', (status) => {
     if (status.state !== 'connected') {
       chatNotifications.clear()

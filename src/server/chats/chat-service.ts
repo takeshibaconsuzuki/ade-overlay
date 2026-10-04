@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Server as Engine } from 'engine.io'
@@ -13,7 +14,7 @@ import type { PastePart } from '../../shared/paste.ts'
 import { callRpc, handleRpc, listenEvent, sendEvent } from '../../shared/rpc.ts'
 import { z } from 'zod'
 import type { Logger } from 'pino'
-import type { OpenEditorInput } from '../../shared/companion.ts'
+import type { WorktreeRef } from '../../shared/companion.ts'
 import {
   chatReportSchema,
   chatRequests,
@@ -30,7 +31,7 @@ interface EditorRegistration {
 
 interface EditorConnection {
   id: string
-  worktree: OpenEditorInput
+  worktree: WorktreeRef
   extensionToken: string
   activityToken: string
   activation?: string
@@ -41,7 +42,7 @@ interface Navigation {
   id: string
   source: Socket
   complete: (error?: string) => void
-  editorId: string
+  editorServerId: string
   terminalId: string
   timer: ReturnType<typeof setTimeout>
   ready: boolean
@@ -53,7 +54,7 @@ const handshakeSchema = z.object({
   startedAt: z.coerce.number().finite().nonnegative(),
 })
 interface PasteReservation {
-  editorId: string
+  editorServerId: string
   documentId: string
   owner: Socket
   socket: Socket
@@ -86,7 +87,7 @@ export class ChatService {
   private titleTimer?: ReturnType<typeof setInterval>
   private endpoint = ''
   private reconciling = false
-  onNavigate?: (id: string, worktree: OpenEditorInput) => void
+  onNavigate?: (id: string, worktree: WorktreeRef) => void
   onNavigationFinished?: (id: string) => void
 
   private readonly logger: Logger
@@ -198,14 +199,14 @@ export class ChatService {
         if (navigation?.source === client || navigation?.target === client)
           this.finish(navigation.id, 'Editor connection closed. Try again.')
       })
-      handleRpc(client, chatRequests.activate, (chatId) => {
+      handleRpc(client, chatRequests.companionOpenChat, (chatId) => {
         if (scope.socket !== client || this.closing)
           throw new Error('Editor connection is no longer current.')
-        return this.activate(chatId, client)
+        return this.open(chatId, client)
       })
       listenEvent(
         client,
-        chatEvents.focused,
+        chatEvents.extensionFocusChatResponse,
         (message) => {
           if (scope.socket !== client) return
           const navigation = this.navigation
@@ -214,13 +215,33 @@ export class ChatService {
         },
         () => client.conn.close(),
       )
-      sendEvent(client, chatEvents.snapshot, this.store.list())
-      if (this.navigation?.editorId === scope.id) this.focus(this.navigation.id)
+      sendEvent(client, chatEvents.extensionUpdateChats, this.store.list())
+      if (this.navigation?.editorServerId === scope.id)
+        this.focus(this.navigation.id)
     })
     this.store.on('update', (snapshot) => {
       for (const scope of this.editors.values())
-        if (scope.socket) sendEvent(scope.socket, chatEvents.snapshot, snapshot)
+        if (scope.socket)
+          sendEvent(scope.socket, chatEvents.extensionUpdateChats, snapshot)
     })
+  }
+
+  // The extension connects shortly after its editor page loads. Intentional:
+  // this takes whichever extension is connected, without waiting for the
+  // current document's as chat opening does. After a page reload the previous
+  // extension host can briefly receive the request; the file can be reopened.
+  async openFile(editorServerId: string, path: string): Promise<null> {
+    const deadline = Date.now() + 15_000
+    for (;;) {
+      const scope = this.editors.get(editorServerId)
+      if (this.closing || !scope)
+        throw new Error('VS Code is not running for this worktree.')
+      if (scope.socket)
+        return callRpc(scope.socket, chatRequests.extensionOpenFile, { path })
+      if (Date.now() >= deadline)
+        throw new Error('VS Code did not become ready. Try again.')
+      await delay(100)
+    }
   }
 
   forgetPastes(owner: Socket): void {
@@ -230,14 +251,15 @@ export class ChatService {
 
   async reservePaste(
     owner: Socket,
-    editorId: string,
+    editorServerId: string,
     documentId: string,
   ): Promise<string | null> {
     for (const [id, reservation] of this.pasteReservations)
       if (
         reservation.expires <= Date.now() ||
         !reservation.owner.connected ||
-        this.editors.get(reservation.editorId)?.socket !== reservation.socket
+        this.editors.get(reservation.editorServerId)?.socket !==
+          reservation.socket
       )
         this.pasteReservations.delete(id)
     const pending = this.pendingReservations.get(owner) ?? 0
@@ -245,18 +267,22 @@ export class ChatService {
       (reservation) => reservation.owner === owner,
     ).length
     if (pending + reserved >= 32) throw new Error('Too many pending pastes.')
-    const socket = this.editors.get(editorId)?.socket
+    const socket = this.editors.get(editorServerId)?.socket
     if (this.closing || !owner.connected || !socket?.connected)
       throw new Error(
         'The editor extension is disconnected. Try pasting again.',
       )
     this.pendingReservations.set(owner, pending + 1)
     try {
-      const target = await callRpc(socket, chatRequests.pasteTarget, null)
+      const target = await callRpc(
+        socket,
+        chatRequests.extensionGetPasteTarget,
+        null,
+      )
       if (
         this.closing ||
         !owner.connected ||
-        this.editors.get(editorId)?.socket !== socket
+        this.editors.get(editorServerId)?.socket !== socket
       )
         throw new Error('The editor connection changed. Try pasting again.')
       if (!target) return null
@@ -264,7 +290,7 @@ export class ChatService {
       if (!provider) throw new Error('Unsupported chat provider.')
       const id = randomUUID()
       this.pasteReservations.set(id, {
-        editorId,
+        editorServerId,
         documentId,
         owner,
         socket,
@@ -282,7 +308,7 @@ export class ChatService {
 
   async paste(
     owner: Socket,
-    editorId: string,
+    editorServerId: string,
     documentId: string,
     reservationId: string,
     items: PastePart[],
@@ -291,13 +317,13 @@ export class ChatService {
     if (
       !reservation ||
       reservation.owner !== owner ||
-      reservation.editorId !== editorId ||
+      reservation.editorServerId !== editorServerId ||
       reservation.documentId !== documentId ||
       reservation.expires <= Date.now()
     )
       throw new Error('The paste reservation is invalid or expired.')
     this.pasteReservations.delete(reservationId)
-    const key = JSON.stringify([editorId, reservation.target.terminalId])
+    const key = JSON.stringify([editorServerId, reservation.target.terminalId])
     const previous = this.pasteQueues.get(key) ?? Promise.resolve()
     const request = this.deliverPaste(reservation, items, previous)
     const tail = Promise.allSettled([previous, request]).then(() => {})
@@ -315,13 +341,13 @@ export class ChatService {
     items: PastePart[],
     previous: Promise<void>,
   ): Promise<null> {
-    const { owner, socket, editorId, target, provider } = reservation
+    const { owner, socket, editorServerId, target, provider } = reservation
     const assertCurrent = () => {
       if (
         this.closing ||
         !owner.connected ||
         !socket.connected ||
-        this.editors.get(editorId)?.socket !== socket
+        this.editors.get(editorServerId)?.socket !== socket
       )
         throw new Error('The editor connection changed. Try pasting again.')
     }
@@ -332,7 +358,7 @@ export class ChatService {
     const text = provider.preparePaste(parts)
     await previous
     assertCurrent()
-    return callRpc(socket, chatRequests.paste, { ...target, text })
+    return callRpc(socket, chatRequests.extensionPaste, { ...target, text })
   }
 
   async listen(): Promise<void> {
@@ -363,7 +389,7 @@ export class ChatService {
     this.titleTimer.unref()
   }
 
-  registerEditor(id: string, worktree: OpenEditorInput): EditorRegistration {
+  registerEditor(id: string, worktree: WorktreeRef): EditorRegistration {
     this.releaseEditor(id)
     const entry: EditorConnection = {
       id,
@@ -392,7 +418,7 @@ export class ChatService {
     // Chat removal still belongs exclusively to process reconciliation.
   }
 
-  activate(chatId: string, source: Socket): Promise<null> {
+  open(chatId: string, source: Socket): Promise<null> {
     if (this.closing) throw new Error('Companion is stopping.')
     if (this.navigation)
       this.finish(this.navigation.id, 'Superseded by another navigation.')
@@ -412,7 +438,7 @@ export class ChatService {
         id,
         source,
         complete: (error) => (error ? reject(new Error(error)) : resolve(null)),
-        editorId: entry.editorId,
+        editorServerId: entry.editorServerId,
         terminalId: entry.chat.terminalId,
         timer,
         ready: false,
@@ -448,12 +474,12 @@ export class ChatService {
   private focus(id: string): void {
     const navigation = this.navigation
     if (navigation?.id !== id) return
-    const scope = this.editors.get(navigation.editorId)
+    const scope = this.editors.get(navigation.editorServerId)
     const socket = scope?.socket
     if (!navigation.ready || navigation.target || !socket?.connected) return
     if (scope?.activation === navigation.activationAfter) return
     navigation.target = socket
-    sendEvent(socket, chatEvents.focus, {
+    sendEvent(socket, chatEvents.extensionFocusChat, {
       id,
       terminalId: navigation.terminalId,
     })
@@ -466,7 +492,7 @@ export class ChatService {
     this.navigation = undefined
     this.onNavigationFinished?.(id)
     if (error && navigation.target)
-      sendEvent(navigation.target, chatEvents.cancelFocus, id)
+      sendEvent(navigation.target, chatEvents.extensionCancelFocusChat, id)
     navigation.complete(error?.slice(0, 1024))
   }
 

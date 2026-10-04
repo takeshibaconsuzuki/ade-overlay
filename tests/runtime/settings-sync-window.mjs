@@ -3,7 +3,12 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
-import { commandOrControl, key } from '../helpers/keyboard.mjs'
+import {
+  commandOrControl,
+  key,
+  letterKey,
+  openCommandPalette,
+} from '../helpers/keyboard.mjs'
 const input = JSON.parse(
   readFileSync(process.env.ADE_EDITOR_TEST_INPUT, 'utf8'),
 )
@@ -35,14 +40,7 @@ async function command(contents, text) {
   window.show()
   window.focus()
   contents.focus()
-  await key(contents, 'F1')
-  await until(
-    () =>
-      contents.executeJavaScript(
-        "!!document.querySelector('.quick-input-widget input')",
-      ),
-    'palette',
-  )
+  await openCommandPalette(contents)
   await key(contents, 'A', [commandOrControl])
   await contents.insertText('>' + text)
   await until(
@@ -118,11 +116,14 @@ async function saveUserSettings(contents, text) {
   await delay(100)
   // Chromium inserts this as typing, so remove Monaco's auto-closed brace.
   await key(contents, 'Delete')
-  await key(contents, 'S', [commandOrControl])
+  await letterKey(contents, 's', [commandOrControl])
   await until(
     async () => (await browserSettings(contents)) === text,
     'native save finished',
   )
+  // VS Code can show User settings in a modal editor, where the command
+  // palette does not open. Leave it before the next command.
+  await key(contents, 'Escape')
 }
 async function run() {
   await app.whenReady()

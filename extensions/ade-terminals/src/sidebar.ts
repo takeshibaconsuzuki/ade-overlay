@@ -64,7 +64,7 @@ export class SidebarProvider
         if (action.type === 'select-provider')
           await this.launcher.open(action.provider)
         else if (action.type === 'launch') await this.launcher.open(action.kind)
-        else await this.chats.activateChat(action.chatId)
+        else await this.chats.companionOpenChat(action.chatId)
       })()
         .catch((error: unknown) => {
           if (version === this.actionVersion)

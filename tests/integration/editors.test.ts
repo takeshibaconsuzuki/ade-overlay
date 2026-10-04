@@ -26,7 +26,7 @@ import {
 } from '../../src/shared/editor-settings.ts'
 import {
   companionRequests,
-  type EditorSession,
+  type EditorServerSession,
   type WorktreeSnapshot,
 } from '../../src/shared/companion.ts'
 import { fixture, connect, editorUrl } from '../helpers/editor-server.ts'
@@ -35,14 +35,14 @@ const execute = promisify(execFile)
 
 test('editor commands validate inputs and sessions', () => {
   assert.equal(
-    companionRequests.openEditor.input.safeParse({
+    companionRequests.companionStartEditorServer.input.safeParse({
       project: 'repo',
       path: '\0',
     }).success,
     false,
   )
   assert.equal(
-    companionRequests.openEditor.output.safeParse({
+    companionRequests.companionStartEditorServer.output.safeParse({
       id: 'x',
       accessToken: 'bad',
     }).success,
@@ -121,7 +121,10 @@ test('project chat commands reach all its editors and reset after companion conf
       [project, linked, chatCommands ?? {}],
       [second.project, second.project, { claude: 'second-claude' }],
     ] as const) {
-      const session = await client.openEditor({ project: owner, path })
+      const session = await client.companionStartEditorServer({
+        project: owner,
+        path,
+      })
       const response = await fetch(
         new URL('runtime-info', editorUrl(server.url, session)),
         {
@@ -150,7 +153,10 @@ test('imported root pages retain authentication, public authority and VS Code co
   const server = await startCompanionServer({ port: 0, config, editorRuntime })
   cleanups.push(() => server.close())
   const client = await connect(t, server.url)
-  const session = await client.openEditor({ project, path: project })
+  const session = await client.companionStartEditorServer({
+    project,
+    path: project,
+  })
   const url = editorUrl(server.url, session)
   assert.equal(
     (await fetch(url, { headers: { Accept: 'text/html' } })).status,
@@ -229,7 +235,10 @@ test('editor proxy preserves preference cookies and replaces all stale authentic
   const server = await startCompanionServer({ port: 0, config, editorRuntime })
   cleanups.push(() => server.close())
   const client = await connect(t, server.url)
-  const editor = await client.openEditor({ project, path: project })
+  const editor = await client.companionStartEditorServer({
+    project,
+    path: project,
+  })
   const url = editorUrl(server.url, editor)
   const cookie =
     'vscode-tkn=old; vscode.nls.locale=fr; preference=%2Ffoo%3Dbar; empty=; vscode-tkn=another-old'
@@ -283,7 +292,7 @@ test('editor proxy preserves preference cookies and replaces all stale authentic
       .status,
     403,
   )
-  await client.listWorktrees()
+  await client.companionListWorktrees()
 })
 
 test(
@@ -300,20 +309,26 @@ test(
     const first = await connect(t, server.url)
     const second = await connect(t, server.url)
     const changes: WorktreeSnapshot[] = []
-    second.on('worktreesUpdated', (update) => changes.push(update))
-    assert.equal((await first.listWorktrees()).worktrees[0].editor, 'stopped')
+    second.on('desktopUpdateWorktrees', (update) => changes.push(update))
+    assert.equal(
+      (await first.companionListWorktrees()).worktrees[0].editorServer,
+      'stopped',
+    )
     const input = { project, path: project }
     const [session, duplicate] = await Promise.all([
-      first.openEditor(input),
-      second.openEditor(input),
+      first.companionStartEditorServer(input),
+      second.companionStartEditorServer(input),
     ])
     assert.deepEqual(session, duplicate)
-    assert.equal((await second.listWorktrees()).worktrees[0].editor, 'running')
-    assert.ok(
-      changes.some((update) => update.worktrees[0].editor === 'starting'),
+    assert.equal(
+      (await second.companionListWorktrees()).worktrees[0].editorServer,
+      'running',
     )
     assert.ok(
-      changes.some((update) => update.worktrees[0].editor === 'running'),
+      changes.some((update) => update.worktrees[0].editorServer === 'starting'),
+    )
+    assert.ok(
+      changes.some((update) => update.worktrees[0].editorServer === 'running'),
     )
     const url = editorUrl(server.url, session)
     assert.equal((await fetch(url)).status, 403)
@@ -351,13 +366,20 @@ test(
     assert.equal((await echoed)[0].toString(), 'terminal data')
     first.stop()
     const restartedApp = await connect(t, server.url)
-    assert.deepEqual(await restartedApp.openEditor(input), session)
+    assert.deepEqual(
+      await restartedApp.companionStartEditorServer(input),
+      session,
+    )
     assert.equal(
-      (await restartedApp.refreshWorktrees()).worktrees[0].editor,
+      (await restartedApp.companionRefreshWorktrees()).worktrees[0]
+        .editorServer,
       'running',
     )
     await assert.rejects(
-      restartedApp.openEditor({ project, path: join(project, 'unknown') }),
+      restartedApp.companionStartEditorServer({
+        project,
+        path: join(project, 'unknown'),
+      }),
       /unavailable/,
     )
     const after = (await (await fetch(detailsUrl, { headers })).json()) as {
@@ -379,7 +401,10 @@ test('editor processes do not inherit companion credentials or profile overrides
   const server = await startCompanionServer({ port: 0, config, editorRuntime })
   cleanups.push(() => server.close())
   const client = await connect(t, server.url)
-  const editor = await client.openEditor({ project, path: project })
+  const editor = await client.companionStartEditorServer({
+    project,
+    path: project,
+  })
   const response = await fetch(
     new URL('runtime-info', editorUrl(server.url, editor)),
     {
@@ -421,7 +446,7 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     const input = { project, path: project }
-    const editor = await client.openEditor(input)
+    const editor = await client.companionStartEditorServer(input)
     const url = editorUrl(server.url, editor).replace('http:', 'ws:')
     const headers = { Authorization: `Bearer ${editor.accessToken}` }
     const healthy = new WebSocket(url, { headers })
@@ -447,10 +472,10 @@ test(
       healthy.send(code)
       assert.equal((await reply)[0].toString(), code)
       assert.equal(
-        (await client.listWorktrees()).worktrees[0].editor,
+        (await client.companionListWorktrees()).worktrees[0].editorServer,
         'running',
       )
-      assert.deepEqual(await client.openEditor(input), editor)
+      assert.deepEqual(await client.companionStartEditorServer(input), editor)
     }
   },
 )
@@ -474,9 +499,15 @@ test(
       baseBranch: 'main',
       branch: 'feature',
     })
-    const main = await client.openEditor({ project, path: project })
-    const other = await client.openEditor({ project, path: linked })
-    const details = async (session: EditorSession) =>
+    const main = await client.companionStartEditorServer({
+      project,
+      path: project,
+    })
+    const other = await client.companionStartEditorServer({
+      project,
+      path: linked,
+    })
+    const details = async (session: EditorServerSession) =>
       (await (
         await fetch(new URL('runtime-info', editorUrl(server.url, session)), {
           headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -500,10 +531,10 @@ test(
     await mkdir(dirname(settings), { recursive: true })
     await writeFile(settings, '{"custom": true}')
     const stopped = new Promise<void>((resolve) =>
-      client.on('worktreesUpdated', (update) => {
+      client.on('desktopUpdateWorktrees', (update) => {
         if (
-          update.worktrees.find((entry) => entry.path === project)?.editor ===
-          'stopped'
+          update.worktrees.find((entry) => entry.path === project)
+            ?.editorServer === 'stopped'
         )
           resolve()
       }),
@@ -512,7 +543,10 @@ test(
       headers: { Authorization: `Bearer ${main.accessToken}` },
     })
     await stopped
-    const reopened = await client.openEditor({ project, path: project })
+    const reopened = await client.companionStartEditorServer({
+      project,
+      path: project,
+    })
     assert.equal(reopened.id, main.id)
     assert.notEqual(reopened.accessToken, main.accessToken)
     assert.equal(await readFile(settings, 'utf8'), '{"custom": true}')
@@ -525,7 +559,7 @@ test(
       ).status,
       403,
     )
-    assert.equal((await client.listWorktrees()).worktrees.length, 1)
+    assert.equal((await client.companionListWorktrees()).worktrees.length, 1)
   },
 )
 
@@ -558,9 +592,9 @@ test(
       branch: 'removed',
       baseBranch: 'main',
     })
-    const starting = once(client, 'worktreesUpdated')
+    const starting = once(client, 'desktopUpdateWorktrees')
     const cancelled = assert.rejects(
-      client.openEditor({ project, path: removed }),
+      client.companionStartEditorServer({ project, path: removed }),
       /cancelled|aborted/,
     )
     await starting
@@ -574,7 +608,7 @@ test(
     await cancelled
     assert.ok(!result.worktrees.some((tree) => tree.path === removed))
     release()
-    await client.listWorktrees()
+    await client.companionListWorktrees()
   },
 )
 
@@ -590,8 +624,11 @@ test('editors share one runtime and retain workspace data when the companion res
   })
   cleanups.push(() => server.close())
   const client = await connect(t, server.url)
-  const first = await client.openEditor({ project, path: project })
-  const details = async (session: EditorSession) =>
+  const first = await client.companionStartEditorServer({
+    project,
+    path: project,
+  })
+  const details = async (session: EditorServerSession) =>
     (await (
       await fetch(new URL('runtime-info', editorUrl(server.url, session)), {
         headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -607,14 +644,20 @@ test('editors share one runtime and retain workspace data when the companion res
     branch: 'next',
     baseBranch: 'main',
   })
-  const second = await client.openEditor({ project, path: nextPath })
+  const second = await client.companionStartEditorServer({
+    project,
+    path: nextPath,
+  })
   assert.notEqual((await details(second)).pid, before.pid)
   assert.equal(
     (await details(second)).runtime,
     join(editorRuntime.runtimeRoot, 'out', 'server-main.js'),
   )
   assert.equal((await details(second)).args['--reconnection-grace-time'], '600')
-  assert.deepEqual(await client.openEditor({ project, path: project }), first)
+  assert.deepEqual(
+    await client.companionStartEditorServer({ project, path: project }),
+    first,
+  )
   assert.equal((await details(first)).pid, before.pid)
   const settings = join(before.args['--user-data-dir'], 'User', 'settings.json')
   await mkdir(dirname(settings), { recursive: true })
@@ -628,7 +671,10 @@ test('editors share one runtime and retain workspace data when the companion res
   })
   cleanups.push(() => restarted.close())
   const restartedClient = await connect(t, restarted.url)
-  const reopened = await restartedClient.openEditor({ project, path: project })
+  const reopened = await restartedClient.companionStartEditorServer({
+    project,
+    path: project,
+  })
   assert.equal(reopened.id, first.id)
   const after = (await (
     await fetch(new URL('runtime-info', editorUrl(restarted.url, reopened)), {
@@ -638,6 +684,39 @@ test('editors share one runtime and retain workspace data when the companion res
   assert.equal(after.runtime, join(nextRoot, 'out', 'server-main.js'))
   assert.equal(await readFile(settings, 'utf8'), '{"editor.fontSize":31}')
 })
+
+test(
+  'stopping is published before the process exits and refuses opens until stopped',
+  { timeout: 30_000 },
+  async (t) => {
+    const { project, config, cleanups, editorRuntime } = await fixture(t)
+    const server = await startCompanionServer({
+      port: 0,
+      config,
+      editorRuntime,
+    })
+    cleanups.push(() => server.close())
+    const client = await connect(t, server.url)
+    const input = { project, path: project }
+    const session = await client.companionStartEditorServer(input)
+    const states: string[] = []
+    client.on('desktopUpdateWorktrees', (update) =>
+      states.push(update.worktrees[0].editorServer),
+    )
+    const stopped = client.companionStopEditorServer(input)
+    await assert.rejects(
+      client.companionStartEditorServer(input),
+      /still stopping/,
+    )
+    const row = (await stopped).worktrees[0]
+    assert.equal(row.editorServer, 'stopped')
+    assert.equal(row.error, undefined)
+    assert.ok(states.indexOf('stopping') >= 0)
+    assert.ok(states.indexOf('stopping') < states.lastIndexOf('stopped'))
+    const reopened = await client.companionStartEditorServer(input)
+    assert.notEqual(reopened.accessToken, session.accessToken)
+  },
+)
 
 test(
   'startup errors survive reconnects and successful opens until explicitly cleared',
@@ -654,41 +733,54 @@ test(
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
     await assert.rejects(
-      client.openEditor({ project, path: project }),
+      client.companionStartEditorServer({ project, path: project }),
       /ENOENT/,
     )
-    assert.equal((await client.listWorktrees()).worktrees[0].editor, 'stopped')
-    assert.match((await client.listWorktrees()).worktrees[0].error!, /ENOENT/)
+    assert.equal(
+      (await client.companionListWorktrees()).worktrees[0].editorServer,
+      'stopped',
+    )
+    assert.match(
+      (await client.companionListWorktrees()).worktrees[0].error!,
+      /ENOENT/,
+    )
     const reconnected = await connect(t, server.url)
     assert.match(
-      (await reconnected.listWorktrees()).worktrees[0].error!,
+      (await reconnected.companionListWorktrees()).worktrees[0].error!,
       /ENOENT/,
     )
     editorRuntime.runtimeRoot = workingRuntime
-    const failure = (await reconnected.listWorktrees()).worktrees[0].error
+    const failure = (await reconnected.companionListWorktrees()).worktrees[0]
+      .error
     const updates: WorktreeSnapshot[] = []
-    reconnected.on('worktreesUpdated', (update) => updates.push(update))
-    const opening = reconnected.openEditor({ project, path: project })
+    reconnected.on('desktopUpdateWorktrees', (update) => updates.push(update))
+    const opening = reconnected.companionStartEditorServer({
+      project,
+      path: project,
+    })
     assert.equal(
-      (await reconnected.listWorktrees()).worktrees[0].error,
+      (await reconnected.companionListWorktrees()).worktrees[0].error,
       failure,
     )
     const session = await opening
     assert.deepEqual(
-      await reconnected.openEditor({ project, path: project }),
+      await reconnected.companionStartEditorServer({ project, path: project }),
       session,
     )
     assert.ok(
-      updates.some((update) => update.worktrees[0].editor === 'starting'),
+      updates.some((update) => update.worktrees[0].editorServer === 'starting'),
     )
     for (const update of updates)
       assert.equal(update.worktrees[0].error, failure)
-    const reopened = (await client.listWorktrees()).worktrees[0]
-    assert.equal(reopened.editor, 'running')
+    const reopened = (await client.companionListWorktrees()).worktrees[0]
+    assert.equal(reopened.editorServer, 'running')
     assert.equal(reopened.error, failure)
-    await reconnected.setWorktreeError({ project, path: project })
-    assert.equal((await client.listWorktrees()).worktrees[0].error, undefined)
-    await client.listWorktrees()
+    await reconnected.companionSetWorktreeError({ project, path: project })
+    assert.equal(
+      (await client.companionListWorktrees()).worktrees[0].error,
+      undefined,
+    )
+    await client.companionListWorktrees()
   },
 )
 
@@ -714,24 +806,25 @@ test(
       branch: 'slow',
       baseBranch: 'main',
     })
-    const starting = once(client, 'worktreesUpdated')
+    const starting = once(client, 'desktopUpdateWorktrees')
     const cancelled = assert.rejects(
-      client.openEditor({ project, path }),
+      client.companionStartEditorServer({ project, path }),
       /cancelled|aborted/,
     )
     await starting
-    const refreshed = await client.refreshWorktrees()
+    const refreshed = await client.companionRefreshWorktrees()
     assert.equal(
-      refreshed.worktrees.find((worktree) => worktree.path === path)?.editor,
+      refreshed.worktrees.find((worktree) => worktree.path === path)
+        ?.editorServer,
       'starting',
     )
     assert.ok(
       refreshed.worktrees.find((worktree) => worktree.path === path)
-        ?.editorDetail,
+        ?.editorServerDetail,
     )
     await completeDelete(client, { project, path })
     await cancelled
-    assert.equal((await client.listWorktrees()).worktrees.length, 1)
+    assert.equal((await client.companionListWorktrees()).worktrees.length, 1)
   },
 )
 
@@ -753,7 +846,10 @@ test('server and editor logs identify startup stages without exposing session to
   })
   cleanups.push(() => server.close())
   const client = await connect(t, server.url)
-  const session = await client.openEditor({ project, path: project })
+  const session = await client.companionStartEditorServer({
+    project,
+    path: project,
+  })
   const invalid = await fetch(
     new URL('ade-settings-sync', editorUrl(server.url, session)),
     {
@@ -775,7 +871,7 @@ test('server and editor logs identify startup stages without exposing session to
   assert.ok(
     messages.some(
       (entry) =>
-        entry.command === 'editor:open' &&
+        entry.command === 'companionStartEditorServer' &&
         entry.clientId &&
         entry.msg === 'Command received',
     ),
@@ -827,12 +923,15 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
         branch: 'removed',
         baseBranch: 'main',
       })
-      const running = await client.openEditor({ project, path: removed })
-      const survivor = await client.openEditor({
+      const running = await client.companionStartEditorServer({
+        project,
+        path: removed,
+      })
+      const survivor = await client.companionStartEditorServer({
         project: otherProject,
         path: otherProject,
       })
-      const info = async (editor: EditorSession) =>
+      const info = async (editor: EditorServerSession) =>
         (await (
           await fetch(new URL('runtime-info', editorUrl(server.url, editor)), {
             headers: { Authorization: `Bearer ${editor.accessToken}` },
@@ -848,12 +947,12 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
       await execute('git', ['-C', project, 'worktree', 'remove', '--', removed])
       // External Git changes have not yet been accepted into the cached list.
       assert.ok(
-        (await client.listWorktrees()).worktrees.some(
+        (await client.companionListWorktrees()).worktrees.some(
           (tree) => tree.path === removed,
         ),
       )
       assert.equal((await info(running)).pid, stoppedPid)
-      if (operation === 'refresh') await client.refreshWorktrees()
+      if (operation === 'refresh') await client.companionRefreshWorktrees()
       else {
         if (operation === 'failed-create') {
           const hooks = join(root, 'hooks')
@@ -882,7 +981,7 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
         else await create
       }
       assert.ok(
-        !(await client.listWorktrees()).worktrees.some(
+        !(await client.companionListWorktrees()).worktrees.some(
           (tree) => tree.path === removed,
         ),
       )
@@ -897,7 +996,10 @@ for (const operation of ['create', 'failed-create', 'refresh'] as const) {
       )
       assert.equal((await info(survivor)).pid, survivorPid)
       assert.deepEqual(
-        await client.openEditor({ project: otherProject, path: otherProject }),
+        await client.companionStartEditorServer({
+          project: otherProject,
+          path: otherProject,
+        }),
         survivor,
       )
     },

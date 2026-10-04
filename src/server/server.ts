@@ -11,7 +11,7 @@ import {
 import { ChatService } from './chats/chat-service.ts'
 import { ChatStore } from './chats/chat-store.ts'
 import { WorktreeColors } from './worktrees/worktree-colors.ts'
-import { EditorManager } from './editors/editor-manager.ts'
+import { EditorServerManager } from './editors/editor-manager.ts'
 import type { EditorRuntimeProvider } from './editors/vscode-runtime.ts'
 import { WorktreeStore } from './worktrees/worktree-store.ts'
 import { createEditorTransport } from './editors/editor-transport.ts'
@@ -46,7 +46,7 @@ export async function startCompanionServer(options: ServerOptions = {}) {
     ),
     editorDataDir(config.editor),
   )
-  const editors = new EditorManager(
+  const editors = new EditorServerManager(
     chats,
     config.editor,
     logger,

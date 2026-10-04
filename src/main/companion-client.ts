@@ -14,8 +14,8 @@ import {
   type WorktreePathTemplates,
   type DeleteWorktreeInput,
   type SetWorktreeErrorInput,
-  type OpenEditorInput,
-  type EditorSession,
+  type WorktreeRef,
+  type EditorServerSession,
 } from '../shared/companion.ts'
 import {
   callRpc,
@@ -35,10 +35,10 @@ interface ClientOptions {
 
 export class CompanionClient extends EventEmitter<{
   status: [CompanionStatus]
-  worktreesUpdated: [WorktreeSnapshot]
-  chatActivate: [{ id: string; input: OpenEditorInput }]
-  chatFinished: [string]
-  chatIdle: [Chat]
+  desktopUpdateWorktrees: [WorktreeSnapshot]
+  desktopOpenChat: [{ id: string; input: WorktreeRef }]
+  desktopFinishOpenChat: [string]
+  desktopNotifyChatIdle: [Chat]
 }> {
   private status: CompanionStatus
   private readonly options: ClientOptions
@@ -57,13 +57,13 @@ export class CompanionClient extends EventEmitter<{
     return { ...this.status }
   }
 
-  chatViewReady(
+  desktopOpenChatResponse(
     id: string,
     error?: string,
     activationAfter: string | null = null,
   ): void {
     if (this.socket)
-      sendEvent(this.socket, companionEvents.viewReady, {
+      sendEvent(this.socket, companionEvents.desktopOpenChatResponse, {
         id,
         error: error?.slice(0, 1024),
         activationAfter,
@@ -125,14 +125,18 @@ export class CompanionClient extends EventEmitter<{
         },
         invalid,
       )
-    receive(companionEvents.worktrees, (value) =>
-      this.emit('worktreesUpdated', value),
+    receive(companionEvents.desktopUpdateWorktrees, (value) =>
+      this.emit('desktopUpdateWorktrees', value),
     )
-    receive(companionEvents.chatIdle, (chat) => this.emit('chatIdle', chat))
-    receive(companionEvents.activateChat, (value) =>
-      this.emit('chatActivate', value),
+    receive(companionEvents.desktopNotifyChatIdle, (chat) =>
+      this.emit('desktopNotifyChatIdle', chat),
     )
-    receive(companionEvents.finishChat, (id) => this.emit('chatFinished', id))
+    receive(companionEvents.desktopOpenChat, (value) =>
+      this.emit('desktopOpenChat', value),
+    )
+    receive(companionEvents.desktopFinishOpenChat, (id) =>
+      this.emit('desktopFinishOpenChat', id),
+    )
     socket.on('connect_error', (error) => {
       if (this.socket === socket)
         this.update({
@@ -162,60 +166,76 @@ export class CompanionClient extends EventEmitter<{
     this.update({ state: 'disconnected', url: this.status.url })
   }
 
-  reservePaste(editorId: string, documentId: string): Promise<string | null> {
-    return this.request(companionRequests.reservePaste, {
-      editorId,
+  companionReservePaste(
+    editorServerId: string,
+    documentId: string,
+  ): Promise<string | null> {
+    return this.request(companionRequests.companionReservePaste, {
+      editorServerId,
       documentId,
     })
   }
 
-  paste(
-    editorId: string,
+  companionPaste(
+    editorServerId: string,
     documentId: string,
     reservationId: string,
     items: PastePart[],
   ): Promise<null> {
-    return this.request(companionRequests.paste, {
-      editorId,
+    return this.request(companionRequests.companionPaste, {
+      editorServerId,
       documentId,
       reservationId,
       items,
     })
   }
 
-  activateChat(id: string): Promise<null> {
-    return this.request(companionRequests.activateChat, id)
+  companionOpenChat(id: string): Promise<null> {
+    return this.request(companionRequests.companionOpenChat, id)
   }
 
-  listWorktrees(): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.list, null)
+  companionOpenBootstrapLog(input: WorktreeRef): Promise<null> {
+    return this.request(companionRequests.companionOpenBootstrapLog, input)
   }
-  refreshWorktrees(): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.refresh, null)
+  companionListWorktrees(): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionListWorktrees, null)
   }
-  createWorktree(input: CreateWorktreeInput): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.create, input)
+  companionRefreshWorktrees(): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionRefreshWorktrees, null)
   }
-  getWorktreePathTemplates(): Promise<WorktreePathTemplates> {
-    return this.request(companionRequests.pathTemplates, null)
+  companionCreateWorktree(
+    input: CreateWorktreeInput,
+  ): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionCreateWorktree, input)
   }
-  getWorktreeBranches(project: string): Promise<WorktreeBranch[]> {
-    return this.request(companionRequests.branches, { project })
+  companionGetPathTemplates(): Promise<WorktreePathTemplates> {
+    return this.request(companionRequests.companionGetPathTemplates, null)
   }
-  deleteWorktree(input: DeleteWorktreeInput): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.delete, input)
+  companionListBranches(project: string): Promise<WorktreeBranch[]> {
+    return this.request(companionRequests.companionListBranches, { project })
   }
-  setWorktreeError(input: SetWorktreeErrorInput): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.setError, input)
+  companionDeleteWorktree(
+    input: DeleteWorktreeInput,
+  ): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionDeleteWorktree, input)
   }
-  stopEditor(input: OpenEditorInput): Promise<WorktreeSnapshot> {
-    return this.request(companionRequests.stopEditor, input)
+  companionSetWorktreeError(
+    input: SetWorktreeErrorInput,
+  ): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionSetWorktreeError, input)
   }
-  openEditor(
-    input: OpenEditorInput,
+  companionStopEditorServer(input: WorktreeRef): Promise<WorktreeSnapshot> {
+    return this.request(companionRequests.companionStopEditorServer, input)
+  }
+  companionStartEditorServer(
+    input: WorktreeRef,
     signal?: AbortSignal,
-  ): Promise<EditorSession> {
-    return this.request(companionRequests.openEditor, input, signal)
+  ): Promise<EditorServerSession> {
+    return this.request(
+      companionRequests.companionStartEditorServer,
+      input,
+      signal,
+    )
   }
 
   private async request<I, O>(
@@ -234,9 +254,9 @@ export class CompanionClient extends EventEmitter<{
     } catch (error) {
       if (error instanceof Error && error.message === 'operation has timed out')
         throw new Error(
-          spec.event === 'editor:open'
+          spec.event === 'companionStartEditorServer'
             ? 'Editor startup timed out. Try opening the worktree again.'
-            : spec.event === 'chat:activate'
+            : spec.event === 'desktopOpenChat'
               ? 'Chat navigation timed out. Try opening the chat again.'
               : 'Worktree request timed out. Refresh to check the result before retrying.',
           { cause: error },

@@ -1,30 +1,30 @@
 import { EventEmitter } from 'node:events'
-import type { EditorLifecycle } from '../../src/server/editors/editor-manager.ts'
-import { editorId } from '../../src/server/worktrees/worktree-identity.ts'
+import type { EditorServerLifecycle } from '../../src/server/editors/editor-manager.ts'
+import { editorServerId } from '../../src/server/worktrees/worktree-identity.ts'
 import type {
-  EditorSession,
-  OpenEditorInput,
+  EditorServerSession,
+  WorktreeRef,
   Worktree,
 } from '../../src/shared/companion.ts'
 
 // Store tests explicitly provide editor ownership without launching processes.
 export class WorktreeEditors
   extends EventEmitter<{ status: [] }>
-  implements EditorLifecycle
+  implements EditorServerLifecycle
 {
-  readonly retained: OpenEditorInput[][] = []
-  private sessions = new Map<string, EditorSession>()
+  readonly retained: WorktreeRef[][] = []
+  private sessions = new Map<string, EditorServerSession>()
 
-  status(worktree: OpenEditorInput): Worktree['editor'] {
-    return this.sessions.has(editorId(worktree)) ? 'running' : 'stopped'
+  status(worktree: WorktreeRef): Worktree['editorServer'] {
+    return this.sessions.has(editorServerId(worktree)) ? 'running' : 'stopped'
   }
 
   detail(): string | undefined {
     return undefined
   }
 
-  async open(worktree: OpenEditorInput): Promise<EditorSession> {
-    const id = editorId(worktree)
+  async open(worktree: WorktreeRef): Promise<EditorServerSession> {
+    const id = editorServerId(worktree)
     const session = this.sessions.get(id) ?? {
       id,
       path: `/editors/${id}/`,
@@ -35,13 +35,13 @@ export class WorktreeEditors
     return session
   }
 
-  async stop(worktree: OpenEditorInput): Promise<void> {
-    if (this.sessions.delete(editorId(worktree))) this.emit('status')
+  async stop(worktree: WorktreeRef): Promise<void> {
+    if (this.sessions.delete(editorServerId(worktree))) this.emit('status')
   }
 
-  async retain(worktrees: OpenEditorInput[]): Promise<void> {
+  async retain(worktrees: WorktreeRef[]): Promise<void> {
     this.retained.push(structuredClone(worktrees))
-    const ids = new Set(worktrees.map(editorId))
+    const ids = new Set(worktrees.map(editorServerId))
     for (const id of this.sessions.keys()) {
       if (!ids.has(id)) {
         this.sessions.delete(id)

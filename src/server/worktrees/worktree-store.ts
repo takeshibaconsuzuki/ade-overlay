@@ -1,6 +1,6 @@
-import { exec, execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { chmod, lstat, readdir, realpath } from 'node:fs/promises'
+import { chmod, lstat, open, readdir, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
@@ -11,17 +11,16 @@ import type {
   DeleteWorktreeInput,
   Worktree,
   WorktreeSnapshot,
-  OpenEditorInput,
-  EditorSession,
+  WorktreeRef,
+  EditorServerSession,
   SetWorktreeErrorInput,
 } from '../../shared/companion.ts'
 import { expandHome, type ServerConfig } from '../config.ts'
-import type { EditorLifecycle } from '../editors/editor-manager.ts'
-import { pathKey, worktreeKey } from './worktree-identity.ts'
+import type { EditorServerLifecycle } from '../editors/editor-manager.ts'
+import { editorServerId, pathKey, worktreeKey } from './worktree-identity.ts'
 import { WorktreeColors } from './worktree-colors.ts'
 
 const execute = promisify(execFile)
-const executeShell = promisify(exec)
 
 interface GitWorktree {
   project: string
@@ -34,12 +33,21 @@ interface GitWorktree {
 
 type WorktreeTarget = Pick<GitWorktree, 'project' | 'path' | 'branch'>
 
+type ScanSlot = { running?: Promise<void>; queued?: Promise<void> }
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 type RowState = {
   target: WorktreeTarget
   operation?: Worktree['operation']
   error?: string
   deletionFailure?: Worktree['deletionFailure']
+  bootstrapFailed?: boolean
 }
+
+class BootstrapError extends Error {}
 
 class WorktreeRemovalError extends Error {
   readonly details: NonNullable<Worktree['deletionFailure']>
@@ -104,6 +112,47 @@ async function git(project: string, args: string[]): Promise<string> {
     const failure = error as Error & { stderr?: string }
     throw new Error(failure.stderr?.trim() || failure.message, { cause: error })
   }
+}
+
+// Git removes this per-worktree directory with the worktree, and files in it
+// never appear as untracked changes.
+async function bootstrapLogPath(worktree: string): Promise<string> {
+  const directory = await git(worktree, ['rev-parse', '--absolute-git-dir'])
+  return join(directory.trim(), 'ade-bootstrap.log')
+}
+
+async function runBootstrap(command: string, cwd: string): Promise<void> {
+  const path = await bootstrapLogPath(cwd)
+  const log = await open(path, 'w', 0o600)
+  let failure: string | undefined
+  try {
+    await log.write(`$ ${command}\n`)
+    failure = await new Promise<string | undefined>((resolve) => {
+      const child = spawn(command, {
+        cwd,
+        shell: os.userInfo().shell || true,
+        windowsHide: true,
+        stdio: ['ignore', log.fd, log.fd],
+      })
+      child.once('error', (error) => resolve(error.message))
+      child.once('close', (code, signal) =>
+        resolve(
+          code === 0
+            ? undefined
+            : signal
+              ? `signal ${signal}`
+              : `exit code ${code}`,
+        ),
+      )
+    })
+  } finally {
+    await log.close()
+  }
+  // The log holds the output; the row only says where to look.
+  if (failure)
+    throw new BootstrapError(
+      `Bootstrap command failed: ${failure}. Open the bootstrap log for details.`,
+    )
 }
 
 async function creationPath(path: string): Promise<string> {
@@ -176,18 +225,18 @@ export class WorktreeStore extends EventEmitter<{
     projects: [],
     worktrees: [],
   }
-  private queue: Promise<unknown> = Promise.resolve()
-  private pending = 0
   private closing = false
+  private readonly operations = new Set<Promise<void>>()
+  private readonly scans = new Map<string, ScanSlot>()
   private readonly admissions = new Set<Promise<unknown>>()
-  private readonly editors: EditorLifecycle
+  private readonly editors: EditorServerLifecycle
   private worktrees: GitWorktree[] = []
   private rows = new Map<string, RowState>()
   private projects = new Map<string, ServerConfig['projects'][number]>()
 
   private readonly colors: WorktreeColors
 
-  private constructor(editors: EditorLifecycle, colors: WorktreeColors) {
+  private constructor(editors: EditorServerLifecycle, colors: WorktreeColors) {
     super()
     this.editors = editors
     this.colors = colors
@@ -195,7 +244,7 @@ export class WorktreeStore extends EventEmitter<{
 
   static async open(
     projects: ServerConfig['projects'],
-    editors: EditorLifecycle,
+    editors: EditorServerLifecycle,
     colors = new WorktreeColors(),
   ): Promise<WorktreeStore> {
     const store = new WorktreeStore(editors, colors)
@@ -225,7 +274,7 @@ export class WorktreeStore extends EventEmitter<{
       )
     ).flat()
     store.snapshot.projects = paths
-    await store.applyWorktrees(worktrees, true)
+    await store.apply(worktrees, true)
     return store
   }
 
@@ -234,19 +283,19 @@ export class WorktreeStore extends EventEmitter<{
     return structuredClone(this.snapshot)
   }
 
-  private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.pending >= 32)
-      return Promise.reject(new Error('Too many pending worktree operations.'))
-    this.pending++
-    const result = this.queue.then(operation).finally(() => {
-      this.pending--
-    })
-    this.queue = result.catch(() => {})
-    return result
-  }
-
-  settled(): Promise<unknown> {
-    return this.queue
+  // Resolves once no operation or scan is in flight.
+  async settled(): Promise<void> {
+    for (;;) {
+      const active = [
+        ...this.operations,
+        ...[...this.scans.values()].flatMap((slot) => [
+          slot.running,
+          slot.queued,
+        ]),
+      ].filter(Boolean)
+      if (!active.length) return
+      await Promise.allSettled(active)
+    }
   }
 
   private accepting(): void {
@@ -255,7 +304,7 @@ export class WorktreeStore extends EventEmitter<{
 
   private async admit<T>(operation: () => Promise<T>): Promise<T> {
     this.accepting()
-    if (this.pending + this.admissions.size >= 32)
+    if (this.operations.size + this.admissions.size >= 32)
       throw new Error('Too many pending worktree operations.')
     const admission = operation()
     this.admissions.add(admission)
@@ -269,7 +318,7 @@ export class WorktreeStore extends EventEmitter<{
   async close(): Promise<void> {
     this.closing = true
     await Promise.allSettled(this.admissions)
-    await this.queue
+    await this.settled()
   }
 
   private publish(force = true): WorktreeSnapshot {
@@ -289,6 +338,7 @@ export class WorktreeStore extends EventEmitter<{
       ...(!actual.has(key) && { missing: true }),
       operation: this.rows.get(key)?.operation,
       error: this.rows.get(key)?.error,
+      ...(this.rows.get(key)?.bootstrapFailed && { bootstrapFailed: true }),
       ...(this.rows.get(key)?.deletionFailure && {
         deletionFailure: this.rows.get(key)!.deletionFailure,
       }),
@@ -296,8 +346,8 @@ export class WorktreeStore extends EventEmitter<{
         this.editors.status(target) === 'stopped'
           ? undefined
           : this.colors.get(target),
-      editor: this.editors.status(target),
-      editorDetail: this.editors.detail(target),
+      editorServer: this.editors.status(target),
+      editorServerDetail: this.editors.detail(target),
     }))
     if (!force && isDeepStrictEqual(entries, this.snapshot.worktrees))
       return this.list()
@@ -331,8 +381,7 @@ export class WorktreeStore extends EventEmitter<{
   branches(path: string): Promise<WorktreeBranch[]> {
     this.accepting()
     const project = this.project(path)
-    return this.serialize(async () => {
-      const refs = await branchRefs(project)
+    return branchRefs(project).then((refs) => {
       const refNames = new Set(refs)
       return refs.map((ref) => {
         const local = ref.startsWith('refs/heads/')
@@ -352,45 +401,65 @@ export class WorktreeStore extends EventEmitter<{
     })
   }
 
-  // All Git membership changes pass here. Status-only broadcasts use publish
-  // directly, so stopping a process cannot recursively trigger reconciliation.
-  private async applyWorktrees(
-    worktrees: GitWorktree[],
-    force = false,
-  ): Promise<WorktreeSnapshot> {
+  // All Git membership changes pass here, in one synchronous step: membership
+  // is replaced and editor retention decided before any other request can run.
+  // Status-only broadcasts use publish directly, so stopping a process cannot
+  // recursively trigger reconciliation.
+  private async apply(worktrees: GitWorktree[], force = false): Promise<void> {
     const retained = new Set(worktrees.map(worktreeKey))
     for (const previous of this.worktrees) {
       const key = worktreeKey(previous)
       if (!retained.has(key) && !this.rows.get(key)?.operation)
         this.rows.delete(key)
     }
-    await this.editors.retain(worktrees)
     this.worktrees = worktrees
-    return this.publish(force)
+    const reconciled = this.editors.retain(worktrees)
+    this.publish(force)
+    await reconciled
   }
 
-  private async reconcileProject(project: string): Promise<WorktreeSnapshot> {
-    const entries = await scan(project)
-    return this.applyWorktrees(
-      this.snapshot.projects.flatMap((path) =>
-        path === project
-          ? entries
-          : this.worktrees.filter((entry) => entry.project === path),
-      ),
-    )
+  // Git is the only source of membership. Each project runs one scan at a time
+  // and queues at most one more, shared by every request made while it waits.
+  // A caller therefore always receives a scan that started after its request.
+  private rescan(project: string): Promise<void> {
+    let slot = this.scans.get(project)
+    if (!slot) this.scans.set(project, (slot = {}))
+    if (slot.queued) return slot.queued
+    const state = slot
+    const next: Promise<void> = (state.running ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        state.queued = undefined
+        state.running = next
+        try {
+          const entries = await scan(project)
+          await this.apply(
+            this.snapshot.projects.flatMap((path) =>
+              path === project
+                ? entries
+                : this.worktrees.filter((entry) => entry.project === path),
+            ),
+          )
+        } finally {
+          state.running = undefined
+        }
+      })
+    state.queued = next
+    return next
   }
 
   refresh(): Promise<WorktreeSnapshot> {
     this.accepting()
-    return this.serialize(async () => {
-      const entries = (
-        await Promise.all(this.snapshot.projects.map(scan))
-      ).flat()
-      return this.applyWorktrees(entries, true)
-    })
+    const { revision } = this.snapshot
+    // Every refresh broadcasts, even when the scans changed nothing.
+    return Promise.all(
+      this.snapshot.projects.map((project) => this.rescan(project)),
+    ).then(() =>
+      this.snapshot.revision === revision ? this.publish() : this.list(),
+    )
   }
 
-  private find(input: OpenEditorInput): GitWorktree | undefined {
+  private find(input: WorktreeRef): GitWorktree | undefined {
     return this.worktrees.find(
       (entry) => worktreeKey(entry) === worktreeKey(input),
     )
@@ -413,36 +482,47 @@ export class WorktreeStore extends EventEmitter<{
     return this.publish()
   }
 
-  async openEditor(input: OpenEditorInput): Promise<EditorSession> {
+  async startEditorServer(input: WorktreeRef): Promise<EditorServerSession> {
     this.accepting()
     const key = worktreeKey(input)
     if (this.rows.get(key)?.operation)
       throw new Error('A worktree operation is still running.')
+    // Refused like an operation, so a transient stop leaves no row error.
+    if (this.editors.status(input) === 'stopping')
+      throw new Error('VS Code is still stopping. Open it once it has stopped.')
     const worktree = this.find(input)
     const state = worktree
-      ? { target: worktree, error: this.rows.get(key)?.error }
+      ? {
+          target: worktree,
+          error: this.rows.get(key)?.error,
+          bootstrapFailed: this.rows.get(key)?.bootstrapFailed,
+        }
       : undefined
     if (state) {
       this.rows.set(key, state)
     }
     try {
-      return await this.serialize(async () => {
-        this.project(input.project)
-        const current = this.find(input)
-        if (!current || current.prunable)
-          throw new Error('Worktree is unavailable. Refresh the list first.')
-        await realpath(current.path)
-        await this.colors.assign(current)
-        // Register startup in order, but release the queue during readiness.
-        return {
-          ready: this.editors.open(
-            current,
-            this.projects.get(pathKey(current.project))?.chatCommands,
-          ),
-        }
-      }).then(({ ready }) => ready)
+      this.project(input.project)
+      const found = this.find(input)
+      if (!found || found.prunable)
+        throw new Error('Worktree is unavailable. Refresh the list first.')
+      await realpath(found.path)
+      await this.colors.assign(found)
+      // A deletion or rescan may have claimed the worktree during these waits.
+      const current = this.find(input)
+      if (!current || this.rows.get(key)?.operation)
+        throw new Error('Worktree is unavailable. Refresh the list first.')
+      return await this.editors.open(
+        current,
+        this.projects.get(pathKey(current.project))?.chatCommands,
+      )
     } catch (error) {
-      if (state && this.rows.get(key) === state && this.find(input)) {
+      if (
+        state &&
+        this.rows.get(key) === state &&
+        this.find(input) &&
+        this.editors.status(input) !== 'stopping'
+      ) {
         this.rows.set(key, {
           target: state.target,
           error: String(error instanceof Error ? error.message : error).slice(
@@ -462,25 +542,26 @@ export class WorktreeStore extends EventEmitter<{
   // Stopping ends a running process; membership and the saved workspace data
   // remain, so a later open starts a fresh process. Startup is not stoppable,
   // so an explicit stop never surfaces as an opening failure.
-  async stopEditor(input: OpenEditorInput): Promise<WorktreeSnapshot> {
+  async stopEditorServer(input: WorktreeRef): Promise<WorktreeSnapshot> {
     this.accepting()
     const project = this.project(input.project)
     const key = worktreeKey({ ...input, project })
     if (this.rows.get(key)?.operation)
       throw new Error('A worktree operation is still running.')
-    return this.serialize(async () => {
-      const current = this.find({ ...input, project })
-      if (!current)
-        throw new Error('Worktree is not in the cache. Refresh the list first.')
-      if (this.editors.status(current) === 'starting')
-        throw new Error(
-          'VS Code is still starting. Stop it once it is running.',
-        )
-      await this.editors.stop(current)
-      return this.list()
-    })
+    const current = this.find({ ...input, project })
+    if (!current)
+      throw new Error('Worktree is not in the cache. Refresh the list first.')
+    if (this.editors.status(current) === 'starting')
+      throw new Error('VS Code is still starting. Stop it once it is running.')
+    if (this.editors.status(current) === 'stopping')
+      throw new Error('VS Code is already stopping.')
+    await this.editors.stop(current)
+    return this.list()
   }
 
+  // Reserve the row, then run the Git work in the background alongside any
+  // other operation. The row keeps its operation until a rescan that started
+  // after the work has applied, so membership never trails a cleared row.
   private schedule(
     target: WorktreeTarget,
     operation: NonNullable<Worktree['operation']>,
@@ -489,28 +570,49 @@ export class WorktreeStore extends EventEmitter<{
     const key = worktreeKey(target)
     if (this.rows.get(key)?.operation)
       throw new Error('A worktree operation is already running.')
-    if (this.pending >= 32)
+    if (this.operations.size >= 32)
       throw new Error('Too many pending worktree operations.')
     const state: RowState = { target, operation }
     this.rows.set(key, state)
     const accepted = this.publish()
     // The row owns failures even after the requesting desktop disconnects.
-    void this.serialize(async () => {
+    const work = (async () => {
+      let failure: unknown
       try {
         await run()
+      } catch (error) {
+        failure = error
+      }
+      const removal =
+        failure instanceof WorktreeRemovalError ? failure.details : undefined
+      const bootstrapFailed = failure instanceof BootstrapError
+      try {
+        // Failed hooks and bootstrap commands can still leave a worktree.
+        await this.rescan(target.project)
+      } catch (error) {
+        failure =
+          failure === undefined
+            ? error
+            : new AggregateError(
+                [failure, error],
+                `${errorMessage(failure)}\nCould not refresh worktrees: ${errorMessage(error)}`,
+                { cause: error },
+              )
+      }
+      if (failure === undefined) {
         this.rows.delete(key)
         this.publish()
-      } catch (error) {
-        state.operation = undefined
-        if (error instanceof WorktreeRemovalError)
-          state.deletionFailure = error.details
-        state.error = (
-          error instanceof Error ? error.message : String(error)
-        ).slice(0, 4096)
-        this.publish()
-        this.emit('operationFailed', target, error)
+        return
       }
-    }).catch(() => {})
+      state.operation = undefined
+      if (removal) state.deletionFailure = removal
+      if (bootstrapFailed) state.bootstrapFailed = true
+      state.error = errorMessage(failure).slice(0, 4096)
+      this.publish()
+      this.emit('operationFailed', target, failure)
+    })()
+    this.operations.add(work)
+    void work.finally(() => this.operations.delete(work))
     return accepted
   }
 
@@ -530,78 +632,67 @@ export class WorktreeStore extends EventEmitter<{
       branch: branch || input.baseBranch,
     }
     return this.schedule(target, 'creating', async () => {
-      try {
-        const refs = await branchRefs(project)
-        const gitRef = input.baseBranch.trim()
-        const localRef = gitRef.startsWith('refs/')
-          ? gitRef
-          : `refs/heads/${gitRef}`
-        const local =
-          localRef.startsWith('refs/heads/') && refs.includes(localRef)
-        const remoteRef = `refs/remotes/${gitRef}`
-        const startRef = local
-          ? localRef
-          : !gitRef.startsWith('refs/') && refs.includes(remoteRef)
-            ? remoteRef
-            : gitRef
-        if (!branch && !local)
-          throw new Error(
-            'A new branch name is required unless Git ref names an existing local branch.',
-          )
-        let args = [
-          'worktree',
-          'add',
-          '--',
-          path,
-          localRef.slice('refs/heads/'.length),
-        ]
-        if (branch) {
-          if (branch.startsWith('-'))
-            throw new Error('Branch names cannot start with a dash.')
-          await git(project, ['check-ref-format', `refs/heads/${branch}`])
-          const commit = (
-            await git(project, [
-              'rev-parse',
-              '--verify',
-              '--end-of-options',
-              `${startRef}^{commit}`,
-            ])
-          ).trim()
-          args = ['worktree', 'add', '-b', branch, '--', path, commit]
-        }
-        await git(project, args)
-        const command = this.projects.get(pathKey(project))?.bootstrapCommand
-        if (command?.trim()) {
-          try {
-            await executeShell(command, {
-              cwd: path,
-              shell: os.userInfo().shell || undefined,
-              windowsHide: true,
-              maxBuffer: 16 * 1024 * 1024,
-            })
-          } catch (error) {
-            const failure = error as Error & { stderr?: string }
-            throw new Error(
-              `Bootstrap command failed: ${failure.stderr?.trim() || failure.message}`,
-              { cause: error },
-            )
-          }
-        }
-      } catch (error) {
-        // Checkout hooks and bootstrap commands can fail after Git created it.
-        try {
-          await this.reconcileProject(project)
-        } catch (reconciliationError) {
-          throw new AggregateError(
-            [error, reconciliationError],
-            `${(error as Error).message}\nCould not refresh worktrees: ${(reconciliationError as Error).message}`,
-            { cause: reconciliationError },
-          )
-        }
-        throw error
+      const refs = await branchRefs(project)
+      const gitRef = input.baseBranch.trim()
+      const localRef = gitRef.startsWith('refs/')
+        ? gitRef
+        : `refs/heads/${gitRef}`
+      const local =
+        localRef.startsWith('refs/heads/') && refs.includes(localRef)
+      const remoteRef = `refs/remotes/${gitRef}`
+      const startRef = local
+        ? localRef
+        : !gitRef.startsWith('refs/') && refs.includes(remoteRef)
+          ? remoteRef
+          : gitRef
+      if (!branch && !local)
+        throw new Error(
+          'A new branch name is required unless Git ref names an existing local branch.',
+        )
+      let args = [
+        'worktree',
+        'add',
+        '--',
+        path,
+        localRef.slice('refs/heads/'.length),
+      ]
+      if (branch) {
+        if (branch.startsWith('-'))
+          throw new Error('Branch names cannot start with a dash.')
+        await git(project, ['check-ref-format', `refs/heads/${branch}`])
+        const commit = (
+          await git(project, [
+            'rev-parse',
+            '--verify',
+            '--end-of-options',
+            `${startRef}^{commit}`,
+          ])
+        ).trim()
+        args = ['worktree', 'add', '-b', branch, '--', path, commit]
       }
-      await this.reconcileProject(project)
+      // Intentional: creations of the same existing branch are not serialized.
+      // Git refuses a branch that is already checked out, but its check is not
+      // atomic, so two creations started at the same moment can both succeed.
+      await git(project, args)
+      const command = this.projects.get(pathKey(project))?.bootstrapCommand
+      if (command?.trim()) await runBootstrap(command, path)
     })
+  }
+
+  // The log is written beside Git's metadata for the worktree, on this machine.
+  async bootstrapLog(
+    input: WorktreeRef,
+  ): Promise<{ editorServerId: string; path: string }> {
+    this.accepting()
+    const project = this.project(input.project)
+    const current = this.find({ ...input, project })
+    if (!current)
+      throw new Error('Worktree is not in the cache. Refresh the list first.')
+    const path = await bootstrapLogPath(current.path)
+    await lstat(path).catch(() => {
+      throw new Error('This worktree has no bootstrap log.')
+    })
+    return { editorServerId: editorServerId(current), path }
   }
 
   async startDelete(input: DeleteWorktreeInput): Promise<WorktreeSnapshot> {
@@ -665,11 +756,6 @@ export class WorktreeStore extends EventEmitter<{
           deleteBranch: !!input.deleteBranch,
         })
       }
-      await this.applyWorktrees(
-        this.worktrees.filter(
-          (entry) => worktreeKey(entry) !== worktreeKey(worktree),
-        ),
-      )
       if (input.deleteBranch && current?.branch) {
         try {
           await git(project, ['branch', '-D', '--', current.branch])

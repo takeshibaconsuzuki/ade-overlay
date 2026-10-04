@@ -18,7 +18,7 @@ export const sidebarActionSchema = z.discriminatedUnion('type', [
     provider: launchProviderSchema,
   }),
   z.object({ type: z.literal('launch'), kind: launchKindSchema }),
-  z.object({ type: z.literal('activate'), chatId: chatIdSchema }),
+  z.object({ type: z.literal('open'), chatId: chatIdSchema }),
 ])
 export const sidebarStateSchema = z.object({
   type: z.literal('state'),

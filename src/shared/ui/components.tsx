@@ -2,6 +2,7 @@ import {
   useId,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   type ComponentPropsWithRef,
@@ -121,15 +122,43 @@ export function ActionMenu({
   }[]
   restoreFocus?: boolean
 }) {
-  const contentRef = useInteractionScopeRef()
+  const scopeRef = useInteractionScopeRef(false)
+  const [open, setOpen] = useState(false)
+  const present = useRef(false)
+  const interrupted = useRef(false)
+  const contentRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      present.current = !!element
+      scopeRef(element)
+    },
+    [scopeRef],
+  )
+  useEffect(() => {
+    // A hidden window does not finish closing a menu. Close it on blur, and do
+    // not let its late completion take focus from whatever the window focuses
+    // when it is shown again.
+    const onBlur = () => {
+      if (!present.current) return
+      interrupted.current = true
+      setOpen(false)
+    }
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [])
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (next) interrupted.current = false
+        setOpen(next)
+      }}
+    >
       <DropdownMenu.Trigger>{children}</DropdownMenu.Trigger>
       <DropdownMenu.Content
         ref={contentRef}
         align="end"
         onCloseAutoFocus={(event) => {
-          if (!restoreFocus) event.preventDefault()
+          if (!restoreFocus || interrupted.current) event.preventDefault()
         }}
       >
         {items.map((item) => (
@@ -338,15 +367,15 @@ export function SelectField({
   )
 }
 
-function useInteractionScopeRef() {
+function useInteractionScopeRef(holdsFocus: boolean) {
   const suspend = useContext(InteractionScope)
   const release = useRef<(() => void) | undefined>(undefined)
   return useCallback(
     (element: HTMLDivElement | null) => {
       release.current?.()
-      release.current = element ? suspend?.() : undefined
+      release.current = element ? suspend?.(holdsFocus) : undefined
     },
-    [suspend],
+    [suspend, holdsFocus],
   )
 }
 
@@ -367,7 +396,7 @@ export function Modal({
   returnFocusRef?: RefObject<HTMLElement | null>
   children: ReactNode
 }) {
-  const contentRef = useInteractionScopeRef()
+  const contentRef = useInteractionScopeRef(true)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {trigger && <Dialog.Trigger>{trigger}</Dialog.Trigger>}

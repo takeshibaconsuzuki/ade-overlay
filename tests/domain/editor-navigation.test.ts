@@ -3,9 +3,8 @@ import { setImmediate } from 'node:timers/promises'
 import { test } from 'node:test'
 import { EditorNavigation } from '../../src/main/editor-navigation.ts'
 import type {
-  EditorSession,
-  OpenEditorInput,
-  SetWorktreeErrorInput,
+  EditorServerSession,
+  WorktreeRef,
 } from '../../src/shared/companion.ts'
 
 function deferred<T>() {
@@ -19,7 +18,7 @@ function deferred<T>() {
 }
 
 const worktree = (path: string) => ({ project: 'project', path })
-const session: EditorSession = {
+const session: EditorServerSession = {
   id: 'a'.repeat(64),
   accessToken: 'b'.repeat(64),
 }
@@ -28,17 +27,15 @@ type Page = { chatActivation(): Promise<string | null> }
 type Source = 'picker' | 'chat'
 
 function fixture() {
-  const starts: (ReturnType<typeof deferred<EditorSession>> & {
-    input: OpenEditorInput
+  const starts: (ReturnType<typeof deferred<EditorServerSession>> & {
+    input: WorktreeRef
     signal?: AbortSignal
   })[] = []
   const pages: (ReturnType<typeof deferred<Page>> & {
-    editor: EditorSession
-    input: OpenEditorInput
+    editor: EditorServerSession
+    input: WorktreeRef
   })[] = []
-  const errors: (ReturnType<typeof deferred<void>> & {
-    input: SetWorktreeErrorInput
-  })[] = []
+  const opens: { input: WorktreeRef; finished: boolean; error?: string }[] = []
   const replies: {
     id: string
     error?: string
@@ -53,14 +50,14 @@ function fixture() {
   }
   const navigation = new EditorNavigation(
     {
-      openEditor: (input, signal) => {
+      companionStartEditorServer: (input, signal) => {
         // Deliberately allow replies after abort to exercise stale completions,
         // including replies already delivered when navigation is cancelled.
-        const request = { input, signal, ...deferred<EditorSession>() }
+        const request = { input, signal, ...deferred<EditorServerSession>() }
         starts.push(request)
         return request.promise
       },
-      chatViewReady: (id, error, activationAfter) => {
+      desktopOpenChatResponse: (id, error, activationAfter) => {
         replies.push({ id, error, activationAfter })
       },
     },
@@ -72,10 +69,13 @@ function fixture() {
       },
     },
     {
-      setWorktreeError: (input) => {
-        const request = { input, ...deferred<void>() }
-        errors.push(request)
-        return request.promise
+      startOpen: (input) => {
+        const open: (typeof opens)[number] = { input, finished: false }
+        opens.push(open)
+        return (error) => {
+          open.finished = true
+          if (error) open.error = error
+        }
       },
     },
   )
@@ -83,7 +83,9 @@ function fixture() {
     navigation,
     starts,
     pages,
-    errors,
+    opens,
+    failures: () =>
+      opens.flatMap(({ input, error }) => (error ? [{ ...input, error }] : [])),
     replies,
     page,
     activationReads: () => activationReads,
@@ -114,7 +116,7 @@ test('picker completion waits for its page without reading chat activation', asy
   await opening
   assert.equal(f.activationReads(), 0)
   assert.deepEqual(f.replies, [])
-  assert.deepEqual(f.errors, [])
+  assert.deepEqual(f.failures(), [])
 })
 
 for (const older of ['picker', 'chat'] as const) {
@@ -135,7 +137,7 @@ for (const older of ['picker', 'chat'] as const) {
           f.pages.map(({ input }) => input.path),
           ['newer'],
         )
-        assert.deepEqual(f.errors, [])
+        assert.deepEqual(f.failures(), [])
         assert.deepEqual(f.replies, [
           ...(older === 'chat'
             ? [
@@ -153,7 +155,7 @@ for (const older of ['picker', 'chat'] as const) {
       })
     }
 
-    test(`${newer} supersedes ${older} during page loading and suppresses obsolete failure`, async () => {
+    test(`${newer} supersedes ${older} during page loading and keeps the older page failure on its row`, async () => {
       const f = fixture()
       const first = f.open(older, 'older')
       f.starts[0].resolve(session)
@@ -163,7 +165,9 @@ for (const older of ['picker', 'chat'] as const) {
       await second
       f.pages[0].reject(new Error('Obsolete page failure'))
       await first
-      assert.deepEqual(f.errors, [])
+      assert.deepEqual(f.failures(), [
+        { ...worktree('older'), error: 'Obsolete page failure' },
+      ])
       assert.equal(
         f.replies.some(({ error }) => error?.includes('Obsolete')),
         false,
@@ -187,7 +191,7 @@ for (const phase of ['startup', 'page', 'activation'] as const) {
         f.pages[0].resolve({ chatActivation: () => activation.promise })
         await setImmediate()
       }
-      f.navigation.finishChat('a')
+      f.navigation.finishOpenChat('a')
       assert.equal(f.starts[0].signal?.aborted, true)
       if (outcome === 'failure') {
         const pending =
@@ -202,7 +206,13 @@ for (const phase of ['startup', 'page', 'activation'] as const) {
       else activation.resolve(baseline)
       await opening
       assert.equal(f.pages.length, phase === 'startup' ? 0 : 1)
-      assert.deepEqual(f.errors, [])
+      // Only the page's own failure still reaches its row.
+      assert.deepEqual(
+        f.failures(),
+        phase === 'page' && outcome === 'failure'
+          ? [{ ...worktree('a'), error: 'Obsolete failure' }]
+          : [],
+      )
       assert.deepEqual(f.replies, [])
     })
   }
@@ -215,14 +225,14 @@ for (const source of ['picker', 'chat'] as const) {
     await f.ready(0)
     await first
     const second = f.open(source, 'newer')
-    f.navigation.finishChat('older')
+    f.navigation.finishOpenChat('older')
     assert.equal(f.starts[1].signal?.aborted, false)
     await f.ready(1)
     await second
     assert.equal(f.pages[1].input.path, 'newer')
     if (source === 'chat') {
       assert.equal(f.replies.at(-1)?.activationAfter, baseline)
-      f.navigation.finishChat('newer')
+      f.navigation.finishOpenChat('newer')
       assert.equal(f.starts[1].signal?.aborted, true)
     }
   })
@@ -239,7 +249,10 @@ for (const source of ['picker', 'chat'] as const) {
     f.pages[0].reject(new Error('Disconnected page'))
     await first
     assert.equal(f.starts[0].signal?.aborted, true)
-    assert.deepEqual(f.errors, [])
+    // The open's owner drops a failure that outlives its connection.
+    assert.deepEqual(f.failures(), [
+      { ...worktree('old-connection'), error: 'Disconnected page' },
+    ])
     assert.equal(
       f.replies.some(({ error }) => error === 'Disconnected page'),
       false,
@@ -248,45 +261,88 @@ for (const source of ['picker', 'chat'] as const) {
 }
 
 for (const phase of ['startup', 'page'] as const) {
-  for (const persistence of ['success', 'failure'] as const) {
-    test(`picker reports ${phase} errors and handles persistence ${persistence}`, async () => {
-      const f = fixture()
-      const error = new Error('Original failure ' + 'x'.repeat(4096))
-      const opening = f.open('picker', 'a')
-      const completion =
-        persistence === 'failure'
-          ? assert.rejects(opening, (value) => value === error)
-          : opening
-      if (phase === 'startup') f.starts[0].reject(error)
-      else {
-        f.starts[0].resolve(session)
-        await setImmediate()
-        f.pages[0].reject(error)
-      }
+  test(`picker ends its open with a ${phase} failure`, async () => {
+    const f = fixture()
+    const opening = f.open('picker', 'a')
+    if (phase === 'startup') f.starts[0].reject(new Error('Original failure'))
+    else {
+      f.starts[0].resolve(session)
       await setImmediate()
-      assert.deepEqual(f.errors[0].input, {
-        ...worktree('a'),
-        error: error.message.slice(0, 4096),
-      })
-      if (persistence === 'success') f.errors[0].resolve()
-      else f.errors[0].reject(new Error('Could not save row error'))
-      await completion
-      assert.deepEqual(f.replies, [])
-    })
-  }
+      f.pages[0].reject(new Error('Original failure'))
+    }
+    await opening
+    assert.deepEqual(f.opens, [
+      { input: worktree('a'), finished: true, error: 'Original failure' },
+    ])
+    assert.deepEqual(f.replies, [])
+  })
 }
 
-test('supersession while saving a picker error suppresses a late local fallback', async () => {
+test('opening reports whether the page became ready', async () => {
   const f = fixture()
-  const first = f.open('picker', 'older')
-  f.starts[0].reject(new Error('Original startup failure'))
+  const loaded = f.open('picker', 'a')
+  await f.ready(0)
+  assert.equal(await loaded, true)
+
+  const failedStartup = f.open('picker', 'b')
+  f.starts[1].reject(new Error('Startup failed'))
+  assert.equal(await failedStartup, false)
+
+  const failedPage = f.open('picker', 'c')
+  f.starts[2].resolve(session)
   await setImmediate()
-  const second = f.open('chat', 'newer')
-  f.errors[0].reject(new Error('Could not save row error'))
-  await first
+  f.pages[1].reject(new Error('Page failed'))
+  assert.equal(await failedPage, false)
+
+  const supersededStartup = f.open('picker', 'd')
+  const supersededPage = f.open('picker', 'e')
+  f.starts[3].resolve(session)
+  assert.equal(await supersededStartup, false)
+  f.starts[4].resolve(session)
+  await setImmediate()
+  const newer = f.open('picker', 'f')
+  f.pages[2].resolve(f.page)
+  assert.equal(await supersededPage, true)
+  await f.ready(5)
+  assert.equal(await newer, true)
+})
+
+test('a superseded page failure still becomes its row error', async () => {
+  const f = fixture()
+  const older = f.open('chat', 'older')
+  f.starts[0].resolve(session)
+  await setImmediate()
+  const newer = f.open('picker', 'newer')
+  f.pages[0].reject(new Error('Page failed'))
+  await older
+  assert.deepEqual(f.failures(), [
+    { ...worktree('older'), error: 'Page failed' },
+  ])
+  assert.deepEqual(f.replies, [
+    {
+      id: 'older',
+      error: 'Navigation was superseded.',
+      activationAfter: undefined,
+    },
+  ])
   await f.ready(1)
-  await second
-  assert.equal(f.replies.at(-1)?.activationAfter, baseline)
+  await newer
+})
+
+test('every open is recorded when it starts and ended when it finishes, whatever its source', async () => {
+  const f = fixture()
+  const picker = f.open('picker', 'a')
+  assert.deepEqual(f.opens, [{ input: worktree('a'), finished: false }])
+  const chat = f.open('chat', 'b')
+  f.starts[0].resolve(session)
+  await picker
+  assert.deepEqual(f.opens, [
+    { input: worktree('a'), finished: true },
+    { input: worktree('b'), finished: false },
+  ])
+  await f.ready(1)
+  await chat
+  assert.equal(f.opens[1].finished, true)
 })
 
 test('chat reports startup and activation errors only to its source', async () => {
@@ -305,22 +361,18 @@ test('chat reports startup and activation errors only to its source', async () =
   })
   await activation
   assert.equal(f.replies.at(-1)?.error, 'Activation unavailable')
-  assert.deepEqual(f.errors, [])
+  assert.deepEqual(f.failures(), [])
 })
 
-test('chat page failure reaches the source without waiting for row persistence', async () => {
+test('chat page failure reaches both its source and its row', async () => {
   const f = fixture()
   const opening = f.open('chat', 'a')
   f.starts[0].resolve(session)
   await setImmediate()
   f.pages[0].reject(new Error('Page failed'))
   await opening
-  assert.deepEqual(f.errors[0].input, {
-    ...worktree('a'),
-    error: 'Page failed',
-  })
-  assert.equal(f.replies.at(-1)?.error, 'Page failed')
-  f.errors[0].reject(new Error('Could not save row error'))
-  await setImmediate()
-  assert.equal(f.replies.length, 1)
+  assert.deepEqual(f.failures(), [{ ...worktree('a'), error: 'Page failed' }])
+  assert.deepEqual(f.replies, [
+    { id: 'a', error: 'Page failed', activationAfter: undefined },
+  ])
 })

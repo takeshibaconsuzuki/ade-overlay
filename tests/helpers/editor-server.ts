@@ -16,7 +16,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { CompanionClient } from '../../src/main/companion-client.ts'
 import { FixtureRuntime } from '../fixtures/editor-runtime.ts'
-import { type EditorSession } from '../../src/shared/companion.ts'
+import { type EditorServerSession } from '../../src/shared/companion.ts'
 
 const execute = promisify(execFile)
 
@@ -122,6 +122,6 @@ export async function connect(t: TestContext, url: string) {
   return client
 }
 
-export function editorUrl(companion: string, session: EditorSession) {
+export function editorUrl(companion: string, session: EditorServerSession) {
   return new URL(editorPath(session.id), companion.replace('ws:', 'http:')).href
 }

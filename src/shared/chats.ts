@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { eventSpec, requestSpec } from './rpc.ts'
+import { eventSpec, messages, requestSpec } from './rpc.ts'
 import { terminalPasteSchema, pasteTargetSchema } from './paste-schema.ts'
 import { worktreeColorSchema } from './worktree-colors.ts'
 
@@ -33,28 +33,30 @@ export const chatSchema = z.object({
 const chatSnapshotSchema = z.object({
   chats: z.array(chatSchema),
 })
-export const chatRequests = {
-  paste: requestSpec('paste', terminalPasteSchema, z.null(), 5_000),
-  pasteTarget: requestSpec(
-    'paste-target',
+export const chatRequests = messages({
+  extensionPaste: requestSpec(terminalPasteSchema, z.null(), 5_000),
+  extensionGetPasteTarget: requestSpec(
     z.null(),
     pasteTargetSchema.nullable(),
     5_000,
   ),
-  activate: requestSpec('activate', chatIdSchema, z.null(), 35_000),
-}
-export const chatEvents = {
-  snapshot: eventSpec('snapshot', chatSnapshotSchema),
-  focus: eventSpec(
-    'focus',
+  companionOpenChat: requestSpec(chatIdSchema, z.null(), 35_000),
+  extensionOpenFile: requestSpec(
+    z.object({ path: z.string().min(1).max(4096) }),
+    z.null(),
+    10_000,
+  ),
+})
+export const chatEvents = messages({
+  extensionUpdateChats: eventSpec(chatSnapshotSchema),
+  extensionFocusChat: eventSpec(
     z.object({ id: chatIdSchema, terminalId: chatIdSchema }),
   ),
-  cancelFocus: eventSpec('cancel-focus', chatIdSchema),
-  focused: eventSpec(
-    'focused',
+  extensionCancelFocusChat: eventSpec(chatIdSchema),
+  extensionFocusChatResponse: eventSpec(
     z.object({ id: chatIdSchema, error: z.string().max(1024).optional() }),
   ),
-}
+})
 export type ProcessIdentity = z.infer<typeof processIdentitySchema>
 export type ChatActivity = z.infer<typeof chatActivitySchema>
 export type ChatReport = z.infer<typeof chatReportSchema>

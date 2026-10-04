@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import { WebSocket, WebSocketServer } from 'ws'
 import { socketPeer } from '../helpers/socket.ts'
 import { ChatService } from '../../src/server/chats/chat-service.ts'
-import { EditorManager } from '../../src/server/editors/editor-manager.ts'
+import { EditorServerManager } from '../../src/server/editors/editor-manager.ts'
 import { createEditorTransport } from '../../src/server/editors/editor-transport.ts'
 import { EditorRuntimeManager } from '../../src/server/editors/vscode-runtime.ts'
 import { SettingsSync } from '../../src/server/editors/settings-sync.ts'
@@ -242,18 +242,21 @@ test(
     })
     const id = 'a'.repeat(64)
     const token = 'b'.repeat(64)
-    t.mock.method(EditorManager.prototype, 'target', (editorId: string) =>
-      editorId === id
-        ? {
-            url: target,
-            token,
-            profile: { name: '', contents: '{}' },
-            settings: new SettingsSync(
-              join(tmpdir(), 'unused-settings.json'),
-              silentLogger,
-            ),
-          }
-        : undefined,
+    t.mock.method(
+      EditorServerManager.prototype,
+      'target',
+      (editorServerId: string) =>
+        editorServerId === id
+          ? {
+              url: target,
+              token,
+              profile: { name: '', contents: '{}' },
+              settings: new SettingsSync(
+                join(tmpdir(), 'unused-settings.json'),
+                silentLogger,
+              ),
+            }
+          : undefined,
     )
     const server = await startCompanionServer({
       config: { projects: [] },

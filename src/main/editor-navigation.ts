@@ -2,7 +2,7 @@ import type { CompanionClient } from './companion-client.ts'
 import type { CompanionState } from './companion-state.ts'
 import type { EditorPage } from './editor-page.ts'
 import type { EditorWindow } from './editor-window.ts'
-import type { OpenEditorInput } from '../shared/companion.ts'
+import type { WorktreeRef } from '../shared/companion.ts'
 
 interface Navigation {
   controller: AbortController
@@ -19,9 +19,12 @@ type NavigationWindow = {
 // request; companion startup and retained page lifetimes belong to their owners.
 export class EditorNavigation {
   private current?: Navigation
-  private readonly client: Pick<CompanionClient, 'openEditor' | 'chatViewReady'>
+  private readonly client: Pick<
+    CompanionClient,
+    'companionStartEditorServer' | 'desktopOpenChatResponse'
+  >
   private readonly window: NavigationWindow
-  private readonly state: Pick<CompanionState, 'setWorktreeError'>
+  private readonly state: Pick<CompanionState, 'startOpen'>
 
   constructor(
     client: EditorNavigation['client'],
@@ -33,12 +36,14 @@ export class EditorNavigation {
     this.state = state
   }
 
-  openWorktree(input: OpenEditorInput): Promise<void> {
+  // Resolves to whether the worktree's page became ready. An open superseded
+  // during startup never creates its page; one superseded later still loads.
+  openWorktree(input: WorktreeRef): Promise<boolean> {
     return this.navigate(input)
   }
 
-  openChat(id: string, input: OpenEditorInput): Promise<void> {
-    return this.navigate(input, id)
+  async openChat(id: string, input: WorktreeRef): Promise<void> {
+    await this.navigate(input, id)
   }
 
   // End the selection request without stopping shared editor startup or
@@ -46,10 +51,13 @@ export class EditorNavigation {
   cancelSelectionRequest(): void {
     const previous = this.invalidate()
     if (previous?.chatId !== undefined)
-      this.client.chatViewReady(previous.chatId, 'Navigation was superseded.')
+      this.client.desktopOpenChatResponse(
+        previous.chatId,
+        'Navigation was superseded.',
+      )
   }
 
-  finishChat(id: string): void {
+  finishOpenChat(id: string): void {
     if (this.current?.chatId === id) this.invalidate()
   }
 
@@ -61,48 +69,45 @@ export class EditorNavigation {
   }
 
   private async navigate(
-    input: OpenEditorInput,
+    input: WorktreeRef,
     chatId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.cancelSelectionRequest()
     const navigation: Navigation = { controller: new AbortController(), chatId }
     this.current = navigation
+    const finishOpen = this.state.startOpen(input)
     let phase: 'startup' | 'page' | 'activation' = 'startup'
+    let failure: string | undefined
     try {
-      const editor = await this.client.openEditor(
+      const editor = await this.client.companionStartEditorServer(
         input,
         navigation.controller.signal,
       )
-      if (this.current !== navigation) return
+      if (this.current !== navigation) return false
       phase = 'page'
       // This wait follows the retained page's lifetime, even if the selection
       // request ends. A newer request can select B while A keeps loading.
       const page = await this.window.open(editor, input)
-      if (this.current !== navigation || chatId === undefined) return
+      if (this.current !== navigation || chatId === undefined) return true
       phase = 'activation'
       const activationAfter = await page.chatActivation()
       if (this.current === navigation)
-        this.client.chatViewReady(chatId, undefined, activationAfter)
+        this.client.desktopOpenChatResponse(chatId, undefined, activationAfter)
+      return true
     } catch (error) {
-      if (this.current !== navigation) return
       const message = error instanceof Error ? error.message : String(error)
-      const report = () =>
-        this.state.setWorktreeError({ ...input, error: message.slice(0, 4096) })
-      if (chatId !== undefined) {
-        // Startup errors belong to the server. Persist page failures without
-        // delaying the source extension's failure reply.
-        if (phase === 'page') void report().catch(() => {})
-        this.client.chatViewReady(chatId, message)
-      } else {
-        try {
-          await report()
-        } catch {
-          // IPC provides a local row error only if the companion cannot own it
-          // and this request has not been superseded while saving the error.
-          if (this.current === navigation) throw error
-        }
-      }
+      const superseded = this.current !== navigation
+      // A superseded startup wait only ended; its outcome belongs to the
+      // server. A page that fails in the background still fails its row.
+      if (superseded && phase !== 'page') return false
+      if (!superseded && chatId !== undefined)
+        this.client.desktopOpenChatResponse(chatId, message)
+      // Only this desktop observed the failure, so it stays this desktop's row
+      // error. A chat's startup and activation errors go only to its source.
+      if (chatId === undefined || phase === 'page') failure = message
+      return false
     } finally {
+      finishOpen(failure)
       // Chat navigation remains current through the terminal acknowledgement.
       if (chatId === undefined && this.current === navigation)
         this.current = undefined

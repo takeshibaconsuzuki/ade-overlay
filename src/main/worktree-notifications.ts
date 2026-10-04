@@ -1,6 +1,6 @@
 import type { NotificationConstructorOptions } from 'electron'
 import type {
-  OpenEditorInput,
+  WorktreeRef,
   Worktree,
   WorktreeSnapshot,
 } from '../shared/companion.ts'
@@ -18,7 +18,7 @@ interface WorktreeNotification {
 
 // Paths in accepted snapshots are already canonicalized by the companion,
 // whose platform may differ from the desktop's.
-const key = (worktree: OpenEditorInput): string =>
+const key = (worktree: WorktreeRef): string =>
   JSON.stringify([worktree.project, worktree.path])
 
 export class WorktreeNotifications {
@@ -27,7 +27,7 @@ export class WorktreeNotifications {
   private readonly create: (
     options: NotificationConstructorOptions,
   ) => WorktreeNotification | undefined
-  private readonly open: (input: OpenEditorInput) => Promise<unknown>
+  private readonly open: (input: WorktreeRef) => Promise<unknown>
   private readonly onError: (error: unknown) => void
 
   constructor(

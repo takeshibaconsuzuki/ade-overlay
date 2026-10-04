@@ -26,6 +26,8 @@ const companion: CompanionAPI = {
     ipcRenderer.invoke(companionChannels.openEditor, input),
   stopEditor: (input) =>
     ipcRenderer.invoke(companionChannels.stopEditor, input),
+  openBootstrapLog: (input) =>
+    ipcRenderer.invoke(companionChannels.openBootstrapLog, input),
   onState: (callback) => {
     const listener = (_event: IpcRendererEvent, state: CompanionState): void =>
       callback(state)

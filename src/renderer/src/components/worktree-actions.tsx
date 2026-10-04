@@ -312,11 +312,13 @@ export function WorktreeActions({
   connected,
   opening,
   onStopEditor,
+  onOpenBootstrapLog,
 }: {
   worktree: Worktree
   connected: boolean
   opening: boolean
   onStopEditor: () => void
+  onOpenBootstrapLog: () => void
 }) {
   const { open, busy, error, changeOpen, submit } = useSubmission()
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -352,11 +354,25 @@ export function WorktreeActions({
   }
 
   const reason = `Actions for ${worktree.branch ?? worktree.path}`
-  const deletion = worktree.main
-    ? 'The main worktree cannot be deleted'
-    : worktree.locked
-      ? 'Unlock this worktree in Git before deleting it'
+  const unavailable = !connected
+    ? 'Reconnect to the companion first'
+    : worktree.operation
+      ? 'Wait for the current operation to finish'
       : undefined
+  const deletion =
+    unavailable ??
+    (worktree.missing
+      ? 'This worktree does not exist'
+      : worktree.main
+        ? 'The main worktree cannot be deleted'
+        : worktree.locked
+          ? 'Unlock this worktree in Git before deleting it'
+          : undefined)
+  const bootstrapLog =
+    unavailable ??
+    (worktree.bootstrapFailed && !worktree.missing
+      ? undefined
+      : 'This worktree has no bootstrap error')
   const branchDeletion =
     deletion ?? (worktree.branch ? undefined : 'This worktree has no branch')
 
@@ -367,8 +383,16 @@ export function WorktreeActions({
         items={[
           {
             label: 'Stop VS Code server',
-            disabled: worktree.editor !== 'running' || opening,
+            disabled:
+              !!unavailable || worktree.editorServer !== 'running' || opening,
+            title: unavailable,
             onSelect: onStopEditor,
+          },
+          {
+            label: 'Open bootstrap log',
+            disabled: !!bootstrapLog || opening,
+            title: bootstrapLog,
+            onSelect: onOpenBootstrapLog,
           },
           {
             label: 'Delete worktree',
@@ -390,7 +414,6 @@ export function WorktreeActions({
           ref={triggerRef}
           tone="secondary"
           className="worktree-menu-trigger"
-          disabled={!connected || !!worktree.operation || worktree.missing}
           title={reason}
           aria-label={reason}
         >

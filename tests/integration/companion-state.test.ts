@@ -53,7 +53,7 @@ async function fixture(t: TestContext) {
         request.acknowledge({ ok: true, value }),
       fail: (error: string) => request.acknowledge({ ok: false, error }),
       push: (value: WorktreeSnapshot) =>
-        request.socket.emit('worktrees:updated', value),
+        request.socket.emit('desktopUpdateWorktrees', value),
     }
   }
   const wait = async (predicate: (value: DesktopCompanionState) => boolean) => {
@@ -73,7 +73,7 @@ test(
     const { state, next, wait } = await fixture(t)
     const accepted: number[] = []
     state.on('snapshot', (value) => accepted.push(value.revision))
-    const initial = await next('worktrees:list')
+    const initial = await next('companionListWorktrees')
     assert.equal(state.getCurrent().loading, true)
     initial.push(snapshot(5))
     initial.reply(snapshot(4))
@@ -81,7 +81,7 @@ test(
     assert.equal(state.getCurrent().snapshot?.revision, 5)
 
     const refresh = state.refreshWorktrees()
-    const refreshing = await next('worktrees:refresh')
+    const refreshing = await next('companionRefreshWorktrees')
     refreshing.push(snapshot(7))
     refreshing.push(snapshot(6))
     refreshing.reply(snapshot(7))
@@ -95,15 +95,15 @@ test(
       baseBranch: 'main',
       branch: '',
     })
-    ;(await next('worktrees:create')).reply(snapshot(8))
+    ;(await next('companionCreateWorktree')).reply(snapshot(8))
     assert.equal(await create, undefined)
     const remove = state.deleteWorktree({ project: 'project', path: 'branch' })
-    const deleting = await next('worktrees:delete')
+    const deleting = await next('companionDeleteWorktree')
     deleting.push(snapshot(9))
     deleting.reply(snapshot(9))
     assert.equal(await remove, undefined)
     const clear = state.setWorktreeError({ project: 'project', path: 'branch' })
-    ;(await next('worktrees:set-error')).reply(snapshot(10))
+    ;(await next('companionSetWorktreeError')).reply(snapshot(10))
     assert.equal(await clear, undefined)
     assert.deepEqual(accepted, [5, 7, 8, 9, 10])
     assert.deepEqual(state.getCurrent().snapshot, snapshot(10))
@@ -115,7 +115,7 @@ test(
   { timeout: 5_000 },
   async (t) => {
     const { client, state, next, wait } = await fixture(t)
-    const initial = await next('worktrees:list')
+    const initial = await next('companionListWorktrees')
     initial.reply(snapshot(20))
     await wait((value) => !value.loading)
     // Hold an already-resolved transport reply across replacement of its
@@ -128,15 +128,15 @@ test(
     const release = new Promise<void>((resolve) => {
       releaseReply = resolve
     })
-    const refresh = client.refreshWorktrees.bind(client)
-    t.mock.method(client, 'refreshWorktrees', async () => {
+    const refresh = client.companionRefreshWorktrees.bind(client)
+    t.mock.method(client, 'companionRefreshWorktrees', async () => {
       const result = await refresh()
       markReceived()
       await release
       return result
     })
     const pendingRefresh = state.refreshWorktrees()
-    const oldRefresh = await next('worktrees:refresh')
+    const oldRefresh = await next('companionRefreshWorktrees')
     oldRefresh.reply(snapshot(99))
     await received
     const pendingCreate = assert.rejects(
@@ -148,10 +148,10 @@ test(
       }),
       /Disconnected/,
     )
-    await next('worktrees:create')
+    await next('companionCreateWorktree')
     client.connect()
     assert.equal(state.getCurrent().snapshot, null)
-    const reconnect = await next('worktrees:list')
+    const reconnect = await next('companionListWorktrees')
     assert.equal(state.getCurrent().loading, true)
     releaseReply()
     await Promise.all([pendingRefresh, pendingCreate])
@@ -164,7 +164,7 @@ test(
     assert.equal(state.getCurrent().error, '')
 
     reconnect.socket.conn.close()
-    const automatic = await next('worktrees:list')
+    const automatic = await next('companionListWorktrees')
     automatic.reply(snapshot(1))
     await wait((value) => !value.loading)
     assert.equal(state.getCurrent().snapshot?.revision, 1)
@@ -176,16 +176,16 @@ test(
   { timeout: 5_000 },
   async (t) => {
     const { state, next, wait } = await fixture(t)
-    const initial = await next('worktrees:list')
+    const initial = await next('companionListWorktrees')
     initial.fail('Initial list failed')
     await wait((value) => !value.loading)
     assert.equal(state.getCurrent().error, 'Initial list failed')
     assert.equal(state.getCurrent().snapshot, null)
 
     const older = state.refreshWorktrees()
-    const olderRequest = await next('worktrees:refresh')
+    const olderRequest = await next('companionRefreshWorktrees')
     const newer = state.refreshWorktrees()
-    const newerRequest = await next('worktrees:refresh')
+    const newerRequest = await next('companionRefreshWorktrees')
     assert.equal(state.getCurrent().error, '')
     olderRequest.fail('Superseded failure')
     await older
@@ -196,7 +196,7 @@ test(
     assert.equal(state.getCurrent().loading, false)
 
     const failed = state.refreshWorktrees()
-    ;(await next('worktrees:refresh')).fail('Refresh failed')
+    ;(await next('companionRefreshWorktrees')).fail('Refresh failed')
     await failed
     assert.equal(state.getCurrent().error, 'Refresh failed')
     assert.equal(state.getCurrent().snapshot?.revision, 2)
@@ -204,8 +204,84 @@ test(
       state.deleteWorktree({ project: 'project', path: 'main' }),
       /Protected/,
     )
-    ;(await next('worktrees:delete')).fail('Protected worktree')
+    ;(await next('companionDeleteWorktree')).fail('Protected worktree')
     await rejected
     assert.equal(state.getCurrent().snapshot?.revision, 2)
+  },
+)
+
+test(
+  'main owns per-worktree local state and publishes it merged onto rows',
+  { timeout: 5_000 },
+  async (t) => {
+    const { client, state, next, wait } = await fixture(t)
+    const row = (path: string, error?: string) => ({
+      project: 'project',
+      path,
+      branch: path,
+      main: false,
+      locked: false,
+      prunable: false,
+      editorServer: 'stopped' as const,
+      ...(error && { error }),
+    })
+    ;(await next('companionListWorktrees')).reply({
+      ...snapshot(1),
+      worktrees: [row('a', 'Companion error'), row('b')],
+    })
+    await wait((value) => value.snapshot?.revision === 1)
+    const rows = () => state.getCurrent().snapshot!.worktrees
+    assert.deepEqual(rows(), [row('a', 'Companion error'), row('b')])
+
+    const published: DesktopCompanionState[] = []
+    state.on('changed', (value) => published.push(value))
+    const a = { project: 'project', path: 'a' }
+    const b = { project: 'project', path: 'b' }
+    const finishA = state.startOpen(a)
+    const finishB = state.startOpen(b)
+    assert.equal(published.length, 2)
+    assert.deepEqual(published.at(-1), state.getCurrent())
+    assert.equal(rows()[0].opening, true)
+    assert.equal(rows()[1].opening, true)
+    assert.ok(rows()[1].lastOpenedAt! > rows()[0].lastOpenedAt!)
+    const reopened = state.startOpen(a)
+    assert.ok(rows()[0].lastOpenedAt! > rows()[1].lastOpenedAt!)
+    finishA('First open failed')
+    assert.equal(rows()[0].opening, true, 'opening lasts until every open ends')
+    assert.equal(rows()[0].error, 'First open failed')
+    reopened('Page failed')
+    finishB()
+    assert.equal(rows()[0].opening, undefined)
+    assert.equal(rows()[1].opening, undefined)
+    assert.equal(rows()[0].error, 'Page failed', 'an open failure stays local')
+    assert.equal(rows()[1].error, undefined)
+
+    state.setLocalError(a, 'Local error')
+    assert.equal(rows()[0].error, 'Local error')
+    state.setLocalError(a)
+    assert.equal(rows()[0].error, 'Companion error')
+    await state.rowRequest(b, async () => {
+      throw new Error('Stop failed')
+    })
+    assert.equal(rows()[1].error, 'Stop failed')
+
+    const reopening = state.startOpen(b)
+    const recency = rows()[1].lastOpenedAt
+    client.stop()
+    await wait((value) => value.status.state !== 'connected')
+    client.connect()
+    ;(await next('companionListWorktrees')).reply({
+      ...snapshot(0),
+      worktrees: [row('b')],
+    })
+    await wait((value) => value.snapshot?.revision === 0)
+    assert.deepEqual(
+      rows(),
+      [{ ...row('b'), lastOpenedAt: recency }],
+      'a new connection keeps recency and drops opens, errors and gone rows',
+    )
+    reopening('Disconnected page')
+    assert.equal(rows()[0].opening, undefined)
+    assert.equal(rows()[0].error, undefined)
   },
 )

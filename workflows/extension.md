@@ -24,7 +24,7 @@ sequenceDiagram
 - The control credential enters only the extension host and is removed from its inherited environment before extension-spawned processes can receive it. Provider terminals receive activity-reporting access instead.
 - A new extension activation replaces older control connections; a reconnect from an obsolete activation cannot reclaim ownership.
 - The extension automatically reconnects after connection loss while it remains active.
-- Sidebar actions [launch terminals](#launch-a-terminal) or request [chat navigation](chats.md#navigate-to-a-chat). Choosing a provider both remembers the choice and launches it.
+- Sidebar actions [launch terminals](#launch-a-terminal) or request [chat opening](chats.md#open-a-chat). Choosing a provider both remembers the choice and launches it.
 - Extension deactivation stops its observers and connection without killing workspace terminals. Terminal restoration and placement ownership have separate lifetimes.
 
 ## Update the sidebar
@@ -127,5 +127,5 @@ flowchart TD
     Show --> Expire
 ```
 
-- Waiting for restoration does not hold the workbench queue. The focus acknowledgement completes the companion's [cross-worktree navigation](chats.md#navigate-to-a-chat).
+- Waiting for restoration does not hold the workbench queue. The focus acknowledgement completes the companion's [chat open](chats.md#open-a-chat).
 - A newer request or cancellation prevents an older request from subsequently taking focus.

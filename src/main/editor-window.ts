@@ -16,8 +16,8 @@ import { EditorSettingsSync } from './settings-sync.ts'
 import { EditorPage } from './editor-page.ts'
 import { editorPath } from '../shared/companion.ts'
 import type {
-  EditorSession,
-  OpenEditorInput,
+  EditorServerSession,
+  WorktreeRef,
   WorktreeSnapshot,
 } from '../shared/companion.ts'
 
@@ -25,7 +25,7 @@ interface EditorView {
   view: WebContentsView
   token: string
   page: EditorPage
-  worktree: OpenEditorInput
+  worktree: WorktreeRef
   forget: () => void
 }
 
@@ -46,9 +46,12 @@ export class EditorWindow {
   constructor(
     companionUrl: string,
     private readonly pasteBridge?: {
-      reservePaste(editorId: string, documentId: string): Promise<string | null>
-      paste(
-        editorId: string,
+      companionReservePaste(
+        editorServerId: string,
+        documentId: string,
+      ): Promise<string | null>
+      companionPaste(
+        editorServerId: string,
         documentId: string,
         reservationId: string,
         items: PastePart[],
@@ -62,8 +65,8 @@ export class EditorWindow {
   // Select the view before waiting for page readiness. Another open can select
   // a different view during that wait; completing this load never reselects it.
   async open(
-    editor: EditorSession,
-    worktree: OpenEditorInput,
+    editor: EditorServerSession,
+    worktree: WorktreeRef,
   ): Promise<EditorPage> {
     const path = editorPath(editor.id)
     const url = new URL(path, this.origin)
@@ -132,9 +135,9 @@ export class EditorWindow {
               view.webContents.focus()
             },
             (documentId) =>
-              this.pasteBridge!.reservePaste(editor.id, documentId),
+              this.pasteBridge!.companionReservePaste(editor.id, documentId),
             (documentId, reservationId, items) =>
-              this.pasteBridge!.paste(
+              this.pasteBridge!.companionPaste(
                 editor.id,
                 documentId,
                 reservationId,

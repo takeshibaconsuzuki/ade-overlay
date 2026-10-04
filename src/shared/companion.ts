@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { eventSpec, requestSpec } from './rpc.ts'
+import { eventSpec, messages, requestSpec } from './rpc.ts'
 import { chatIdSchema, chatSchema } from './chats.ts'
 import { pasteItemsSchema } from './paste-schema.ts'
 import { worktreeColorSchema } from './worktree-colors.ts'
@@ -24,7 +24,7 @@ export const createWorktreeInputSchema = z.object({
   branch: argumentSchema,
   path: textSchema,
 })
-export const openEditorInputSchema = z.object({
+export const worktreeRefSchema = z.object({
   project: textSchema,
   path: textSchema,
 })
@@ -42,14 +42,14 @@ const worktreePathTemplatesSchema = z.object({
     }),
   ),
 })
-export const deleteWorktreeInputSchema = openEditorInputSchema.extend({
+export const deleteWorktreeInputSchema = worktreeRefSchema.extend({
   deleteBranch: z.boolean().optional(),
   force: z.boolean().optional(),
 })
-export const setWorktreeErrorInputSchema = openEditorInputSchema.extend({
+export const setWorktreeErrorInputSchema = worktreeRefSchema.extend({
   error: z.string().max(4096).optional(),
 })
-const editorSessionSchema = z.object({
+const editorServerSessionSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
   accessToken: z.string().regex(/^[a-f0-9]{64}$/),
 })
@@ -63,8 +63,8 @@ const worktreeSchema = z.object({
   main: z.boolean(),
   locked: z.boolean(),
   prunable: z.boolean(),
-  editor: z.enum(['stopped', 'starting', 'running']),
-  editorDetail: z.string().max(512).optional(),
+  editorServer: z.enum(['stopped', 'starting', 'running', 'stopping']),
+  editorServerDetail: z.string().max(512).optional(),
   color: worktreeColorSchema.optional(),
   operation: z.enum(['creating', 'deleting']).optional(),
   error: z.string().optional(),
@@ -76,6 +76,7 @@ const worktreeSchema = z.object({
     })
     .optional(),
   missing: z.boolean().optional(),
+  bootstrapFailed: z.boolean().optional(),
 })
 const worktreeSnapshotSchema = z.object({
   revision: z.int().nonnegative(),
@@ -83,11 +84,10 @@ const worktreeSnapshotSchema = z.object({
   worktrees: z.array(worktreeSchema),
 })
 
-export const companionRequests = {
-  paste: requestSpec(
-    'editor:paste',
+export const companionRequests = messages({
+  companionPaste: requestSpec(
     z.object({
-      editorId: editorSessionSchema.shape.id,
+      editorServerId: editorServerSessionSchema.shape.id,
       documentId: z.uuid(),
       reservationId: z.uuid(),
       items: pasteItemsSchema,
@@ -95,88 +95,81 @@ export const companionRequests = {
     z.null(),
     25_000,
   ),
-  reservePaste: requestSpec(
-    'editor:reserve-paste',
-    z.object({ editorId: editorSessionSchema.shape.id, documentId: z.uuid() }),
+  companionReservePaste: requestSpec(
+    z.object({
+      editorServerId: editorServerSessionSchema.shape.id,
+      documentId: z.uuid(),
+    }),
     z.uuid().nullable(),
     8_000,
   ),
-  activateChat: requestSpec('chat:activate', chatIdSchema, z.null(), 35_000),
-  list: requestSpec('worktrees:list', z.null(), worktreeSnapshotSchema, 5_000),
-  branches: requestSpec(
-    'worktrees:branches',
+  companionOpenChat: requestSpec(chatIdSchema, z.null(), 35_000),
+  companionOpenBootstrapLog: requestSpec(worktreeRefSchema, z.null(), 30_000),
+  companionListWorktrees: requestSpec(z.null(), worktreeSnapshotSchema, 5_000),
+  companionListBranches: requestSpec(
     z.object({ project: textSchema }),
     z.array(worktreeBranchSchema),
     5_000,
   ),
-  pathTemplates: requestSpec(
-    'worktrees:path-templates',
+  companionGetPathTemplates: requestSpec(
     z.null(),
     worktreePathTemplatesSchema,
     5_000,
   ),
-  refresh: requestSpec(
-    'worktrees:refresh',
+  companionRefreshWorktrees: requestSpec(
     z.null(),
     worktreeSnapshotSchema,
     120_000,
   ),
-  create: requestSpec(
-    'worktrees:create',
+  companionCreateWorktree: requestSpec(
     createWorktreeInputSchema,
     worktreeSnapshotSchema,
     120_000,
   ),
-  delete: requestSpec(
-    'worktrees:delete',
+  companionDeleteWorktree: requestSpec(
     deleteWorktreeInputSchema,
     worktreeSnapshotSchema,
     120_000,
   ),
-  setError: requestSpec(
-    'worktrees:set-error',
+  companionSetWorktreeError: requestSpec(
     setWorktreeErrorInputSchema,
     worktreeSnapshotSchema,
     120_000,
   ),
-  openEditor: requestSpec(
-    'editor:open',
-    openEditorInputSchema,
-    editorSessionSchema,
+  companionStartEditorServer: requestSpec(
+    worktreeRefSchema,
+    editorServerSessionSchema,
     180_000,
   ),
-  stopEditor: requestSpec(
-    'editor:stop',
-    openEditorInputSchema,
+  companionStopEditorServer: requestSpec(
+    worktreeRefSchema,
     worktreeSnapshotSchema,
     120_000,
   ),
-}
-export const companionEvents = {
-  chatIdle: eventSpec('chat:idle', chatSchema),
-  hello: eventSpec('hello', z.object({ protocolVersion: z.int() })),
-  worktrees: eventSpec('worktrees:updated', worktreeSnapshotSchema),
-  activateChat: eventSpec(
-    'chat:activate',
-    z.object({ id: idSchema, input: openEditorInputSchema }),
+})
+export const companionEvents = messages({
+  desktopNotifyChatIdle: eventSpec(chatSchema),
+  hello: eventSpec(z.object({ protocolVersion: z.int() })),
+  desktopUpdateWorktrees: eventSpec(worktreeSnapshotSchema),
+  desktopOpenChat: eventSpec(
+    z.object({ id: idSchema, input: worktreeRefSchema }),
   ),
-  finishChat: eventSpec('chat:finished', idSchema),
-  viewReady: eventSpec(
-    'chat:view-ready',
+  desktopFinishOpenChat: eventSpec(idSchema),
+  desktopOpenChatResponse: eventSpec(
     z.object({
       id: idSchema,
       error: z.string().max(1024).optional(),
       activationAfter: z.uuid().nullable(),
     }),
   ),
-}
+})
 
 export type CreateWorktreeInput = z.infer<typeof createWorktreeInputSchema>
 export type WorktreePathTemplates = z.infer<typeof worktreePathTemplatesSchema>
 export type DeleteWorktreeInput = z.infer<typeof deleteWorktreeInputSchema>
-export type OpenEditorInput = z.infer<typeof openEditorInputSchema>
+export type WorktreeRef = z.infer<typeof worktreeRefSchema>
 export type SetWorktreeErrorInput = z.infer<typeof setWorktreeErrorInputSchema>
-export type EditorSession = z.infer<typeof editorSessionSchema>
+export type EditorServerSession = z.infer<typeof editorServerSessionSchema>
 export type Worktree = z.infer<typeof worktreeSchema>
 export type WorktreeSnapshot = z.infer<typeof worktreeSnapshotSchema>
 const companionUrlSchema = z

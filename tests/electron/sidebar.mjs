@@ -209,7 +209,7 @@ app
     await until(
       "window.actions.filter(a=>a.type==='select-provider' && a.provider==='claude').length===2",
     )
-    stage = 'launch and activation actions'
+    stage = 'launch and open actions'
     await run(
       "document.querySelector('.chat-provider-button > button').click(); document.querySelector('.chat-provider-button > button').click(); document.querySelector('.chat-launchers > button').click(); document.querySelector('.chat-row').click()",
     )
@@ -219,7 +219,7 @@ app
       2,
     )
     assert.ok(actions.some((a) => a.type === 'launch' && a.kind === 'terminal'))
-    assert.ok(actions.some((a) => a.type === 'activate' && a.chatId === 'one'))
+    assert.ok(actions.some((a) => a.type === 'open' && a.chatId === 'one'))
     stage = 'content updates and safe rendering'
     state.chats[2].title = 'Loaded title'
     state.chats[2].message = '<img src=x onerror="window.injected=true">'

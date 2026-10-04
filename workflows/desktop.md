@@ -22,7 +22,7 @@ flowchart TD
     Reset --> Connect
     Automatic --> Connect
     Connect --> Hello[Wait for compatible companion handshake]
-    Hello --> Fetch[Mark connected and request worktrees:list]
+    Hello --> Fetch[Mark connected and request companionListWorktrees]
     Fetch --> Accept[Accept current shared state]
     Accept --> Ready([Picker shows available worktrees])
     Hello --> Settings[Request settings synchronization for retained pages]
@@ -42,13 +42,15 @@ flowchart TD
 flowchart TD
     Incoming([Worktree reply or broadcast arrives]) --> Store[Main accepts only newer state from its current connection]
     Store --> Reconcile[Reconcile retained pages with accepted membership]
-    Reconcile --> Publish[Publish state to the picker]
+    Reconcile --> Publish[Merge this desktop's local worktree state onto the rows and publish to the picker]
     Publish --> Visible([Picker and retained views reflect the same membership])
 ```
 
 - Connection and refresh requests read through main; command completion does not return snapshots to the renderer.
+- Main keeps local state per worktree, never shared with the companion or other desktops: when it was last opened, whether main is opening it now, and an error only this desktop observed. A change to it publishes again. A new connection keeps the open times and clears the rest.
+- The picker holds no worktree data of its own. It filters and sorts the published rows, and row actions report failures through them.
 - Reconciliation removes pages for absent worktrees. A stopped editor status alone does not dispose its page.
-- Shared row state survives desktop reconnection because the companion owns it. [Worktree membership](worktrees.md#refresh-and-apply-membership) remains separate from operation and editor status.
+- Shared row state survives desktop reconnection because the companion owns it. [Worktree membership](worktrees.md#rescan-a-project) remains separate from operation and editor status.
 
 ## Toggle the worktree picker
 
@@ -78,11 +80,11 @@ sequenceDiagram
     participant Main as Desktop navigation
     participant Server as Companion
     participant Window as Editor window
-    User->>Picker: Activate an available worktree
+    User->>Picker: Open an available worktree
     Picker->>Main: openEditor through trusted preload bridge
     Main->>Main: Supersede the previous selection request
-    Main->>Server: editor:open, wait for editor preparation
-    Note over Server: Git queue registers startup, then releases<br/>it during readiness waits
+    Main->>Server: companionStartEditorServer, wait for editor preparation
+    Note over Server: Independent of creations, deletions, and<br/>opens of other worktrees
     Server-->>Main: Ready editor session and credential
     Main->>Window: Select editor page, wait for document<br/>readiness
     Window-->>Main: Page ready
@@ -91,9 +93,10 @@ sequenceDiagram
 ```
 
 - The server performs [editor preparation](editors.md#prepare-an-editor); the window performs [page selection](editor-pages.md#select-an-editor-page). Opening completes after both.
-- Search filters basename and branch. Pointer or keyboard activation skips disconnected, prunable, missing, and mutating worktrees. Progress updates preserve a still-valid selection; changed search results reset it.
-- Create and delete dialogs suspend picker interaction and invoke [worktree mutations](worktrees.md#schedule-a-mutation). Dismissing a dialog does not cancel an accepted server operation.
-- An opening failure becomes a companion row error; if main cannot store it there, the picker retains a local error. Opening an editor does not clear an existing error.
+- Search filters basename and branch. Pointer or keyboard opening skips disconnected, prunable, missing, and mutating worktrees. Progress updates preserve a still-valid selection; changed search results reset it.
+- Create and delete dialogs suspend picker interaction and invoke worktree [creation](worktrees.md#create-a-worktree) and [deletion](worktrees.md#delete-a-worktree). Dismissing a dialog does not cancel an accepted server operation.
+- The companion's row holds only errors shared by every desktop, such as its own editor startup failures. A failure only this desktop observed stays that worktree's local error: a failed open request or page, and failed stop, clear-error, and bootstrap-log requests. Opening an editor does not clear an existing error.
+- Dialogs and row menus take keyboard and pointer input from the picker while open. A dialog also keeps focus when the picker is shown again; a menu closes when the picker window loses focus, so showing the picker focuses the search.
 
 ## Notify when worktree creation finishes
 
@@ -106,7 +109,7 @@ sequenceDiagram
     State->>Main: Creating row finishes, after bootstrap and membership refresh
     Main->>OS: Show creation success or failure with path and any error
     User->>OS: Click notification
-    OS->>Main: Activate the worktree
+    OS->>Main: Open the worktree
     Main->>State: Check current membership and availability
     alt Worktree exists and is available
         Main->>Main: Open through shared editor navigation
@@ -129,12 +132,12 @@ sequenceDiagram
     participant OS as Desktop notifications
     actor User
     Chats->>Chats: Accept working to idle for the same chat
-    Chats-->>Main: chat:idle with title and message
+    Chats-->>Main: desktopNotifyChatIdle with title and message
     Main->>OS: Show notification
     User->>OS: Click notification
     OS->>Main: Open the notified chat
-    Main->>Chats: chat:activate, wait for terminal focus
-    Note over Chats,Main: Run shared chat navigation
+    Main->>Chats: companionOpenChat, wait for terminal focus
+    Note over Chats,Main: Run the shared chat open
     Chats-->>Main: Terminal focused or navigation failed
     Main-->>User: Chat is visible, or show opening error
 ```
@@ -142,7 +145,7 @@ sequenceDiagram
 - Notifications use the chat title and latest message, falling back to the worktree path when no message is available. They also appear while the desktop is focused, subject to operating-system notification settings.
 - Only accepted working-to-idle transitions notify. Initial idle reports, repeated idle reports, title updates, session replacement, and process removal do not. Transitions while disconnected are not replayed.
 - Each chat retains at most one notification. A later notification replaces it; clicking, disconnecting, or quitting clears it.
-- Clicks use [chat navigation](chats.md#navigate-to-a-chat), including terminal acknowledgement and stale-chat errors. Notification navigation requires exactly one connected desktop, as sidebar navigation does.
+- Clicks use [chat opening](chats.md#open-a-chat), including terminal acknowledgement and stale-chat errors. Notification navigation requires exactly one connected desktop, as sidebar navigation does.
 
 ## Supersede navigation
 
@@ -155,8 +158,8 @@ flowchart TD
     Continue --> Done([Current visible view remains until another selection changes it])
 ```
 
-- Picker and [chat navigation](chats.md#navigate-to-a-chat) share this coordinator. Chat requests remain current until the companion reports terminal completion.
-- A page that finishes loading after another page is selected never reselects itself.
+- Picker and [chat opening](chats.md#open-a-chat) share this coordinator. Chat requests remain current until the companion reports terminal completion.
+- A page that finishes loading after another page is selected never reselects itself. Its row shows as opening until then, and a page failure still becomes that row's local error unless the connection has changed.
 
 ## Close a window
 
@@ -167,7 +170,7 @@ flowchart TD
     Hide --> Retained([Picker stays open, editor pages stay retained])
     Which -->|Picker or application quit| Stop[Stop settings synchronization and close every editor page]
     Stop --> Disconnect[Disconnect from the companion]
-    Disconnect --> Exit([Desktop exits, companion editor processes keep running])
+    Disconnect --> Exit([Desktop exits, companion editor servers keep running])
 ```
 
 - Desktop shutdown does not wait for editor unload approval, saves, backups, or settings synchronization. Recent unsaved browser state can be lost.

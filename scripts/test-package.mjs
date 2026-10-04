@@ -257,7 +257,9 @@ try {
       await delay(100)
     }
   }
-  const reply = await socket.timeout(5000).emitWithAck('worktrees:list', null)
+  const reply = await socket
+    .timeout(5000)
+    .emitWithAck('companionListWorktrees', null)
   assert.equal(reply.ok, true)
   assert.ok(Array.isArray(reply.value.worktrees))
   assert.equal(

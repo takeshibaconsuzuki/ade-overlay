@@ -35,7 +35,7 @@ const tree = (path) => ({
   main: path === 'a',
   locked: false,
   prunable: false,
-  editor: 'running',
+  editorServer: 'running',
 })
 let snapshot = {
   revision: 1,
@@ -48,7 +48,6 @@ let connections = 0
 let client
 const chatReplies = new Map()
 const rowErrors = []
-let rejectRowError = false
 let rejectEditorOpen = false
 let holdEditorOpen = false
 let heldEditorOpen
@@ -76,19 +75,17 @@ sockets.on('connection', (socket) => {
   client = socket
   connections++
   socket.emit('hello', { protocolVersion: 1 })
-  socket.on('chat:view-ready', (message) =>
+  socket.on('desktopOpenChatResponse', (message) =>
     chatReplies.set(message.id, message),
   )
-  for (const command of ['worktrees:list', 'worktrees:refresh'])
+  for (const command of ['companionListWorktrees', 'companionRefreshWorktrees'])
     socket.on(command, (_input, ack) => {
       const reply = (value) => ack({ ok: true, value })
       if (holdLists) heldList = reply
       else reply(snapshot)
     })
-  socket.on('worktrees:set-error', (input, ack) => {
+  socket.on('companionSetWorktreeError', (input, ack) => {
     rowErrors.push(input)
-    if (rejectRowError)
-      return ack({ ok: false, error: 'Could not save row error' })
     snapshot = {
       ...snapshot,
       revision: snapshot.revision + 1,
@@ -96,10 +93,10 @@ sockets.on('connection', (socket) => {
         row.path === input.path ? { ...row, error: input.error } : row,
       ),
     }
-    socket.emit('worktrees:updated', snapshot)
+    socket.emit('desktopUpdateWorktrees', snapshot)
     ack({ ok: true, value: snapshot })
   })
-  socket.on('editor:open', (input, ack) => {
+  socket.on('companionStartEditorServer', (input, ack) => {
     const reply = (error) =>
       ack(
         error
@@ -204,7 +201,7 @@ async function run() {
   stage =
     'chat navigation selects retained and fresh worktrees through the real desktop handler'
   for (const path of ['a', 'c']) {
-    client.emit('chat:activate', {
+    client.emit('desktopOpenChat', {
       id: `chat-${path}`,
       input: { project: 'project', path },
     })
@@ -221,7 +218,7 @@ async function run() {
   stage = 'repeated chat navigation waits for the same loading document'
   holdPage = true
   const navigate = (id, path) =>
-    client.emit('chat:activate', {
+    client.emit('desktopOpenChat', {
       id,
       input: { project: 'project', path },
     })
@@ -264,7 +261,7 @@ async function run() {
   await open('b')
   assert.equal(view('b').id, second.id)
 
-  const finished = (id) => client.emit('chat:finished', id)
+  const finished = (id) => client.emit('desktopFinishOpenChat', id)
   const flush = () =>
     picker.executeJavaScript('window.companion.refreshWorktrees()')
   const activeIs = (path) =>
@@ -272,6 +269,11 @@ async function run() {
       BaseWindow.getAllWindows()
         .find((window) => window !== pickerWindow)
         .contentView.children.some((child) => child.webContents === view(path)),
+    )
+  // Row errors as the picker sees them, including this desktop's local ones.
+  const rowError = (path) =>
+    picker.executeJavaScript(
+      `window.companion.getState().then(state => state.snapshot.worktrees.find(row => row.path === ${JSON.stringify(path)})?.error)`,
     )
   stage = 'terminated chat opens ignore late startup success and failure'
   snapshot = { ...snapshot, worktrees: [...snapshot.worktrees, tree('e')] }
@@ -308,8 +310,13 @@ async function run() {
     activeIs('b')
   }
 
-  stage = 'cancellation during page loading suppresses late row errors'
-  snapshot = { ...snapshot, worktrees: [...snapshot.worktrees, tree('f')] }
+  stage = 'a page failing after its chat ended becomes a local row error'
+  // A new revision lets the desktop accept the row that will hold the error.
+  snapshot = {
+    ...snapshot,
+    revision: snapshot.revision + 1,
+    worktrees: [...snapshot.worktrees, tree('f')],
+  }
   heldPage = undefined
   holdPage = true
   navigate('cancel-page', 'f')
@@ -320,21 +327,19 @@ async function run() {
   heldPage.writeHead(502, { 'Content-Type': 'text/html' })
   heldPage.end('Cancelled page failed')
   await until(() => !view('f'))
+  await until(async () => /502/.test(await rowError('f')))
   assert.equal(rowErrors.length, 0)
   assert.equal(chatReplies.has('cancel-page'), false)
   await open('b')
 
-  stage = 'chat page failures are shared row errors and survive reconnect'
+  stage = 'chat page failures are local row errors and a reconnect clears them'
   pageStatus = 503
   navigate('page-failed', 'e')
-  await until(() => chatReplies.has('page-failed') && rowErrors.length === 1)
+  await until(() => chatReplies.has('page-failed'))
   const pageError = chatReplies.get('page-failed').error
   assert.match(pageError, /503/)
-  assert.deepEqual(rowErrors[0], {
-    project: 'project',
-    path: 'e',
-    error: pageError,
-  })
+  await until(async () => (await rowError('e')) === pageError)
+  assert.equal(rowErrors.length, 0)
   const connectionBeforeError = connections
   client.conn.close()
   await until(() => connections > connectionBeforeError)
@@ -343,23 +348,15 @@ async function run() {
       "window.companion.getState().then(state => state.status.state === 'connected' && !state.loading)",
     ),
   )
-  const recovered = await picker.executeJavaScript(
-    'window.companion.getState().then(state => state.snapshot)',
-  )
-  assert.equal(
-    recovered.worktrees.find((row) => row.path === 'e').error,
-    pageError,
-  )
+  assert.equal(await rowError('e'), undefined)
+  assert.equal(await rowError('f'), undefined)
   pageStatus = 200
   navigate('retry-page', 'e')
   await until(() => chatReplies.has('retry-page'))
   assert.equal(chatReplies.get('retry-page').error, undefined)
-  assert.equal(
-    snapshot.worktrees.find((row) => row.path === 'e').error,
-    pageError,
-  )
+  assert.equal(await rowError('e'), undefined)
 
-  stage = 'a superseded page failure does not persist a row error'
+  stage = 'a superseded page failure becomes a local row error'
   heldPage = undefined
   holdPage = true
   navigate('stale-failure', 'f')
@@ -373,26 +370,17 @@ async function run() {
   // Supersession acknowledges the chat before the old page finishes failing.
   // Let that page close before reusing its worktree in the next scenario.
   await until(() => !view('f'))
-  assert.equal(rowErrors.length, 1)
+  await until(async () => /502/.test(await rowError('f')))
+  assert.equal(rowErrors.length, 0)
 
-  stage = 'server errors do not get duplicated as desktop page failures'
+  stage = 'chat startup errors reach only the chat, never a row'
   rejectEditorOpen = true
   navigate('startup-failed', 'f')
   await until(() => chatReplies.has('startup-failed'))
   assert.equal(chatReplies.get('startup-failed').error, 'Server startup failed')
-  assert.equal(rowErrors.length, 1)
+  assert.match(await rowError('f'), /502/)
+  assert.equal(rowErrors.length, 0)
   rejectEditorOpen = false
-
-  stage = 'failure to save a row error preserves the source error'
-  rejectRowError = true
-  pageStatus = 503
-  navigate('row-save-failed', 'f')
-  await until(
-    () => chatReplies.has('row-save-failed') && rowErrors.length === 2,
-  )
-  assert.match(chatReplies.get('row-save-failed').error, /503/)
-  rejectRowError = false
-  pageStatus = 200
   await open('b')
 
   stage = 'ignoring a stale list reply after a newer pushed update'
@@ -403,7 +391,7 @@ async function run() {
   await until(() => heldList)
   snapshot = { ...snapshot, revision: snapshot.revision + 1 }
   // WebSocket ordering guarantees the broadcast is handled before the old reply.
-  client.emit('worktrees:updated', snapshot)
+  client.emit('desktopUpdateWorktrees', snapshot)
   heldList({
     ...snapshot,
     revision: snapshot.revision - 1,

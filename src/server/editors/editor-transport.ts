@@ -10,7 +10,7 @@ import decompressResponse from 'decompress-response'
 import getRawBody from 'raw-body'
 import { parseCookie, stringifyCookie } from 'cookie'
 import type { Logger } from 'pino'
-import type { EditorManager } from './editor-manager.ts'
+import type { EditorServerManager } from './editor-manager.ts'
 import type { ChatService } from '../chats/chat-service.ts'
 import { withImportedProfile } from './editor-page.ts'
 import { settingsSyncScript } from './settings-sync-asset.ts'
@@ -18,7 +18,7 @@ import { MAX_SETTINGS_BYTES } from '../../shared/editor-settings.ts'
 import { authorized, rejectUpgrade } from '../transport.ts'
 
 interface EditorTransportOptions {
-  target: EditorManager['target']
+  target: EditorServerManager['target']
   activation: ChatService['activation']
   logger: Logger
 }

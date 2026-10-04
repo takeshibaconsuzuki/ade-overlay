@@ -45,7 +45,10 @@ test(
     })
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
-    const editor = await client.openEditor({ project, path: project })
+    const editor = await client.companionStartEditorServer({
+      project,
+      path: project,
+    })
     for (const locale of ['fr', 'de']) {
       const response = await fetch(editorUrl(server.url, editor), {
         headers: {
@@ -103,7 +106,7 @@ test(
     for (const path of [project, second]) {
       // Portable overrides appdata; check appdata independently for the second child.
       if (path === second) delete process.env.VSCODE_PORTABLE
-      const editor = await client.openEditor({ project, path })
+      const editor = await client.companionStartEditorServer({ project, path })
       const data = join(config.editor.dataDir, 'workspaces', editor.id, 'data')
       const entries = await readdir(data)
       assert.ok(
@@ -202,7 +205,10 @@ test(
     })
     cleanups.push(() => server.close())
     const client = await connect(t, server.url)
-    const editor = await client.openEditor({ project, path: project })
+    const editor = await client.companionStartEditorServer({
+      project,
+      path: project,
+    })
     const result = join(root, 'bootstrap-result.json')
     const input = join(root, 'bootstrap-input.json')
     await writeFile(
@@ -270,7 +276,7 @@ test(
     })
     const sessions = []
     for (const path of [project, second])
-      sessions.push(await client.openEditor({ project, path }))
+      sessions.push(await client.companionStartEditorServer({ project, path }))
     const results = []
     const syncModule = await bundleMain(root, 'settings-sync')
     for (const phase of ['initial', 'restart']) {

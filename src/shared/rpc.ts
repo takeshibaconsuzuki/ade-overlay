@@ -12,15 +12,21 @@ interface Socket {
 }
 
 export function requestSpec<I, O>(
-  event: string,
   input: z.ZodType<I>,
   output: z.ZodType<O>,
   timeout: number,
 ) {
-  return { event, input, output, timeout }
+  return { event: '', input, output, timeout }
 }
-export function eventSpec<T>(event: string, schema: z.ZodType<T>) {
-  return { event, schema }
+export function eventSpec<T>(schema: z.ZodType<T>) {
+  return { event: '', schema }
+}
+// A message's wire name is its key, so code, wire and logs share one name.
+export function messages<T extends Record<string, { event: string }>>(
+  specs: T,
+): T {
+  for (const [name, spec] of Object.entries(specs)) spec.event = name
+  return specs
 }
 
 const replySchema = z.discriminatedUnion('ok', [

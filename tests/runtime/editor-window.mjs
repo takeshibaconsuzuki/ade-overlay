@@ -3,7 +3,13 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { basename, join } from 'node:path'
-import { commandOrControl, key } from '../helpers/keyboard.mjs'
+import {
+  commandOrControl,
+  key,
+  letterKey,
+  openCommandPalette,
+  quickInputFocused,
+} from '../helpers/keyboard.mjs'
 const input = JSON.parse(
   readFileSync(process.env.ADE_EDITOR_TEST_INPUT, 'utf8'),
 )
@@ -19,14 +25,7 @@ async function until(check, label) {
 }
 async function command(contents, text) {
   contents.focus()
-  await key(contents, 'F1')
-  await until(
-    () =>
-      contents.executeJavaScript(
-        "!!document.querySelector('.quick-input-widget input')",
-      ),
-    'command palette',
-  )
+  await openCommandPalette(contents)
   await key(contents, 'A', [commandOrControl])
   await contents.insertText('>' + text)
   await until(
@@ -362,15 +361,26 @@ async function run() {
       return
     }
     if (input.phase === 'first') {
-      await key(editor, 'P', [commandOrControl])
-      await delay(300)
+      await letterKey(editor, 'p', [commandOrControl])
+      await until(
+        () => editor.executeJavaScript(quickInputFocused),
+        'quick open',
+      )
       await editor.insertText('persist.txt')
-      await delay(600)
-      await key(editor, 'Enter')
       await until(
         () =>
           editor.executeJavaScript(
-            '!!document.querySelector(\'.tab[aria-selected="true"]\')',
+            "Array.from(document.querySelectorAll('.quick-input-list .monaco-list-row')).some(row => row.textContent.includes('persist.txt'))",
+          ),
+        'quick open result',
+      )
+      await delay(200)
+      await key(editor, 'Enter')
+      // A new profile also shows the Welcome tab, so require this file's tab.
+      await until(
+        () =>
+          editor.executeJavaScript(
+            "!!document.querySelector('.tab[aria-selected=\"true\"]')?.textContent.includes('persist.txt')",
           ),
         'open file',
       )

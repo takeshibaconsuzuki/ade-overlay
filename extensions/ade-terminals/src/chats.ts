@@ -72,12 +72,12 @@ export class ChatController implements vscode.Disposable {
     )?.id
   }
 
-  async activateChat(chatId: string): Promise<void> {
+  async companionOpenChat(chatId: string): Promise<void> {
     if (!this.snapshot.chats.some((chat) => chat.id === chatId))
       throw new Error('This chat is no longer available.')
     if (!this.socket?.connected)
       throw new Error('Chat tracking is disconnected from the companion.')
-    await callRpc(this.socket, chatRequests.activate, chatId)
+    await callRpc(this.socket, chatRequests.companionOpenChat, chatId)
   }
 
   private connect(): void {
@@ -94,18 +94,28 @@ export class ChatController implements vscode.Disposable {
       maxReconnectDelay: 2000,
     })
     this.socket = socket
-    handleRpc(socket, chatRequests.paste, ({ terminalId, provider, text }) => {
-      if (this.stopped || !socket.connected)
-        throw new Error('Editor connection closed.')
-      const terminal = this.identities.find(terminalId)
-      if (!terminal || !vscode.window.terminals.includes(terminal))
-        throw new Error('The chat terminal is no longer available.')
-      if (this.identities.provider(terminal) !== provider)
-        throw new Error('The chat provider changed. Try pasting again.')
-      terminal.sendText(text, false)
+    handleRpc(
+      socket,
+      chatRequests.extensionPaste,
+      ({ terminalId, provider, text }) => {
+        if (this.stopped || !socket.connected)
+          throw new Error('Editor connection closed.')
+        const terminal = this.identities.find(terminalId)
+        if (!terminal || !vscode.window.terminals.includes(terminal))
+          throw new Error('The chat terminal is no longer available.')
+        if (this.identities.provider(terminal) !== provider)
+          throw new Error('The chat provider changed. Try pasting again.')
+        terminal.sendText(text, false)
+        return null
+      },
+    )
+    handleRpc(socket, chatRequests.extensionOpenFile, async ({ path }) => {
+      await vscode.window.showTextDocument(vscode.Uri.file(path), {
+        preview: false,
+      })
       return null
     })
-    handleRpc(socket, chatRequests.pasteTarget, () => {
+    handleRpc(socket, chatRequests.extensionGetPasteTarget, () => {
       const terminal = vscode.window.activeTerminal
       // Pin the target now, but wait for launch to dispatch its command before
       // releasing a reservation. A queued query timing out cannot write input.
@@ -130,7 +140,7 @@ export class ChatController implements vscode.Disposable {
     const invalid = () => socket.io.engine.close()
     listenEvent(
       socket,
-      chatEvents.snapshot,
+      chatEvents.extensionUpdateChats,
       (snapshot) => {
         this.snapshot = snapshot
         this.changes.fire()
@@ -139,7 +149,7 @@ export class ChatController implements vscode.Disposable {
     )
     listenEvent(
       socket,
-      chatEvents.cancelFocus,
+      chatEvents.extensionCancelFocusChat,
       (id) => {
         if (this.focusId === id) this.focusGeneration++
       },
@@ -147,14 +157,14 @@ export class ChatController implements vscode.Disposable {
     )
     listenEvent(
       socket,
-      chatEvents.focus,
+      chatEvents.extensionFocusChat,
       (message) => {
         const connection = socket.id
         this.focusId = message.id
         const generation = ++this.focusGeneration
         const acknowledge = (error?: string) => {
           if (socket.id === connection)
-            sendEvent(socket, chatEvents.focused, {
+            sendEvent(socket, chatEvents.extensionFocusChatResponse, {
               id: message.id,
               error: error?.slice(0, 1024),
             })

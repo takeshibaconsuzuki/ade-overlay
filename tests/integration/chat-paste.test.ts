@@ -157,8 +157,8 @@ test(
     await chats.listen()
     t.after(() => chats.close())
     const worktree = { project: root, path: root }
-    const editorId = 'a'.repeat(64)
-    const registration = chats.registerEditor(editorId, worktree)
+    const editorServerId = 'a'.repeat(64)
+    const registration = chats.registerEditor(editorServerId, worktree)
     const extensionUrl = new URL(
       '/extension',
       registration.activityEnvironment.ADE_CHAT_ENDPOINT,
@@ -174,10 +174,14 @@ test(
       terminalId: 'reserved',
       provider: 'codex',
     }
-    handleRpc(extension.socket, chatRequests.pasteTarget, () => target)
+    handleRpc(
+      extension.socket,
+      chatRequests.extensionGetPasteTarget,
+      () => target,
+    )
     const deliveries: { terminalId: string; text: string; provider: string }[] =
       []
-    handleRpc(extension.socket, chatRequests.paste, (payload) => {
+    handleRpc(extension.socket, chatRequests.extensionPaste, (payload) => {
       deliveries.push(payload)
       return null
     })
@@ -220,16 +224,20 @@ test(
     const peer = await socketPeer(t, `ws://127.0.0.1:${address.port}/companion`)
     const documentId = randomUUID()
     const reserve = async () => {
-      const id = await callRpc(peer.socket, companionRequests.reservePaste, {
-        editorId,
-        documentId,
-      })
+      const id = await callRpc(
+        peer.socket,
+        companionRequests.companionReservePaste,
+        {
+          editorServerId,
+          documentId,
+        },
+      )
       assert.ok(id)
       return id
     }
     const paste = (reservationId: string, items: PastePart[]) =>
-      callRpc(peer.socket, companionRequests.paste, {
-        editorId,
+      callRpc(peer.socket, companionRequests.companionPaste, {
+        editorServerId,
         documentId,
         reservationId,
         items,
@@ -268,12 +276,12 @@ test(
     )
     for (const [socket, overrides] of [
       [other.socket, {}],
-      [peer.socket, { editorId: 'b'.repeat(64) }],
+      [peer.socket, { editorServerId: 'b'.repeat(64) }],
       [peer.socket, { documentId: randomUUID() }],
     ] as const) {
       await assert.rejects(
-        callRpc(socket, companionRequests.paste, {
-          editorId,
+        callRpc(socket, companionRequests.companionPaste, {
+          editorServerId,
           documentId,
           reservationId: scoped,
           items: [],
@@ -311,8 +319,8 @@ test(
 
     target = null
     assert.equal(
-      await callRpc(peer.socket, companionRequests.reservePaste, {
-        editorId,
+      await callRpc(peer.socket, companionRequests.companionReservePaste, {
+        editorServerId,
         documentId,
       }),
       null,
@@ -355,7 +363,7 @@ test(
     ])
     const rejected = assert.rejects(pending, /connection changed/)
     await downloading
-    chats.releaseEditor(editorId)
+    chats.releaseEditor(editorServerId)
     releaseImage()
     await rejected
     assert.equal(

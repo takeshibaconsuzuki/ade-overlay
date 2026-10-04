@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import type { NotificationConstructorOptions } from 'electron'
 import { WorktreeNotifications } from '../../src/main/worktree-notifications.ts'
-import type { OpenEditorInput, Worktree } from '../../src/shared/companion.ts'
+import type { WorktreeRef, Worktree } from '../../src/shared/companion.ts'
 
 class FakeNotification extends EventEmitter {
   shown = false
@@ -23,16 +23,16 @@ const row = (overrides: Partial<Worktree> = {}): Worktree => ({
   main: false,
   locked: false,
   prunable: false,
-  editor: 'stopped',
+  editorServer: 'stopped',
   ...overrides,
 })
 
-function fixture(open?: (input: OpenEditorInput) => Promise<void>) {
+function fixture(open?: (input: WorktreeRef) => Promise<void>) {
   const created: {
     notification: FakeNotification
     options: NotificationConstructorOptions
   }[] = []
-  const opened: OpenEditorInput[] = []
+  const opened: WorktreeRef[] = []
   const errors: unknown[] = []
   const notifications = new WorktreeNotifications(
     (options) => {
@@ -57,10 +57,10 @@ test('creation notifies once after all creating snapshots, including bootstrap, 
   update(row()) // Existing worktrees do not notify on connection.
   update(row({ missing: true, operation: 'creating' }))
   update(row({ operation: 'creating' })) // Git checkout exists, bootstrap pending.
-  update(row({ operation: 'creating', editor: 'starting' }))
+  update(row({ operation: 'creating', editorServer: 'starting' }))
   assert.equal(created.length, 0)
   update(row())
-  update(row({ editor: 'running' }))
+  update(row({ editorServer: 'running' }))
   assert.equal(created.length, 1)
   assert.equal(created[0].notification.shown, true)
   assert.equal(created[0].options.title, 'Worktree creation completed')

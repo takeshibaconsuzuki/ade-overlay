@@ -76,7 +76,7 @@ flowchart TD
 - Codex titles come from its local state; Claude titles come from the official Agent SDK’s session metadata lookup, including durable renamed titles. Each Claude provider home is read in an isolated worker so SDK configuration cannot affect another home or the companion. Neither provider’s files are modified. Missing or temporarily unavailable metadata leaves existing titles intact.
 - The sidebar shows placeholders until a title or message is available.
 
-## Navigate to a chat
+## Open a chat
 
 ```mermaid
 sequenceDiagram
@@ -85,23 +85,23 @@ sequenceDiagram
     participant Chats as Companion
     participant Desktop
     participant Target as Target extension
-    User->>Source: Select a live chat row
-    Source->>Chats: activate via /extension, wait for final<br/>result
-    Chats->>Chats: Supersede prior chat navigation and start a<br/>30-second deadline
-    Chats->>Desktop: chat:activate through the single connected<br/>desktop
-    Desktop->>Desktop: Select destination editor and await page<br/>readiness
-    Desktop-->>Chats: chat:view-ready with the document's<br/>activation baseline
+    User->>Source: Open a live chat row
+    Source->>Chats: companionOpenChat via /extension, wait<br/>for final result
+    Chats->>Chats: Supersede the prior chat open and start a<br/>30-second deadline
+    Chats->>Desktop: desktopOpenChat through the single connected<br/>desktop
+    Desktop->>Desktop: Open the destination worktree and await page<br/>readiness
+    Desktop-->>Chats: desktopOpenChatResponse with the document's<br/>activation baseline
     Note over Chats,Target: Wait for destination activation different<br/>from the document baseline
-    Chats->>Target: focus the chat terminal
+    Chats->>Target: extensionFocusChat
     Target->>Target: Wait for restoration and terminal focus
-    Target-->>Chats: focused acknowledgement
-    Chats-->>Desktop: chat:finished
-    Chats-->>Source: Activation completed
+    Target-->>Chats: extensionFocusChatResponse
+    Chats-->>Desktop: desktopFinishOpenChat
+    Chats-->>Source: Open completed
     Source-->>User: Destination chat terminal is focused
 ```
 
-- Desktop notification clicks request the same activation directly through the companion connection; the desktop receives the final result after terminal focus.
-- The companion requires exactly one connected desktop for chat navigation. Desktop selection uses the shared [worktree opening](desktop.md#open-a-worktree) and [supersession](desktop.md#supersede-navigation) workflows, then the target performs [terminal focus](extension.md#focus-a-chat-terminal).
+- Desktop notification clicks request the same open directly through the companion connection; the desktop receives the final result after terminal focus.
+- The companion requires exactly one connected desktop to open a chat. The desktop uses the shared [worktree opening](desktop.md#open-a-worktree) and [supersession](desktop.md#supersede-navigation) workflows, then the target performs [terminal focus](extension.md#focus-a-chat-terminal).
 - Page readiness is not terminal readiness. The page's activation baseline prevents a newly loaded document from sending focus to the old extension host.
 - Timeout, supersession, page failure, or a participating connection closing finishes the source request with an error and cancels outstanding terminal focus. Shared editor startup and retained page loading can continue.
-- Startup failures remain companion-owned worktree errors. Desktop page failures are also stored on the worktree without delaying the chat failure reply.
+- Startup failures remain companion-owned worktree errors. Desktop page failures stay on that desktop as the worktree's local error.

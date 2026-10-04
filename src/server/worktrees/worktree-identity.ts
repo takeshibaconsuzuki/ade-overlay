@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import type { OpenEditorInput } from '../../shared/companion.ts'
+import type { WorktreeRef } from '../../shared/companion.ts'
 
 // Physical paths are resolved at discovery/admission, including the existing
 // ancestor of a creation destination. Keys must also work after paths disappear.
@@ -9,15 +9,15 @@ export function pathKey(path: string): string {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
-function identity(worktree: OpenEditorInput): [string, string] {
+function identity(worktree: WorktreeRef): [string, string] {
   return [pathKey(worktree.project), pathKey(worktree.path)]
 }
 
-export function worktreeKey(worktree: OpenEditorInput): string {
+export function worktreeKey(worktree: WorktreeRef): string {
   return JSON.stringify(identity(worktree))
 }
 
-export function editorId(worktree: OpenEditorInput): string {
+export function editorServerId(worktree: WorktreeRef): string {
   // This encoding names persistent workspace data. Preserve the NUL separator
   // and SHA-256 digest when changing other identity consumers.
   return createHash('sha256')

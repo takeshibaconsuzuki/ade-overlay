@@ -1,6 +1,6 @@
 # Companion
 
-- The companion account owns configured repositories, Git commands, local VS Code resources, and editor processes. The companion keeps running when desktop clients disconnect.
+- The companion account owns configured repositories, Git commands, local VS Code resources, and editor servers. The companion keeps running when desktop clients disconnect.
 - Sources: [service composition](../src/server/server.ts), [entry point](../src/server/index.ts), [companion transport](../src/server/companion-transport.ts), [configuration](../src/server/config.ts).
 
 ## Start the companion
@@ -25,7 +25,7 @@ sequenceDiagram
     Runtime->>Runtime: Prepare runtime for later editor requests
 ```
 
-- Startup discovery applies [Git membership](worktrees.md#refresh-and-apply-membership) before the public listener opens. Configuration must identify main worktree roots; an absent default configuration produces an empty project list.
+- Startup discovery applies [Git membership](worktrees.md#what-a-snapshot-contains) before the public listener opens. Configuration must identify main worktree roots; an absent default configuration produces an empty project list.
 - [Runtime preparation](editors.md#prepare-the-shared-runtime) is shared with later editor requests. [Chat maintenance](chats.md#schedule-chat-maintenance) continues for the service lifetime.
 - Configuration is loaded at startup. Changing it requires restarting the companion.
 
@@ -56,11 +56,11 @@ sequenceDiagram
     participant Host as Companion lifecycle
     participant Store as Worktree store
     participant Transport as Public and chat transports
-    participant Editors as Editor processes
+    participant Editors as Editor servers
     Host->>Store: Stop admitting worktree requests
     Host->>Transport: Stop listener and close active connections
     Transport->>Transport: Finish pending chat navigation, stop<br/>maintenance
-    Host->>Store: Wait for admitted requests and queued<br/>operations
+    Host->>Store: Wait for admitted requests, running<br/>operations, and rescans
     Note over Store: Includes creation paths still being resolved<br/>when shutdown began
     Store-->>Host: Accepted work drained
     Host->>Editors: Cancel preparation and stop every editor
@@ -69,5 +69,5 @@ sequenceDiagram
 ```
 
 - Startup failure uses the same cleanup path.
-- Closing transports happens before waiting for accepted work; disconnected clients do not cancel queued mutations.
-- [Editor stopping](editors.md#editor-process-lifetime) preserves workspace data directories for later starts.
+- Closing transports happens before waiting for accepted work; disconnected clients do not cancel accepted operations, including a running bootstrap.
+- [Editor stopping](editors.md#editor-server-lifetime) preserves workspace data directories for later starts.

@@ -27,7 +27,7 @@ exports.run = async () => {
   await extension.activate()
   assert.ok(
     !(await vscode.commands.getCommands(true)).includes(
-      'adeTerminals.activateChat',
+      'adeTerminals.openChat',
     ),
     'chat navigation does not ship a test-only command',
   )
@@ -432,7 +432,7 @@ exports.run = async () => {
       () => controller.getSnapshot().chats.some((chat) => chat.id === live.id),
       'controller receives the live chat',
     )
-    await controller.activateChat(live.id)
+    await controller.companionOpenChat(live.id)
     assert.equal(vscode.window.activeTerminal, tracked)
     other.show()
     await eventually(
@@ -442,19 +442,19 @@ exports.run = async () => {
     messages.fire({ type: 'ready' })
     assert.ok(sidebarState.chats.some((chat) => chat.id === live.id))
     const beforeInvalid = sidebarState
-    messages.fire({ type: 'activate', chatId: 42 })
+    messages.fire({ type: 'open', chatId: 42 })
     assert.equal(
       sidebarState,
       beforeInvalid,
       'invalid bridge messages are ignored',
     )
-    messages.fire({ type: 'activate', chatId: 'missing-chat' })
+    messages.fire({ type: 'open', chatId: 'missing-chat' })
     await eventually(() => sidebarState.error, 'sidebar reports a missing chat')
     assert.match(sidebarState.error, /no longer available/)
-    messages.fire({ type: 'activate', chatId: live.id })
+    messages.fire({ type: 'open', chatId: live.id })
     await eventually(
       () => vscode.window.activeTerminal === tracked,
-      'validated sidebar activation focuses the exact terminal',
+      'validated sidebar open focuses the exact terminal',
     )
     assert.equal(sidebarState.error, undefined)
   } finally {
@@ -507,7 +507,7 @@ exports.run = async () => {
       'no terminal selected in the owned group',
     )
     restored.selectTerminal(tracked)
-    await restored.activateChat(live.id)
+    await restored.companionOpenChat(live.id)
     await eventually(
       () => vscode.window.activeTerminal === tracked,
       'restored activation focuses same terminal',

@@ -20,6 +20,7 @@ export function usePickerNavigation(
   )
   const order = useRef<string[]>([])
   const suspended = useRef(0)
+  const focusHeld = useRef(0)
   const [suspensionVersion, setSuspensionVersion] = useState(0)
   const availabilityKey = JSON.stringify(
     items.map(({ key, available }) => [key, available]),
@@ -60,11 +61,13 @@ export function usePickerNavigation(
       targets().find(({ button }) => !!target && button.contains(target)),
     [targets],
   )
-  const suspend = useCallback(() => {
+  const suspend = useCallback((holdsFocus: boolean) => {
     suspended.current++
+    if (holdsFocus) focusHeld.current++
     setSuspensionVersion((version) => version + 1)
     return () => {
       suspended.current--
+      if (holdsFocus) focusHeld.current--
       setSuspensionVersion((version) => version + 1)
     }
   }, [])
@@ -129,7 +132,7 @@ export function usePickerNavigation(
     const list = listRef.current
     if (!list) return
     // Move focus off an old result before resetting selection, so Enter cannot
-    // activate a row left over from the previous results.
+    // open a row left over from the previous results.
     if (
       list.contains(document.activeElement) ||
       (document.activeElement === document.body &&
@@ -160,8 +163,9 @@ export function usePickerNavigation(
     }
     const onFocus = () => {
       resetPointer()
-      // A modal owns focus until it closes, including across window switches.
-      if (suspended.current === 0 && focusOnWindowFocus) {
+      // A dialog owns focus until it closes, including across window switches.
+      // A menu does not: it closes when its window loses focus.
+      if (focusHeld.current === 0 && focusOnWindowFocus) {
         searchRef.current?.focus({ preventScroll: true })
       }
       syncHighlightVisibility()
@@ -240,7 +244,7 @@ export function usePickerNavigation(
         (event.key === 'Enter' && canOpenWithEnter(target)) ||
         (event.key === ' ' && targetEntry(target)?.button === target)
       ) {
-        // Hover alone does not enable keyboard activation.
+        // Hover alone does not enable keyboard opening.
         event.preventDefault()
         if (!event.repeat) buttons[current]?.button.click()
       } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

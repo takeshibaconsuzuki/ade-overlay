@@ -40,8 +40,9 @@ export class SettingsSync {
     const incoming = settingsSnapshotSchema.parse(input)
     const operation = this.pending.then(async () => {
       const local = await this.read()
-      // Equal timestamps deterministically favor the companion copy.
-      if (incoming.mtime <= local.mtime) return local
+      // Equal timestamps deterministically favor the companion copy. A file
+      // keeps its save time only to about a millisecond, so compare at that.
+      if (Math.round(incoming.mtime) <= Math.round(local.mtime)) return local
       // Recheck before replacing: an external desktop editor can save at any time.
       const current = await this.read()
       if (!current.equals(local))
@@ -63,7 +64,7 @@ export class SettingsSync {
     await mkdir(dirname(this.path), { recursive: true })
     await writeFileAtomic(this.path, value.content, { mode: 0o600 })
     // A synchronized write keeps the original save time, not the copy time.
-    await utimes(this.path, new Date(), new Date(value.mtime))
+    await utimes(this.path, new Date(), new Date(Math.round(value.mtime)))
   }
 
   async settled(): Promise<void> {

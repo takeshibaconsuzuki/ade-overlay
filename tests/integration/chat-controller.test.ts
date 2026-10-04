@@ -65,7 +65,7 @@ test(
         peer = socket
         listenEvent(
           socket,
-          chatEvents.focused,
+          chatEvents.extensionFocusChatResponse,
           (message) => messages.push(message),
           () => {
             throw new Error('Invalid focus result')
@@ -142,11 +142,17 @@ test(
       'connecting needs no terminal announcements',
     )
 
-    sendEvent(peer!, chatEvents.focus, { id: 'first', terminalId: 'a' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'first',
+      terminalId: 'a',
+    })
     await delay(80)
     assert.equal(result('first'), undefined)
     assert.equal(placements, 0, 'restoration does not hold the placement queue')
-    sendEvent(peer!, chatEvents.focus, { id: 'second', terminalId: 'b' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'second',
+      terminalId: 'b',
+    })
     await until(() => !!result('first'))
     const superseded = result('first')
     assert.ok(superseded?.error)
@@ -175,16 +181,18 @@ test(
       releaseLaunch = resolve
     }).then(() => b.sendText(command, true))
     let reserved = false
-    const earlyPaste = callRpc(peer!, chatRequests.pasteTarget, null).then(
-      (target) => {
-        reserved = true
-        assert.deepEqual(target, { terminalId: 'b', provider: 'codex' })
-        return callRpc(peer!, chatRequests.paste, {
-          ...target!,
-          text: earlyText,
-        })
-      },
-    )
+    const earlyPaste = callRpc(
+      peer!,
+      chatRequests.extensionGetPasteTarget,
+      null,
+    ).then((target) => {
+      reserved = true
+      assert.deepEqual(target, { terminalId: 'b', provider: 'codex' })
+      return callRpc(peer!, chatRequests.extensionPaste, {
+        ...target!,
+        text: earlyText,
+      })
+    })
     await delay(30)
     assert.equal(reserved, false, 'reservation waits for command dispatch')
     assert.deepEqual(
@@ -202,17 +210,23 @@ test(
     b.sent.length = 0
     vscode.window.activeTerminal = b
 
-    assert.deepEqual(await callRpc(peer!, chatRequests.pasteTarget, null), {
-      terminalId: 'b',
-      provider: 'codex',
-    })
+    assert.deepEqual(
+      await callRpc(peer!, chatRequests.extensionGetPasteTarget, null),
+      {
+        terminalId: 'b',
+        provider: 'codex',
+      },
+    )
     const ordinary = terminal()
     vscode.window.terminals.push(ordinary)
     vscode.window.activeTerminal = ordinary
-    assert.equal(await callRpc(peer!, chatRequests.pasteTarget, null), null)
+    assert.equal(
+      await callRpc(peer!, chatRequests.extensionGetPasteTarget, null),
+      null,
+    )
     const text = '\x1b[200~first\n  second\x1b[201~'
     assert.equal(
-      await callRpc(peer!, chatRequests.paste, {
+      await callRpc(peer!, chatRequests.extensionPaste, {
         terminalId: 'b',
         provider: 'codex',
         text,
@@ -227,7 +241,7 @@ test(
       'paste does not change focus',
     )
     await assert.rejects(
-      callRpc(peer!, chatRequests.paste, {
+      callRpc(peer!, chatRequests.extensionPaste, {
         terminalId: 'missing',
         provider: 'codex',
         text,
@@ -236,12 +250,12 @@ test(
     )
     vscode.window.activeTerminal = undefined
     await assert.rejects(
-      callRpc(peer!, chatRequests.pasteTarget, null),
+      callRpc(peer!, chatRequests.extensionGetPasteTarget, null),
       /no active terminal/,
     )
     vscode.window.activeTerminal = b
 
-    sendEvent(peer!, chatEvents.snapshot, {
+    sendEvent(peer!, chatEvents.extensionUpdateChats, {
       chats: [
         { id: 'chat-b', terminalId: 'b', path: '/project', activity: 'idle' },
       ],
@@ -266,15 +280,21 @@ test(
     })
     placementReady = held
     const previousPlacements = placements
-    sendEvent(peer!, chatEvents.focus, { id: 'held', terminalId: 'a' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'held',
+      terminalId: 'a',
+    })
     await until(() => placements > previousPlacements)
-    sendEvent(peer!, chatEvents.cancelFocus, 'held')
+    sendEvent(peer!, chatEvents.extensionCancelFocusChat, 'held')
     await delay(30)
     release()
     await until(() => !!result('held'))
     assert.equal(a.shows, 0)
 
-    sendEvent(peer!, chatEvents.focus, { id: 'timeout', terminalId: 'missing' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'timeout',
+      terminalId: 'missing',
+    })
     await delay(50)
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 8100 })
     await delay(80)
@@ -283,7 +303,10 @@ test(
     const timedOut = result('timeout')
     assert.ok(timedOut?.error)
 
-    sendEvent(peer!, chatEvents.focus, { id: 'disconnect', terminalId: 'c' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'disconnect',
+      terminalId: 'c',
+    })
     await delay(50)
     peer!.conn.close()
     await delay(50)
@@ -293,10 +316,16 @@ test(
     await delay(80)
     assert.equal(c.shows, 0, 'disconnected requests cannot focus later')
     await until(() => peer?.connected === true)
-    sendEvent(peer!, chatEvents.focus, { id: 'reconnected', terminalId: 'c' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'reconnected',
+      terminalId: 'c',
+    })
     await until(() => !!result('reconnected'))
     assert.equal(c.shows, 1, 'reconnect can focus without announcing terminals')
-    sendEvent(peer!, chatEvents.focus, { id: 'disposed', terminalId: 'd' })
+    sendEvent(peer!, chatEvents.extensionFocusChat, {
+      id: 'disposed',
+      terminalId: 'd',
+    })
     await delay(50)
     controller.dispose()
     const d = terminal()

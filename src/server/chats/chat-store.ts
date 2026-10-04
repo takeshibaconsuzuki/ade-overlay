@@ -6,7 +6,7 @@ import type {
   ChatSnapshot,
   ProcessIdentity,
 } from '../../shared/chats.ts'
-import type { OpenEditorInput } from '../../shared/companion.ts'
+import type { WorktreeRef } from '../../shared/companion.ts'
 import type { WorktreeColor } from '../../shared/worktree-colors.ts'
 import {
   chatProvider,
@@ -22,11 +22,11 @@ import {
 interface ChatRecord {
   chat: Chat
   provider: string
-  worktree: OpenEditorInput
+  worktree: WorktreeRef
   sessionId: string
   lastTurnAt?: number
   process: ProcessIdentity
-  editorId: string
+  editorServerId: string
   observedAt: number
   metadataRoot?: string
 }
@@ -46,13 +46,11 @@ export class ChatStore extends EventEmitter<{
   private readonly processes: (
     notBefore: number,
   ) => Promise<Map<number, ChatProcess>>
-  private readonly color: (
-    worktree: OpenEditorInput,
-  ) => WorktreeColor | undefined
+  private readonly color: (worktree: WorktreeRef) => WorktreeColor | undefined
 
   constructor(
     processes = readChatProcesses,
-    color: (worktree: OpenEditorInput) => WorktreeColor | undefined = () =>
+    color: (worktree: WorktreeRef) => WorktreeColor | undefined = () =>
       undefined,
   ) {
     super()
@@ -76,20 +74,20 @@ export class ChatStore extends EventEmitter<{
 
   get(
     id: string,
-  ): { chat: Chat; editorId: string; worktree: OpenEditorInput } | undefined {
+  ): { chat: Chat; editorServerId: string; worktree: WorktreeRef } | undefined {
     const entry = this.records.get(id)
     return (
       entry && {
         chat: { ...entry.chat },
-        editorId: entry.editorId,
+        editorServerId: entry.editorServerId,
         worktree: { ...entry.worktree },
       }
     )
   }
 
   async activity(
-    editorId: string,
-    worktree: OpenEditorInput,
+    editorServerId: string,
+    worktree: WorktreeRef,
     report: ChatReport,
   ): Promise<boolean> {
     const requestedAt = performance.now()
@@ -97,7 +95,7 @@ export class ChatStore extends EventEmitter<{
     const accepted = await this.serial(async () => {
       const current = [...this.records.values()].find(
         (entry) =>
-          entry.editorId === editorId &&
+          entry.editorServerId === editorServerId &&
           entry.chat.terminalId === report.terminalId,
       )
       if (
@@ -117,7 +115,7 @@ export class ChatStore extends EventEmitter<{
         return false
       const id = createHash('sha256')
         .update(
-          `${editorId}\0${report.terminalId}\0${report.provider}\0${report.sessionId}`,
+          `${editorServerId}\0${report.terminalId}\0${report.provider}\0${report.sessionId}`,
         )
         .digest('hex')
       // One visible conversation per terminal; a later session replaces the old one.
@@ -137,7 +135,7 @@ export class ChatStore extends EventEmitter<{
         previous.chat.message !== message ||
         previous.lastTurnAt !== lastTurnAt
       const next: ChatRecord = {
-        editorId,
+        editorServerId,
         provider: report.provider,
         worktree: { ...worktree },
         sessionId: report.sessionId,

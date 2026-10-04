@@ -52,21 +52,21 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
           : 'No desktop is connected.',
       )
     chatRequest = { id, owner: clients[0] }
-    sendEvent(clients[0], companionEvents.activateChat, { id, input })
+    sendEvent(clients[0], companionEvents.desktopOpenChat, { id, input })
   }
   chats.onNavigationFinished = (id) => {
     if (chatRequest?.id !== id) return
     const { owner } = chatRequest
     chatRequest = undefined
-    sendEvent(owner, companionEvents.finishChat, id)
+    sendEvent(owner, companionEvents.desktopFinishOpenChat, id)
   }
   const broadcast = (snapshot: WorktreeSnapshot) => {
     for (const client of sockets.sockets.sockets.values())
-      sendEvent(client, companionEvents.worktrees, snapshot)
+      sendEvent(client, companionEvents.desktopUpdateWorktrees, snapshot)
   }
   const notifyIdle = (chat: Chat) => {
     for (const client of sockets.sockets.sockets.values())
-      sendEvent(client, companionEvents.chatIdle, chat)
+      sendEvent(client, companionEvents.desktopNotifyChatIdle, chat)
   }
   chats.store.on('idle', notifyIdle)
   worktrees.on('update', broadcast)
@@ -75,7 +75,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     // control-message limit even though the websocket admits larger frames.
     client.use(([event, input], next) => {
       if (
-        event !== companionRequests.paste.event &&
+        event !== companionRequests.companionPaste.event &&
         Buffer.byteLength(JSON.stringify(input) ?? '') > MAX_MESSAGE_BYTES
       ) {
         client.conn.close()
@@ -86,7 +86,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     logger.info('Companion client connected')
     const events = new Set([
       ...Object.values(companionRequests).map((spec) => spec.event),
-      companionEvents.viewReady.event,
+      companionEvents.desktopOpenChatResponse.event,
     ])
     client.onAny((event: string, ...args: unknown[]) => {
       const acknowledge = args.at(-1)
@@ -101,7 +101,7 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
     })
     listenEvent(
       client,
-      companionEvents.viewReady,
+      companionEvents.desktopOpenChatResponse,
       (message) => {
         if (chatRequest?.id === message.id && chatRequest.owner === client)
           chats.viewReady(message.id, message.error, message.activationAfter)
@@ -129,46 +129,64 @@ export function createCompanionTransport(options: CompanionTransportOptions) {
             clientId: client.id,
             elapsedMs,
             ...(result && typeof result === 'object' && 'id' in result
-              ? { editorId: result.id }
+              ? { editorServerId: result.id }
               : {}),
           }
           if (error) logger.error({ ...details, err: error }, 'Command failed')
           else
             logger.info(
               details,
-              spec.event === 'editor:open'
+              spec.event === 'companionStartEditorServer'
                 ? 'Editor ready'
-                : spec.event === 'worktrees:create' ||
-                    spec.event === 'worktrees:delete'
+                : spec.event === 'companionCreateWorktree' ||
+                    spec.event === 'companionDeleteWorktree'
                   ? 'Command accepted'
                   : 'Command completed',
             )
         },
       )
     }
-    register(companionRequests.activateChat, (id) => chats.activate(id, client))
+    register(companionRequests.companionOpenChat, (id) =>
+      chats.open(id, client),
+    )
     register(
-      companionRequests.paste,
-      ({ editorId, documentId, reservationId, items }) =>
-        chats.paste(client, editorId, documentId, reservationId, items),
+      companionRequests.companionPaste,
+      ({ editorServerId, documentId, reservationId, items }) =>
+        chats.paste(client, editorServerId, documentId, reservationId, items),
     )
-    register(companionRequests.reservePaste, ({ editorId, documentId }) =>
-      chats.reservePaste(client, editorId, documentId),
+    register(
+      companionRequests.companionReservePaste,
+      ({ editorServerId, documentId }) =>
+        chats.reservePaste(client, editorServerId, documentId),
     )
-    register(companionRequests.list, () => worktrees.list())
-    register(companionRequests.pathTemplates, () => worktrees.pathTemplates())
-    register(companionRequests.branches, ({ project }) =>
+    register(companionRequests.companionOpenBootstrapLog, async (input) => {
+      const { editorServerId, path } = await worktrees.bootstrapLog(input)
+      return chats.openFile(editorServerId, path)
+    })
+    register(companionRequests.companionListWorktrees, () => worktrees.list())
+    register(companionRequests.companionGetPathTemplates, () =>
+      worktrees.pathTemplates(),
+    )
+    register(companionRequests.companionListBranches, ({ project }) =>
       worktrees.branches(project),
     )
-    register(companionRequests.refresh, () => worktrees.refresh())
-    register(companionRequests.create, (input) => worktrees.startCreate(input))
-    register(companionRequests.delete, (input) => worktrees.startDelete(input))
-    register(companionRequests.setError, (input) => worktrees.setError(input))
-    register(companionRequests.openEditor, (input) =>
-      worktrees.openEditor(input),
+    register(companionRequests.companionRefreshWorktrees, () =>
+      worktrees.refresh(),
     )
-    register(companionRequests.stopEditor, (input) =>
-      worktrees.stopEditor(input),
+    register(companionRequests.companionCreateWorktree, (input) =>
+      worktrees.startCreate(input),
+    )
+    register(companionRequests.companionDeleteWorktree, (input) =>
+      worktrees.startDelete(input),
+    )
+    register(companionRequests.companionSetWorktreeError, (input) =>
+      worktrees.setError(input),
+    )
+    register(companionRequests.companionStartEditorServer, (input) =>
+      worktrees.startEditorServer(input),
+    )
+    register(companionRequests.companionStopEditorServer, (input) =>
+      worktrees.stopEditorServer(input),
     )
     sendEvent(client, companionEvents.hello, {
       protocolVersion: COMPANION_PROTOCOL_VERSION,

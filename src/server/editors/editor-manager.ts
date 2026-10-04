@@ -10,8 +10,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { Logger } from 'pino'
 import { silentLogger } from '../logging.ts'
 import type {
-  EditorSession,
-  OpenEditorInput,
+  EditorServerSession,
+  WorktreeRef,
   Worktree,
 } from '../../shared/companion.ts'
 import { editorDataDir, type ServerConfig } from '../config.ts'
@@ -29,18 +29,18 @@ import {
 } from './local-vscode.ts'
 import { SettingsSync } from './settings-sync.ts'
 import type { ChatService } from '../chats/chat-service.ts'
-import { editorId } from '../worktrees/worktree-identity.ts'
+import { editorServerId } from '../worktrees/worktree-identity.ts'
 import { editorPath } from '../../shared/companion.ts'
 
-export interface EditorLifecycle {
+export interface EditorServerLifecycle {
   open(
-    worktree: OpenEditorInput,
+    worktree: WorktreeRef,
     chatCommands?: ChatCommands,
-  ): Promise<EditorSession>
-  stop(worktree: OpenEditorInput): Promise<void>
-  retain(worktrees: OpenEditorInput[]): Promise<void>
-  status(worktree: OpenEditorInput): Worktree['editor']
-  detail(worktree: OpenEditorInput): string | undefined
+  ): Promise<EditorServerSession>
+  stop(worktree: WorktreeRef): Promise<void>
+  retain(worktrees: WorktreeRef[]): Promise<void>
+  status(worktree: WorktreeRef): Worktree['editorServer']
+  detail(worktree: WorktreeRef): string | undefined
   on(event: 'status', listener: () => void): unknown
 }
 
@@ -51,12 +51,12 @@ interface EditorEnvironment {
 }
 
 interface RunningEditor {
-  session: EditorSession
-  state: Worktree['editor']
+  session: EditorServerSession
+  state: Worktree['editorServer']
   target?: Pick<EditorEnvironment, 'profile' | 'settings'> & { url: string }
   port?: number
   child?: ChildProcess
-  ready: Promise<EditorSession>
+  ready: Promise<EditorServerSession>
   abort: AbortController
   detail?: string
 }
@@ -78,9 +78,9 @@ async function abortable<T>(
   }
 }
 
-export class EditorManager
+export class EditorServerManager
   extends EventEmitter<{ status: [] }>
-  implements EditorLifecycle
+  implements EditorServerLifecycle
 {
   private readonly entries = new Map<string, RunningEditor>()
   private readonly dataDir: string
@@ -118,12 +118,12 @@ export class EditorManager
     this.runtimes.prepareRuntime()
   }
 
-  status(worktree: OpenEditorInput): Worktree['editor'] {
-    return this.entries.get(editorId(worktree))?.state ?? 'stopped'
+  status(worktree: WorktreeRef): Worktree['editorServer'] {
+    return this.entries.get(editorServerId(worktree))?.state ?? 'stopped'
   }
 
-  detail(worktree: OpenEditorInput): string | undefined {
-    return this.entries.get(editorId(worktree))?.detail
+  detail(worktree: WorktreeRef): string | undefined {
+    return this.entries.get(editorServerId(worktree))?.detail
   }
 
   target(id: string):
@@ -141,16 +141,20 @@ export class EditorManager
   }
 
   open(
-    worktree: OpenEditorInput,
+    worktree: WorktreeRef,
     chatCommands?: ChatCommands,
-  ): Promise<EditorSession> {
+  ): Promise<EditorServerSession> {
     if (this.closing)
       return Promise.reject(new Error('The companion is shutting down.'))
-    const id = editorId(worktree)
+    const id = editorServerId(worktree)
     const existing = this.entries.get(id)
+    if (existing?.state === 'stopping')
+      return Promise.reject(
+        new Error('VS Code is still stopping. Open it once it has stopped.'),
+      )
     if (existing) {
       this.logger.info(
-        { editorId: id, state: existing.state },
+        { editorServerId: id, state: existing.state },
         'Reusing editor session',
       )
       return existing.ready
@@ -167,7 +171,10 @@ export class EditorManager
     this.emit('status')
     entry.ready = this.start(entry, worktree, chatCommands).catch(
       async (error: unknown) => {
-        this.logger.error({ editorId: id, err: error }, 'Editor startup failed')
+        this.logger.error(
+          { editorServerId: id, err: error },
+          'Editor startup failed',
+        )
         await this.dispose(entry)
         throw error
       },
@@ -177,9 +184,9 @@ export class EditorManager
 
   private async start(
     entry: RunningEditor,
-    worktree: OpenEditorInput,
+    worktree: WorktreeRef,
     chatCommands: ChatCommands = {},
-  ): Promise<EditorSession> {
+  ): Promise<EditorServerSession> {
     this.environment ??= (async () => {
       const code = await this.runtimes.localCode()
       const extensions = this.config?.localExtensionsDir ?? code.extensionsDir
@@ -203,7 +210,7 @@ export class EditorManager
     const environment = await abortable(this.environment, entry.abort.signal)
     const runtime = await abortable(this.runtimes.get(), entry.abort.signal)
     const logger = this.logger.child({
-      editorId: entry.session.id,
+      editorServerId: entry.session.id,
       worktree: worktree.path,
     })
     entry.detail = 'Starting VS Code'
@@ -335,6 +342,7 @@ export class EditorManager
           })
           .catch(() => false)
         if (ready) {
+          entry.abort.signal.throwIfAborted()
           entry.target = {
             url: `http://127.0.0.1:${entry.port}`,
             profile: environment.profile,
@@ -357,12 +365,12 @@ export class EditorManager
     )
   }
 
-  async stop(worktree: OpenEditorInput): Promise<void> {
-    await this.stopId(editorId(worktree))
+  async stop(worktree: WorktreeRef): Promise<void> {
+    await this.stopId(editorServerId(worktree))
   }
 
-  async retain(worktrees: OpenEditorInput[]): Promise<void> {
-    const ids = new Set(worktrees.map(editorId))
+  async retain(worktrees: WorktreeRef[]): Promise<void> {
+    const ids = new Set(worktrees.map(editorServerId))
     await Promise.all(
       [...this.entries.keys()]
         .filter((id) => !ids.has(id))
@@ -373,6 +381,13 @@ export class EditorManager
   private async stopId(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (!entry) return
+    // Publish stopping in the same step that ends the session's usefulness, so
+    // no later open can reuse it.
+    if (entry.state !== 'stopping') {
+      entry.state = 'stopping'
+      entry.detail = undefined
+      this.emit('status')
+    }
     entry.abort.abort(new Error('Editor startup was cancelled.'))
     await entry.ready.catch(() => {})
     await this.dispose(entry)

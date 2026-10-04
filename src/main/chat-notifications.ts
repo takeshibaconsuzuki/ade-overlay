@@ -14,16 +14,16 @@ export class ChatNotifications {
   private readonly create: (
     options: NotificationConstructorOptions,
   ) => ChatNotification | undefined
-  private readonly activate: (id: string) => Promise<unknown>
+  private readonly open: (id: string) => Promise<unknown>
   private readonly onError: (error: unknown) => void
 
   constructor(
     create: ChatNotifications['create'],
-    activate: ChatNotifications['activate'],
+    open: ChatNotifications['open'],
     onError: ChatNotifications['onError'],
   ) {
     this.create = create
-    this.activate = activate
+    this.open = open
     this.onError = onError
   }
 
@@ -37,7 +37,7 @@ export class ChatNotifications {
     this.notifications.set(chat.id, notification)
     notification.on('click', () => {
       this.dismiss(chat.id)
-      void this.activate(chat.id).catch(this.onError)
+      void this.open(chat.id).catch(this.onError)
     })
     notification.on('failed', (_event, error) => {
       this.dismiss(chat.id)

@@ -520,37 +520,44 @@ test(
       navigationId = id
       assert.deepEqual(input, worktree)
     }
-    const activate = () =>
-      callRpc(source.socket, chatRequests.activate, chatId).catch(
+    const openChat = () =>
+      callRpc(source.socket, chatRequests.companionOpenChat, chatId).catch(
         (error: Error) => error,
       )
-    const first = activate()
+    const first = openChat()
     while (!navigationId) await delay(5)
     const baseline = service.activation('target')
     service.viewReady(navigationId, undefined, baseline)
     assert.equal(
-      target.messages.some((message) => message.event === 'focus'),
+      target.messages.some((message) => message.event === 'extensionFocusChat'),
       false,
     )
-    const loading = activate()
+    const loading = openChat()
     assert.match(String(await first), /Superseded/)
     service.viewReady(navigationId, undefined, baseline)
     await delay(30)
     assert.equal(
-      target.messages.some((message) => message.event === 'focus'),
+      target.messages.some((message) => message.event === 'extensionFocusChat'),
       false,
     )
     const fresh = await connection(t, targetEnv, 2)
-    const focus = await fresh.take(chatEvents.focus)
+    const focus = await fresh.take(chatEvents.extensionFocusChat)
     assert.equal(focus.terminalId, 'terminal')
     await assert.rejects(connection(t, targetEnv, 1))
-    const nextResult = activate()
-    assert.equal(await fresh.take(chatEvents.cancelFocus), focus.id)
+    const nextResult = openChat()
+    assert.equal(
+      await fresh.take(chatEvents.extensionCancelFocusChat),
+      focus.id,
+    )
     assert.match(String(await loading), /Superseded/)
     service.viewReady(navigationId, undefined, baseline)
-    const next = await fresh.take(chatEvents.focus)
-    sendEvent(fresh.socket, chatEvents.focused, { id: focus.id })
-    sendEvent(fresh.socket, chatEvents.focused, { id: next.id })
+    const next = await fresh.take(chatEvents.extensionFocusChat)
+    sendEvent(fresh.socket, chatEvents.extensionFocusChatResponse, {
+      id: focus.id,
+    })
+    sendEvent(fresh.socket, chatEvents.extensionFocusChatResponse, {
+      id: next.id,
+    })
     assert.equal(await nextResult, null)
     service.releaseEditor('target')
     assert.equal(store.list().chats.length, 1)
@@ -775,7 +782,8 @@ test('chat snapshots carry the companion worktree color through activity changes
   editors.on('status', () => store.refreshColors())
   t.after(() => store.close())
   assert.equal(await store.activity('editor', worktree, report()), true)
-  const first = chatEvents.snapshot.schema.parse(store.list()).chats[0]
+  const first = chatEvents.extensionUpdateChats.schema.parse(store.list())
+    .chats[0]
   assert.equal(first.color, colors.get(worktree))
   assert.ok(first.color)
   await store.activity('editor', worktree, report({ activity: 'working' }))

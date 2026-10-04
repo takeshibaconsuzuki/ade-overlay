@@ -1,7 +1,7 @@
 # Settings
 
 - Settings synchronization exchanges the complete VS Code User settings file between persistent browser storage and the companion account's local VS Code profile. It does not merge individual settings.
-- Newer save time wins; equal times favor the companion copy. Copies preserve save time, so synchronization itself does not create a newer edit.
+- Newer save time wins, compared to the millisecond; equal times favor the companion copy. Copies preserve save time, so synchronization itself does not create a newer edit.
 - One desktop coordinator serves all retained pages at a companion origin. One companion settings queue serves all worktrees and clients for the local file.
 - Sources: [profile initialization](../src/server/editors/local-vscode.ts), [desktop coordinator](../src/main/settings-sync.ts), [browser storage bridge](../src/editor-browser/settings-sync.ts), [companion settings service](../src/server/editors/settings-sync.ts).
 

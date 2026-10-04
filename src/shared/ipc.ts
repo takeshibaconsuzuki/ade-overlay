@@ -3,8 +3,9 @@ import type {
   CreateWorktreeInput,
   WorktreePathTemplates,
   DeleteWorktreeInput,
-  OpenEditorInput,
+  WorktreeRef,
   SetWorktreeErrorInput,
+  Worktree,
   WorktreeSnapshot,
 } from './companion.ts'
 
@@ -30,6 +31,7 @@ export const companionChannels = {
   setWorktreeError: 'companion:worktrees:set-error',
   openEditor: 'companion:editor:open',
   stopEditor: 'companion:editor:stop',
+  openBootstrapLog: 'companion:worktrees:bootstrap-log',
 } as const
 
 export interface CompanionStatus {
@@ -38,9 +40,26 @@ export interface CompanionStatus {
   error?: string
 }
 
+// Desktop main's own data about one worktree. It is never sent to the
+// companion or shared with other desktops.
+export interface LocalWorktreeState {
+  lastOpenedAt?: number
+  opening?: boolean
+  error?: string
+}
+
+// A companion row with this desktop's local state merged in. A local error
+// replaces the companion's.
+export type DesktopWorktree = Worktree &
+  Pick<LocalWorktreeState, 'lastOpenedAt' | 'opening'>
+
+export type DesktopSnapshot = Omit<WorktreeSnapshot, 'worktrees'> & {
+  worktrees: DesktopWorktree[]
+}
+
 export interface CompanionState {
   status: CompanionStatus
-  snapshot: WorktreeSnapshot | null
+  snapshot: DesktopSnapshot | null
   loading: boolean
   error: string
 }
@@ -55,6 +74,7 @@ export interface CompanionAPI {
   getWorktreeBranches(project: string): Promise<WorktreeBranch[]>
   deleteWorktree(input: DeleteWorktreeInput): Promise<void>
   setWorktreeError(input: SetWorktreeErrorInput): Promise<void>
-  openEditor(input: OpenEditorInput): Promise<void>
-  stopEditor(input: OpenEditorInput): Promise<void>
+  openEditor(input: WorktreeRef): Promise<void>
+  stopEditor(input: WorktreeRef): Promise<void>
+  openBootstrapLog(input: WorktreeRef): Promise<void>
 }

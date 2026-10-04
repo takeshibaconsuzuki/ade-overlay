@@ -22,7 +22,7 @@ import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 import { createServer } from 'node:net'
 import os, { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -47,9 +47,12 @@ import {
 
 const execute = promisify(execFile)
 async function git(project: string, ...args: string[]): Promise<string> {
-  const { stdout } = await execute('git', ['-C', project, ...args], {
-    windowsHide: true,
-  })
+  // A developer's signing configuration must not apply to fixture tags.
+  const { stdout } = await execute(
+    'git',
+    ['-C', project, '-c', 'tag.gpgSign=false', ...args],
+    { windowsHide: true },
+  )
   return stdout.trim()
 }
 
@@ -115,10 +118,10 @@ function nextSnapshot(
   return new Promise((resolve) => {
     const listener = (update: WorktreeSnapshot) => {
       if (!matches(update)) return
-      client.off('worktreesUpdated', listener)
+      client.off('desktopUpdateWorktrees', listener)
       resolve(update)
     }
-    client.on('worktreesUpdated', listener)
+    client.on('desktopUpdateWorktrees', listener)
   })
 }
 
@@ -158,7 +161,7 @@ test(
     syncBuiltinESMExports()
     try {
       const creating = client
-        .createWorktree({
+        .companionCreateWorktree({
           project,
           path: destination,
           branch: 'drained',
@@ -330,8 +333,8 @@ test('path templates expose project configuration once without changing membersh
   })
   t.after(() => server.close())
   const client = await connectClient(t, server.url)
-  const before = await client.listWorktrees()
-  assert.deepEqual(await client.getWorktreePathTemplates(), {
+  const before = await client.companionListWorktrees()
+  assert.deepEqual(await client.companionGetPathTemplates(), {
     pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
     projects: [
       {
@@ -342,7 +345,7 @@ test('path templates expose project configuration once without changing membersh
       { mainWorktreePath: other },
     ],
   })
-  assert.deepEqual(await client.listWorktrees(), before)
+  assert.deepEqual(await client.companionListWorktrees(), before)
 })
 
 test('branch search lists local and remote branches for only the configured project', async (t) => {
@@ -368,27 +371,27 @@ test('branch search lists local and remote branches for only the configured proj
   })
   t.after(() => server.close())
   const client = await connectClient(t, server.url)
-  const before = await client.listWorktrees()
-  assert.deepEqual(await client.getWorktreeBranches(project), [
+  const before = await client.companionListWorktrees()
+  assert.deepEqual(await client.companionListBranches(project), [
     { name: 'feature/search', local: true },
     { name: 'main', local: true },
     { name: 'origin/main', local: false },
   ])
-  assert.deepEqual(await client.getWorktreeBranches(other), [
+  assert.deepEqual(await client.companionListBranches(other), [
     { name: 'main', local: true },
     { name: 'other-only', local: true },
   ])
   await git(project, 'branch', 'new-branch')
   assert.ok(
-    (await client.getWorktreeBranches(project)).some(
+    (await client.companionListBranches(project)).some(
       ({ name }) => name === 'new-branch',
     ),
   )
   await assert.rejects(
-    client.getWorktreeBranches(join(project, 'unknown')),
+    client.companionListBranches(join(project, 'unknown')),
     /not configured/,
   )
-  assert.deepEqual(await client.listWorktrees(), before)
+  assert.deepEqual(await client.companionListWorktrees(), before)
 })
 
 test('startup cache covers all repositories and sync list stays cached until refresh', async (t) => {
@@ -561,6 +564,70 @@ test(
   },
 )
 
+test('operations run in parallel and concurrent rescans share one queued scan', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const editors = new WorktreeEditors()
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    editors,
+  )
+  const paths = ['first', 'second', 'third'].map((name) => join(root, name))
+  for (const path of paths)
+    await store.startCreate({
+      project,
+      path,
+      branch: basename(path),
+      baseBranch: 'main',
+    })
+  assert.ok(
+    paths.every(
+      (path) =>
+        store.list().worktrees.find((row) => row.path === path)?.operation ===
+        'creating',
+    ),
+  )
+  await store.settled()
+  for (const path of paths) {
+    const row = store.list().worktrees.find((entry) => entry.path === path)!
+    assert.equal(row.operation, undefined)
+    assert.equal(row.error, undefined)
+    assert.equal(row.missing, undefined)
+  }
+  const scans = editors.retained.length
+  await Promise.all([store.refresh(), store.refresh(), store.refresh()])
+  assert.equal(editors.retained.length, scans + 1)
+  await Promise.all(
+    paths.map((path) => store.startDelete({ project, path, force: true })),
+  )
+  await store.settled()
+  assert.equal(store.list().worktrees.length, 1)
+})
+
+test('a stopping editor refuses opens and stops without retaining a row error', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const path = join(root, 'linked')
+  await git(project, 'worktree', 'add', '-b', 'linked', path)
+  const editors = new WorktreeEditors()
+  const store = await WorktreeStore.open(
+    [{ mainWorktreePath: project }],
+    editors,
+  )
+  const target = { project, path }
+  await store.startEditorServer(target)
+  const status = editors.status.bind(editors)
+  editors.status = () => 'stopping'
+  await assert.rejects(store.startEditorServer(target), /still stopping/)
+  await assert.rejects(store.stopEditorServer(target), /already stopping/)
+  editors.status = status
+  const row = store.list().worktrees.find((entry) => entry.path === path)!
+  assert.equal(row.error, undefined)
+  await store.stopEditorServer(target)
+  await store.startEditorServer(target)
+  assert.equal(editors.status(target), 'running')
+})
+
 test('stopping an editor keeps membership and allows reopening, including the main worktree', async (t) => {
   const { root, makeProject } = await fixture(t)
   const project = await makeProject('project')
@@ -576,36 +643,42 @@ test('stopping an editor keeps membership and allows reopening, including the ma
     { project, path: project },
     { project, path },
   ]) {
-    await store.openEditor(target)
+    await store.startEditorServer(target)
     assert.equal(editors.status(target), 'running')
-    const stopped = await store.stopEditor(target)
+    const stopped = await store.stopEditorServer(target)
     const row = stopped.worktrees.find((entry) => entry.path === target.path)
-    assert.equal(row?.editor, 'stopped')
+    assert.equal(row?.editorServer, 'stopped')
     assert.equal(row?.color, undefined)
     assert.equal(stopped.worktrees.length, 2)
     // Stopping an already stopped editor is a no-op.
-    await store.stopEditor(target)
-    await store.openEditor(target)
+    await store.stopEditorServer(target)
+    await store.startEditorServer(target)
     assert.equal(editors.status(target), 'running')
   }
   assert.equal(editors.retained.length, reconciliations)
   await assert.rejects(
-    store.stopEditor({ project, path: join(root, 'unknown') }),
+    store.stopEditorServer({ project, path: join(root, 'unknown') }),
     /not in the cache/,
   )
   await assert.rejects(
-    store.stopEditor({ project: root, path }),
+    store.stopEditorServer({ project: root, path }),
     /not configured/,
   )
   // Startup is not stoppable, so cancellation never becomes an open failure.
-  await store.openEditor({ project, path })
+  await store.startEditorServer({ project, path })
   const status = editors.status.bind(editors)
   editors.status = () => 'starting'
-  await assert.rejects(store.stopEditor({ project, path }), /still starting/)
+  await assert.rejects(
+    store.stopEditorServer({ project, path }),
+    /still starting/,
+  )
   editors.status = status
   assert.equal(editors.status({ project, path }), 'running')
   await store.startDelete({ project, path })
-  await assert.rejects(store.stopEditor({ project, path }), /still running/)
+  await assert.rejects(
+    store.stopEditorServer({ project, path }),
+    /still running/,
+  )
   await store.settled()
 })
 
@@ -630,7 +703,7 @@ test('synthetic creation failures stay outside Git membership and disappear when
       'prunable',
     ])
   }
-  await store.openEditor({ project: other, path: other })
+  await store.startEditorServer({ project: other, path: other })
   assert.equal(editors.retained.length, 1)
 
   const path = join(root, 'never-created')
@@ -653,8 +726,8 @@ test('synthetic creation failures stay outside Git membership and disappear when
       missing: true,
       operation: 'creating',
       error: undefined,
-      editor: 'stopped',
-      editorDetail: undefined,
+      editorServer: 'stopped',
+      editorServerDetail: undefined,
     },
   )
   assert.deepEqual(
@@ -668,19 +741,24 @@ test('synthetic creation failures stay outside Git membership and disappear when
   assert.equal(failure.operation, undefined)
   assert.equal(editors.retained.length, 2)
   assert.deepEqual(editors.retained[1], membership)
-  await assert.rejects(store.openEditor({ project, path }), /unavailable/)
+  await assert.rejects(
+    store.startEditorServer({ project, path }),
+    /unavailable/,
+  )
   assert.deepEqual(
     (await store.refresh()).worktrees.find((row) => row.path === path),
     failure,
   )
+  // A refresh applies each project's scan separately.
   assert.deepEqual(editors.retained[2], membership)
+  assert.deepEqual(editors.retained[3], membership)
   const cleared = store.setError({ project, path })
   assert.ok(!cleared.worktrees.some((row) => row.path === path))
   assert.equal(
-    cleared.worktrees.find((row) => row.path === other)?.editor,
+    cleared.worktrees.find((row) => row.path === other)?.editorServer,
     'running',
   )
-  assert.equal(editors.retained.length, 3)
+  assert.equal(editors.retained.length, 4)
 })
 
 test('Git discovery replaces creation intent without losing its error or reconciling on editor status', async (t) => {
@@ -709,7 +787,7 @@ test('Git discovery replaces creation intent without losing its error or reconci
   assert.equal(recovered.missing, undefined)
   assert.equal(recovered.error, error)
   const reconciliations = editors.retained.length
-  await store.openEditor({ project, path })
+  await store.startEditorServer({ project, path })
   assert.equal(editors.retained.length, reconciliations)
   assert.equal(
     store.list().worktrees.find((row) => row.path === path)?.error,
@@ -720,7 +798,7 @@ test('Git discovery replaces creation intent without losing its error or reconci
     .worktrees.find((row) => row.path === path)!
   assert.ok(cleared)
   assert.equal(cleared.error, undefined)
-  assert.equal(cleared.editor, 'running')
+  assert.equal(cleared.editorServer, 'running')
   assert.equal(editors.retained.length, reconciliations)
 
   await git(project, 'worktree', 'remove', path)
@@ -745,7 +823,7 @@ test(
     t.after(() => server.close())
     const first = await connectClient(t, server.url)
     const second = await connectClient(t, server.url)
-    assert.equal((await first.listWorktrees()).worktrees.length, 1)
+    assert.equal((await first.companionListWorktrees()).worktrees.length, 1)
     const createdFeature = (snapshot: WorktreeSnapshot) =>
       snapshot.worktrees.some(
         (row) => row.branch === 'feature' && !row.operation && !row.error,
@@ -772,8 +850,11 @@ test(
       }),
     )
     assert.equal(first.getStatus().state, 'connected')
-    await first.setWorktreeError({ project, path: join(root, 'duplicate') })
-    await first.listWorktrees()
+    await first.companionSetWorktreeError({
+      project,
+      path: join(root, 'duplicate'),
+    })
+    await first.companionListWorktrees()
     const removedFeature = (snapshot: WorktreeSnapshot) =>
       !snapshot.worktrees.some((row) => row.path === join(root, 'feature'))
     const removedEvents = [
@@ -795,9 +876,9 @@ test(
       'outside',
       join(root, 'outside'),
     )
-    assert.equal((await second.listWorktrees()).worktrees.length, 1)
-    const refreshedEvent = once(second, 'worktreesUpdated')
-    const refreshed = await first.refreshWorktrees()
+    assert.equal((await second.companionListWorktrees()).worktrees.length, 1)
+    const refreshedEvent = once(second, 'desktopUpdateWorktrees')
+    const refreshed = await first.companionRefreshWorktrees()
     assert.equal(refreshed.worktrees.length, 2)
     assert.deepEqual((await refreshedEvent)[0], refreshed)
     first.stop()
@@ -808,11 +889,14 @@ test(
       path: '../offline',
     })
     const reconnected = await connectClient(t, server.url)
-    assert.equal((await reconnected.listWorktrees()).worktrees.length, 3)
+    assert.equal(
+      (await reconnected.companionListWorktrees()).worktrees.length,
+      3,
+    )
     const { socket } = await socketPeer(t, server.url)
     const reply = await socket
       .timeout(2000)
-      .emitWithAck('worktrees:create', { project })
+      .emitWithAck('companionCreateWorktree', { project })
     assert.equal(reply.ok, false)
     assert.ok(reply.error)
     assert.equal(socket.connected, true)
@@ -849,11 +933,11 @@ test(
     const observer = await connectClient(t, server.url)
     const updates: WorktreeSnapshot[] = []
     const observed: WorktreeSnapshot[] = []
-    creator.on('worktreesUpdated', (update) => updates.push(update))
-    observer.on('worktreesUpdated', (update) => observed.push(update))
+    creator.on('desktopUpdateWorktrees', (update) => updates.push(update))
+    observer.on('desktopUpdateWorktrees', (update) => observed.push(update))
     for (const branch of ['new-branch', '']) {
       const path = join(root, branch || 'existing-worktree')
-      const before = await creator.listWorktrees()
+      const before = await creator.companionListWorktrees()
       const input = {
         project,
         baseBranch: branch ? 'main' : 'existing',
@@ -868,7 +952,7 @@ test(
         await git(path, 'symbolic-ref', '--short', 'HEAD'),
         branch || 'existing',
       )
-      const snapshot = await creator.listWorktrees()
+      const snapshot = await creator.companionListWorktrees()
       assert.equal(snapshot.worktrees.length, before.worktrees.length + 1)
       assert.ok(snapshot.revision > before.revision)
       assert.match(
@@ -884,15 +968,15 @@ test(
       )
       assert.deepEqual(updates.at(-1), snapshot)
       const reconnected = await connectClient(t, server.url)
-      assert.deepEqual(await reconnected.listWorktrees(), snapshot)
+      assert.deepEqual(await reconnected.companionListWorktrees(), snapshot)
       await assert.rejects(
         completeCreate(creator, input),
         /already exists|already (checked out|used)/,
       )
-      assert.deepEqual(await creator.listWorktrees(), snapshot)
+      assert.deepEqual(await creator.companionListWorktrees(), snapshot)
     }
     // The observer's subsequent reply follows all broadcasts on the same socket.
-    assert.deepEqual(await observer.listWorktrees(), updates.at(-1))
+    assert.deepEqual(await observer.companionListWorktrees(), updates.at(-1))
     assert.deepEqual(observed, updates)
     assert.equal(
       updates.filter((update) => update.worktrees.some((row) => row.operation))
@@ -950,7 +1034,7 @@ test(
       )
       assert.deepEqual(await pushed, snapshot)
     }
-    const before = await creator.listWorktrees()
+    const before = await creator.companionListWorktrees()
     await assert.rejects(
       completeCreate(creator, {
         project,
@@ -968,13 +1052,16 @@ test(
         path: join(root, 'missing'),
       }),
     )
-    const failed = await creator.listWorktrees()
+    const failed = await creator.companionListWorktrees()
     assert.equal(
       failed.worktrees.filter((row) => row.missing && row.error).length,
       2,
     )
-    await creator.setWorktreeError({ project, path: join(root, 'duplicate') })
-    const cleared = await creator.setWorktreeError({
+    await creator.companionSetWorktreeError({
+      project,
+      path: join(root, 'duplicate'),
+    })
+    const cleared = await creator.companionSetWorktreeError({
       project,
       path: join(root, 'missing'),
     })
@@ -1016,7 +1103,7 @@ test('Git refs prefer local branches over tags and require a new branch for othe
   })
   t.after(() => server.close())
   const client = await connectClient(t, server.url)
-  assert.deepEqual(await client.getWorktreeBranches(project), [
+  assert.deepEqual(await client.companionListBranches(project), [
     { name: 'feature', local: true },
     { name: 'main', local: true },
     { name: 'origin/feature', local: true },
@@ -1057,6 +1144,56 @@ test('Git refs prefer local branches over tags and require a new branch for othe
     )
     await assert.rejects(access(path))
   }
+})
+
+test('bootstrap output is logged beside Git metadata and summarized in the row error', async (t) => {
+  const { root, makeProject } = await fixture(t)
+  const project = await makeProject('project')
+  const store = await WorktreeStore.open(
+    [
+      {
+        mainWorktreePath: project,
+        bootstrapCommand: 'echo to-stdout && echo to-stderr >&2 && exit 3',
+      },
+    ],
+    new WorktreeEditors(),
+  )
+  const path = join(root, 'logged')
+  await store.startCreate({
+    project,
+    path,
+    branch: 'logged',
+    baseBranch: 'main',
+  })
+  await store.settled()
+  const row = store.list().worktrees.find((entry) => entry.path === path)!
+  assert.equal(
+    row.error,
+    'Bootstrap command failed: exit code 3. Open the bootstrap log for details.',
+  )
+  assert.equal(row.missing, undefined)
+  assert.equal(row.bootstrapFailed, true)
+  await store.startEditorServer({ project, path })
+  assert.equal(
+    store.list().worktrees.find((entry) => entry.path === path)
+      ?.bootstrapFailed,
+    true,
+    'opening the worktree keeps its bootstrap error',
+  )
+  await store.stopEditorServer({ project, path })
+  const log = await store.bootstrapLog({ project, path })
+  const content = await readFile(log.path, 'utf8')
+  assert.match(content, /^\$ echo to-stdout/)
+  assert.match(content, /to-stdout/)
+  assert.match(content, /to-stderr/)
+  assert.equal(await git(path, 'status', '--porcelain'), '')
+  await assert.rejects(
+    store.bootstrapLog({ project, path: project }),
+    /no bootstrap log/,
+  )
+  await store.startDelete({ project, path })
+  await store.settled()
+  await assert.rejects(access(log.path), { code: 'ENOENT' })
 })
 
 test('bootstrap uses the account shell for shell-specific commands', async (t) => {
@@ -1148,7 +1285,7 @@ test('creation failures through directory aliases stay on the canonical worktree
     const failed = store.list()
     const row = failed.worktrees.find((row) => row.path === path)!
     assert.ok(row)
-    assert.match(row.error!, /alias-bootstrap-failed/)
+    assert.match(row.error!, /Bootstrap command failed: exit code 1/)
     assert.equal(row.operation, undefined)
     assert.equal(row.missing, undefined)
     assert.equal(
@@ -1204,10 +1341,15 @@ test('worktree protocol validates inputs and full snapshots', () => {
     branch: '',
     path: '../worktree',
   }
-  assert.ok(companionRequests.create.input.safeParse(input).success)
+  assert.ok(
+    companionRequests.companionCreateWorktree.input.safeParse(input).success,
+  )
   for (const branch of [undefined, null, 42, '\0', 'a'.repeat(4097)])
     assert.equal(
-      companionRequests.create.input.safeParse({ ...input, branch }).success,
+      companionRequests.companionCreateWorktree.input.safeParse({
+        ...input,
+        branch,
+      }).success,
       false,
     )
   for (const input of [
@@ -1216,13 +1358,17 @@ test('worktree protocol validates inputs and full snapshots', () => {
     { project: 'repo', path: '\0' },
     { project: 'repo', path: 2 },
   ])
-    assert.equal(companionRequests.delete.input.safeParse(input).success, false)
+    assert.equal(
+      companionRequests.companionDeleteWorktree.input.safeParse(input).success,
+      false,
+    )
   for (const snapshot of [
     { revision: 1, projects: [], worktrees: [null] },
     { revision: -1, projects: [], worktrees: [] },
   ])
     assert.equal(
-      companionRequests.list.output.safeParse(snapshot).success,
+      companionRequests.companionListWorktrees.output.safeParse(snapshot)
+        .success,
       false,
     )
 })
@@ -1278,7 +1424,7 @@ test(
       const state = new CompanionState(observer)
       state.on('snapshot', (snapshot) => notifications.update(snapshot))
       const path = join(root, 'new')
-      const created = await creator.createWorktree({
+      const created = await creator.companionCreateWorktree({
         project,
         path,
         branch: 'new',
@@ -1288,13 +1434,21 @@ test(
         created.worktrees.find((row) => row.path === path)?.operation,
         'creating',
       )
-      const deleting = await creator.deleteWorktree({ project, path: existing })
+      // Deletion runs alongside the creation instead of waiting for its bootstrap.
+      const deleted = nextSnapshot(
+        observer,
+        (snapshot) => !snapshot.worktrees.some((row) => row.path === existing),
+      )
+      const deleting = await creator.companionDeleteWorktree({
+        project,
+        path: existing,
+      })
       assert.equal(
         deleting.worktrees.find((row) => row.path === existing)?.operation,
         'deleting',
       )
       await assert.rejects(
-        creator.createWorktree({
+        creator.companionCreateWorktree({
           project,
           path,
           branch: 'new',
@@ -1303,21 +1457,23 @@ test(
         /already running/,
       )
       creator.stop()
+      assert.equal(
+        (await deleted).worktrees.find((row) => row.path === path)?.operation,
+        'creating',
+      )
       const restarted = await connectClient(t, server.url)
-      const recovered = await restarted.listWorktrees()
+      const recovered = await restarted.companionListWorktrees()
       assert.equal(
         recovered.worktrees.find((row) => row.path === path)?.operation,
         'creating',
       )
-      assert.equal(
-        recovered.worktrees.find((row) => row.path === existing)?.operation,
-        'deleting',
+      assert.deepEqual(await observer.companionListWorktrees(), recovered)
+      // Opening another worktree does not wait for the bootstrap either.
+      assert.ok(
+        await restarted.companionStartEditorServer({ project, path: project }),
       )
-      assert.deepEqual(await observer.listWorktrees(), recovered)
-      await restarted.listWorktrees()
-      const finished = nextSnapshot(
-        restarted,
-        (snapshot) => !snapshot.worktrees.some((row) => row.path === existing),
+      const finished = nextSnapshot(restarted, (snapshot) =>
+        snapshot.worktrees.some((row) => row.path === path && !row.operation),
       )
       assert.equal(notices.length, 0, 'Bootstrap is still running')
       await writeFile(gate, '')
@@ -1327,13 +1483,13 @@ test(
         path,
       )
       assert.equal(
-        (await restarted.listWorktrees()).worktrees.find(
+        (await restarted.companionListWorktrees()).worktrees.find(
           (row) => row.path === path,
         )?.operation,
         undefined,
       )
       assert.ok(
-        !(await observer.listWorktrees()).worktrees.some(
+        !(await observer.companionListWorktrees()).worktrees.some(
           (row) => row.path === existing,
         ),
       )
@@ -1344,7 +1500,7 @@ test(
 
       const failureNotice = nextSnapshot(observer, (snapshot) =>
         snapshot.worktrees.some((row) =>
-          row.error?.includes('bootstrap exploded'),
+          row.error?.includes('Bootstrap command failed'),
         ),
       )
       await writeFile(gate, 'bootstrap exploded')
@@ -1356,27 +1512,30 @@ test(
           branch: 'failed-bootstrap',
           baseBranch: 'main',
         }),
-        /Bootstrap command failed:.*bootstrap exploded/s,
+        /Bootstrap command failed: exit code 1/,
       )
       await failureNotice
       assert.equal(notices.length, 2)
       assert.equal(notices[1].title, 'Worktree creation failed')
-      assert.match(notices[1].body!, /bootstrap exploded/)
+      assert.match(notices[1].body!, /Bootstrap command failed/)
       restarted.stop()
       const afterFailure = await connectClient(t, server.url)
-      const row = (await afterFailure.listWorktrees()).worktrees.find(
+      const row = (await afterFailure.companionListWorktrees()).worktrees.find(
         (row) => row.path === failedPath,
       )!
-      assert.match(row.error!, /bootstrap exploded/)
+      assert.match(row.error!, /Bootstrap command failed/)
       assert.equal(row.operation, undefined)
       assert.equal(row.missing, undefined)
       assert.equal(
         await git(failedPath, 'symbolic-ref', '--short', 'HEAD'),
         'failed-bootstrap',
       )
-      await afterFailure.setWorktreeError({ project, path: failedPath })
+      await afterFailure.companionSetWorktreeError({
+        project,
+        path: failedPath,
+      })
       assert.equal(
-        (await observer.listWorktrees()).worktrees.find(
+        (await observer.companionListWorktrees()).worktrees.find(
           (row) => row.path === failedPath,
         )?.error,
         undefined,
@@ -1387,20 +1546,23 @@ test(
         completeDelete(afterFailure, { project, path: failedPath }),
         /untracked|modified/i,
       )
-      const dirty = (await afterFailure.listWorktrees()).worktrees.find(
-        (row) => row.path === failedPath,
-      )!
+      const dirty = (
+        await afterFailure.companionListWorktrees()
+      ).worktrees.find((row) => row.path === failedPath)!
       assert.match(dirty.error!, /untracked|modified/i)
       assert.equal(dirty.operation, undefined)
       assert.equal(
-        (await afterFailure.refreshWorktrees()).worktrees.find(
+        (await afterFailure.companionRefreshWorktrees()).worktrees.find(
           (row) => row.path === failedPath,
         )?.error,
         dirty.error,
       )
-      await afterFailure.setWorktreeError({ project, path: failedPath })
+      await afterFailure.companionSetWorktreeError({
+        project,
+        path: failedPath,
+      })
       assert.equal(
-        (await observer.listWorktrees()).worktrees.find(
+        (await observer.companionListWorktrees()).worktrees.find(
           (row) => row.path === failedPath,
         )?.error,
         undefined,
@@ -1446,7 +1608,7 @@ test(
     })
     try {
       const client = await connectClient(t, server.url)
-      const accepted = await client.createWorktree({
+      const accepted = await client.companionCreateWorktree({
         project,
         path,
         branch: 'during-shutdown',
@@ -1583,7 +1745,7 @@ test(
         assert.equal(child.exitCode, null, output)
         await delay(20, undefined, { signal: t.signal })
       }
-      const accepted = await client.createWorktree({
+      const accepted = await client.companionCreateWorktree({
         project,
         path,
         branch: 'during-dev-shutdown',
@@ -1669,7 +1831,7 @@ test('deletion reports local files over RPC and requires an explicit force retry
     completeDelete(client, { project, path, deleteBranch: true }),
     /modified or untracked/,
   )
-  const failed = (await client.listWorktrees()).worktrees.find(
+  const failed = (await client.companionListWorktrees()).worktrees.find(
     (row) => row.path === path,
   )!
   assert.deepEqual(failed.deletionFailure, {
@@ -1726,6 +1888,12 @@ test('force removal keeps the branch by default and still protects main and lock
   assert.equal(failed.deletionFailure?.canForce, false)
   await access(join(path, 'untracked.txt'))
   await git(project, 'worktree', 'unlock', path)
+  // The failed deletion's rescan cached the lock; external unlocks need a refresh.
+  await assert.rejects(
+    store.startDelete({ project, path, force: true }),
+    /Unlock/,
+  )
+  await store.refresh()
   await store.startDelete({ project, path, force: true })
   await store.settled()
   assert.ok(!store.list().worktrees.some((row) => row.path === path))
@@ -1852,13 +2020,13 @@ test('worktree colors persist across concurrent opens, editor stops, refreshes a
   const main = { project, path: project }
   const branch = { project, path: linked }
   await assert.rejects(
-    store.openEditor({ project, path: join(root, 'missing') }),
+    store.startEditorServer({ project, path: join(root, 'missing') }),
   )
   assert.equal(colors.get(main), undefined)
   await Promise.all([
-    store.openEditor(main),
-    store.openEditor(branch),
-    store.openEditor(main),
+    store.startEditorServer(main),
+    store.startEditorServer(branch),
+    store.startEditorServer(main),
   ])
   const assigned = store.list().worktrees.map((row) => row.color)
   assert.ok(
@@ -1895,17 +2063,19 @@ test('worktree colors persist across concurrent opens, editor stops, refreshes a
     restoredColors,
   )
   t.after(() => restarted.close())
-  assert.ok(restarted.list().worktrees.every((row) => row.editor === 'stopped'))
+  assert.ok(
+    restarted.list().worktrees.every((row) => row.editorServer === 'stopped'),
+  )
   assert.deepEqual(
     restarted.list().worktrees.map((row) => row.color),
     [undefined, undefined],
   )
-  await restarted.openEditor(main)
+  await restarted.startEditorServer(main)
   assert.deepEqual(
     restarted.list().worktrees.map((row) => row.color),
     [assigned[0], undefined],
   )
-  await restarted.openEditor(branch)
+  await restarted.startEditorServer(branch)
   assert.deepEqual(
     restarted.list().worktrees.map((row) => row.color),
     assigned,

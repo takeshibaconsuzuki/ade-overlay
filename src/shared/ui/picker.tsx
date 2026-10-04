@@ -14,7 +14,7 @@ const ActionContext = createContext<{
   key: string
   available: boolean
   register: Register
-  activate: () => void
+  open: () => void
 } | null>(null)
 
 export function PickerAction(
@@ -37,7 +37,7 @@ export function PickerAction(
       ref={ref}
       data-picker-key={key}
       disabled={!action.available}
-      onClick={action.activate}
+      onClick={action.open}
     />
   )
 }
@@ -47,14 +47,14 @@ function PickerRow({
   available,
   highlighted,
   register,
-  activate,
+  open,
   children,
 }: {
   itemKey: string
   available: boolean
   highlighted: boolean
   register: Register
-  activate: () => void
+  open: () => void
   children: ReactNode
 }) {
   const ref = useCallback(
@@ -64,7 +64,7 @@ function PickerRow({
   return (
     <li ref={ref} data-highlighted={highlighted || undefined}>
       <ActionContext.Provider
-        value={{ key: itemKey, available, register, activate }}
+        value={{ key: itemKey, available, register, open }}
       >
         {children}
       </ActionContext.Provider>
@@ -80,7 +80,7 @@ export function Picker<T>({
   available,
   resultsKey,
   resetVersion = 0,
-  onActivate,
+  onOpen,
   renderItem,
   search,
   header,
@@ -98,7 +98,7 @@ export function Picker<T>({
   resultsKey: string
   // Change to reset navigation even when search and results are unchanged.
   resetVersion?: number
-  onActivate: (item: T) => void
+  onOpen: (item: T) => void
   renderItem: (
     item: T,
     interaction: { tooltipDismissVersion: number },
@@ -151,7 +151,7 @@ export function Picker<T>({
                   highlight.key === entries[index].key
                 }
                 register={register}
-                activate={() => onActivate(item)}
+                open={() => onOpen(item)}
               >
                 {renderItem(item, {
                   tooltipDismissVersion,
