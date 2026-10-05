@@ -12,7 +12,7 @@ const manifest = {
   type: 'module',
   main: 'server/index.js',
   scripts: { start: 'node server/index.js' },
-  engines: { node: '>=22.22.3' },
+  engines: { node: '>=24.21.0' },
   dependencies: {
     'file-type': app.dependencies['file-type'],
     filenamify: app.dependencies.filenamify,

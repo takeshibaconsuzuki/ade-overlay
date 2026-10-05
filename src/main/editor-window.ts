@@ -95,7 +95,6 @@ export class EditorWindow {
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
-          backgroundThrottling: false,
         },
       })
       const isEditorUrl = (target: URL | null): boolean =>

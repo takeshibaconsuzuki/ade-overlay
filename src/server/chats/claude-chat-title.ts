@@ -25,7 +25,10 @@ export async function readClaudeTitles(
     try {
       const found = await new Promise<Map<string, string>>(
         (resolve, reject) => {
-          worker.once('message', resolve)
+          // Node's watch mode also posts its own messages from a worker.
+          worker.on('message', (message: unknown) => {
+            if (message instanceof Map) resolve(message)
+          })
           worker.once('error', reject)
           worker.once('exit', () => resolve(new Map()))
         },
