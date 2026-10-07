@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { chmod, lstat, open, readdir, realpath } from 'node:fs/promises'
+import { lstat, open, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
@@ -88,14 +88,27 @@ async function removalFiles(path: string): Promise<string[]> {
 
 // Tools such as envtest install read-only directories, whose entries Git
 // cannot unlink. Windows does not restrict deletion by directory mode.
+// One find process walks the tree. Walking it from this process would queue a
+// file operation per directory on Node's shared I/O thread pool, stalling every
+// other request's file access for the duration of the deletion.
 async function makeDirectoriesWritable(path: string): Promise<void> {
-  const { mode } = await lstat(path)
-  if ((mode & 0o700) !== 0o700) await chmod(path, mode | 0o700)
-  const entries = await readdir(path, { withFileTypes: true })
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => makeDirectoriesWritable(join(path, entry.name))),
+  // Each directory is fixed when visited, before find descends into it.
+  await execute(
+    'find',
+    [
+      path,
+      '-type',
+      'd',
+      '!',
+      '-perm',
+      '-0700',
+      '-exec',
+      'chmod',
+      'u+rwx',
+      '{}',
+      ';',
+    ],
+    { windowsHide: true },
   )
 }
 
