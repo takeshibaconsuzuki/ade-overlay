@@ -2,11 +2,14 @@
 
 import argparse
 import hashlib
+import json
 import logging
+import os
 import platform
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -14,7 +17,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-NODE_VERSION = "22.22.3"
+NODE_VERSION = "24.21.0"
 NODE_BASE_URL = "https://nodejs.org/dist"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -110,9 +113,10 @@ def extract_archive(archive: Path, destination: Path, root_name: str) -> None:
                     target.mkdir(parents=True, exist_ok=True)
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with zip_file.open(zip_member) as zip_source, target.open(
-                    "wb"
-                ) as output:
+                with (
+                    zip_file.open(zip_member) as zip_source,
+                    target.open("wb") as output,
+                ):
                     shutil.copyfileobj(zip_source, output)
     else:
         with tarfile.open(archive) as tar_file:
@@ -145,18 +149,66 @@ def extract_archive(archive: Path, destination: Path, root_name: str) -> None:
                 target.chmod(tar_member.mode)
 
 
+def read_state(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_state(path: Path, state: object) -> None:
+    # Readers should never see a partially written success marker.
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, delete=False
+    ) as output:
+        temporary = Path(output.name)
+        json.dump(state, output)
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def file_signature(path: Path) -> Optional[list[int]]:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return [stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+
+
+def node_paths(node_dir: Path) -> tuple[Path, Path]:
+    if platform.system() == "Windows":
+        return node_dir / "node.exe", node_dir / "node_modules/npm/bin/npm-cli.js"
+    return node_dir / "bin/node", node_dir / "lib/node_modules/npm/bin/npm-cli.js"
+
+
+def node_state(node_dir: Path) -> dict:
+    node_binary, npm_cli = node_paths(node_dir)
+    return {
+        "version": NODE_VERSION,
+        "node": file_signature(node_binary),
+        "npm": file_signature(npm_cli),
+    }
+
+
 def bootstrap(force: bool) -> Path:
     os_name, arch = node_platform()
     extension = "zip" if os_name == "win" else "tar.xz"
     root_name = f"node-v{NODE_VERSION}-{os_name}-{arch}"
     filename = f"{root_name}.{extension}"
     node_dir = PROJECT_ROOT / f".node.{os_name}-{arch}"
-    node_binary = node_dir / ("node.exe" if os_name == "win" else "bin/node")
+    node_binary, npm_cli = node_paths(node_dir)
+    marker = node_dir / ".bootstrap-node.json"
+    state = node_state(node_dir)
 
-    if node_binary.exists() and not force:
+    if not force and state["node"] and state["npm"] and read_state(marker) == state:
+        return node_dir
+
+    if node_binary.exists() and npm_cli.exists() and not force:
         installed_version = existing_node_version(node_binary)
         if installed_version == NODE_VERSION:
-            logger.info("Node v%s already exists at %s", NODE_VERSION, node_dir)
+            write_state(marker, state)
             return node_dir
         if installed_version is None:
             logger.info("Existing Node at %s is invalid; replacing it", node_dir)
@@ -190,7 +242,56 @@ def bootstrap(force: bool) -> Path:
         shutil.move(str(extracted), node_dir)
 
     logger.info("Vendored Node v%s into %s", NODE_VERSION, node_dir)
+    write_state(marker, node_state(node_dir))
     return node_dir
+
+
+def dependency_state(node_dir: Path) -> dict:
+    # Hash these small inputs instead of walking node_modules or launching npm.
+    # The hidden lockfile also detects installs performed outside bootstrap.
+    return {
+        "node": node_state(node_dir),
+        "platform": list(node_platform()),
+        "inputs": {
+            name: sha256(PROJECT_ROOT / name)
+            if (PROJECT_ROOT / name).is_file()
+            else None
+            for name in (
+                "package.json",
+                "package-lock.json",
+                "npm-shrinkwrap.json",
+                ".npmrc",
+            )
+        },
+        "installed_lock": file_signature(
+            PROJECT_ROOT / "node_modules/.package-lock.json"
+        ),
+    }
+
+
+def install_dependencies(node_dir: Path, force: bool = False) -> None:
+    marker = PROJECT_ROOT / "node_modules/.bootstrap-dependencies.json"
+    state = dependency_state(node_dir)
+    if not force and state["installed_lock"] and read_state(marker) == state:
+        return
+
+    # An interrupted or failed install must not leave an old success marker.
+    marker.unlink(missing_ok=True)
+    node_binary, npm_cli = node_paths(node_dir)
+    env = os.environ.copy()
+    env["PATH"] = str(node_binary.parent) + os.pathsep + env.get("PATH", "")
+    logger.info("Installing npm dependencies")
+    subprocess.run(
+        [str(node_binary), str(npm_cli), "install", "--no-audit", "--no-fund"],
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdout=sys.stderr,
+        stderr=sys.stderr,
+        check=True,
+    )
+    # npm can update package-lock.json, so capture inputs after a successful run.
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    write_state(marker, dependency_state(node_dir))
 
 
 def powershell_quote(value: str) -> str:
@@ -225,8 +326,8 @@ def print_env(node_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Install the expected Node.js version if needed and print shell commands "
-            "to activate it (PowerShell on Windows, POSIX shell on Linux/macOS)."
+            "Install the development environment if needed, then print shell commands "
+            "to activate it."
         ),
         epilog=(
             "PowerShell: python scripts/bootstrap.py | iex\n"
@@ -237,7 +338,7 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="replace the existing vendored Node directory",
+        help="reinstall the development environment",
     )
     args = parser.parse_args()
 
@@ -245,6 +346,7 @@ def main() -> None:
     logging.basicConfig(format="%(message)s", level=logging.INFO)
 
     node_dir = bootstrap(force=args.force)
+    install_dependencies(node_dir, force=args.force)
     print_env(node_dir)
 
 

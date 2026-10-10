@@ -1,26 +1,34 @@
-# Repository Guidelines
+# Agent Rules
 
-## Build, Test, and Development Commands
-
-- `python scripts/bootstrap.py | iex` (PowerShell): installs the expected Node.js version if it is missing or stale and activates it in the current shell.
-- `eval "$(python scripts/bootstrap.py)"` (Linux/macOS): initializes and activates the same development environment in the current POSIX shell.
-- Add `--force` before the pipe or inside the command substitution to replace the existing vendored Node.js directory.
-- `npm install`: installs dependencies and downloads the Electron app binary via `postinstall`.
-- `npm run dev`: starts the Electron/Vite development app.
-- `npm run build`: builds production output into `out/`.
-- `npm run typecheck`: runs TypeScript checks for Electron main/preload and React renderer code.
-- `npm run lint`: runs ESLint.
-- `npm run lint:fix`: runs ESLint with auto-fixes.
-- `npm run format`: formats files with Prettier.
-- `npm run upgrade`: upgrades dependencies to the latest peer-compatible versions, pins exact versions, and runs `npm install`.
-
-## Dependency Policy
-
-- Keep direct dependencies pinned to exact versions in `package.json`.
+- Activate the development environment before running any other command.
+- Do not install dependencies globally. Install them into the project instead, using methods such as vendoring or virtual environments.
 - Use `npm run upgrade` instead of manually editing version ranges when updating dependencies.
+- Keep prose focused on durable intent and contracts. Preserve general wording that already describes the behavior correctly. Don’t add implementation details or enumerate current components. Change documentation only when the task makes it inaccurate or incomplete.
 
-## Architecture Notes
+# Code Rules
 
-- `src/main/`: Electron main process. Owns app lifecycle, window creation, and privileged OS/Electron work.
-- `src/preload/`: secure bridge loaded before the renderer. Expose only narrow renderer APIs with `contextBridge`.
-- `src/renderer/`: React/browser UI. Treat this as unprivileged browser code; do not rely on Node APIs here.
+- Do not manually wrap prose in markdown or text files. Use newlines only when they serve a structural or semantic purpose.
+- Delegate aggressively to well-maintained libraries, even when the current requirement is small or isolated. They usually handle edge cases better and give us a stronger base for future requirements.
+- We are still in development. Do not implement backwards compatibility or migrations.
+- Keep direct dependencies pinned to exact versions in `package.json`.
+- Keep the fast path of `scripts/bootstrap.py` fast enough to run before every command; the agent does not have a persistent shell session, so it must run it before every command.
+
+# Development
+
+To install the development environment if needed and activate it:
+
+```powershell
+python scripts/bootstrap.py | iex
+```
+
+On Posix:
+
+```bash
+eval "$(python scripts/bootstrap.py)"
+```
+
+- `npm run dev`: start the development app.
+- `npm run lint:fix`: run lint with auto-fixes.
+- `npm run format`: format files.
+
+See `package.json` for other commands.
