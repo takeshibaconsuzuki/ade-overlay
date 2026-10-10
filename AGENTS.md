@@ -7,6 +7,7 @@
 
 # Code Rules
 
+- Follow surrounding code and documentation conventions. Document contracts and lifecycle behavior that names and types do not make clear.
 - When dependency injection is needed for testing, define an explicit interface and a separate implementation.
 - Do not manually wrap prose in markdown or text files. Use newlines only when they serve a structural or semantic purpose.
 - Delegate aggressively to well-maintained libraries, even when the current requirement is small or isolated. They usually handle edge cases better and give us a stronger base for future requirements.

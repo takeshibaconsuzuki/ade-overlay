@@ -11,6 +11,7 @@ import { createConfigStore } from './config-store'
 import { startRpcServer, type RpcServer } from './server'
 import { WorktreeStore } from './worktree-store'
 import type { VscodeServerManager } from './vscode-manager'
+import { VscodeProxy } from './vscode-proxy'
 
 const log = logger.child({ component: 'server' })
 
@@ -103,6 +104,7 @@ export async function startServer(
         sendVscodeServers(client, vscode.snapshot)
         sendWorktrees(client, worktrees.snapshot)
       },
+      new VscodeProxy(vscode),
     )
   } catch (error) {
     await close()

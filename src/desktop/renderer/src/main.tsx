@@ -22,7 +22,7 @@ function WorktreeRow({
   const start = async () => {
     setRequestError(null)
     try {
-      await window.desktop.ensureVscodeServer(worktree.path)
+      await window.desktop.openWorktree(worktree.path)
     } catch (error) {
       setRequestError(
         error instanceof Error
@@ -88,7 +88,7 @@ function WorktreeRow({
   )
 }
 
-function App(): React.JSX.Element {
+function WorktreePicker(): React.JSX.Element {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
@@ -103,7 +103,7 @@ function App(): React.JSX.Element {
       setWorktrees(worktrees)
       setError(null)
     })
-    window.desktop.initialize()
+    window.desktop.initializeWorktreePicker()
     return () => {
       window.desktop.setOnConnectionStateChangedListener(undefined)
       window.desktop.setOnVscodeServersChangedListener(undefined)
@@ -173,4 +173,37 @@ function App(): React.JSX.Element {
   )
 }
 
-createRoot(document.getElementById('root')!).render(<App />)
+function EditorShell(): React.JSX.Element {
+  const [state, setState] = useState<import('../../api').EditorState>({
+    title: 'VS Code',
+  })
+  useEffect(() => {
+    window.desktop.setOnEditorStateChangedListener(setState)
+    window.desktop.initializeEditorWindow()
+    return () => window.desktop.setOnEditorStateChangedListener(undefined)
+  }, [])
+  return state.error ? (
+    <main className="editor-error">
+      <h1>{state.title}</h1>
+      <p role="alert">{state.error}</p>
+      <button
+        type="button"
+        onClick={() => void window.desktop.retryEditor().catch(() => {})}
+      >
+        Retry
+      </button>
+    </main>
+  ) : (
+    <div
+      className="connection-screen"
+      role="status"
+      aria-label={`Loading ${state.title}`}
+    >
+      <span className="connection-spinner" aria-hidden="true" />
+    </div>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(
+  window.location.hash === '#editor' ? <EditorShell /> : <WorktreePicker />,
+)

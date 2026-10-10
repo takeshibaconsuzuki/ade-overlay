@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
 import type { VscodeServerStatus } from '../shared/api'
 import { logger } from '../shared/logger'
 import type { VscodeLauncher, VscodeProcess } from './vscode-process'
 import type { VscodeInstallation, VscodeRuntime } from './vscode-runtime'
+import { vscodeBasePath } from './vscode-route'
+import type { VscodeProxyTargets } from './vscode-proxy'
 
 const log = logger.child({ component: 'vscode-manager' })
 
@@ -11,14 +12,10 @@ interface Entry {
   status: VscodeServerStatus
   task?: Promise<void>
   process?: VscodeProcess
+  target?: string
 }
 
-function key(path: string): string {
-  const absolute = resolve(path)
-  return process.platform === 'win32' ? absolute.toLowerCase() : absolute
-}
-
-export interface VscodeServerManager {
+export interface VscodeServerManager extends VscodeProxyTargets {
   readonly snapshot: VscodeServerStatus[]
   setOnChangedListener(
     listener: ((snapshot: VscodeServerStatus[]) => void) | undefined,
@@ -48,6 +45,10 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
     )
   }
 
+  getTarget(basePath: string): string | undefined {
+    return this.entries.get(basePath)?.target
+  }
+
   setOnChangedListener(
     listener: ((snapshot: VscodeServerStatus[]) => void) | undefined,
   ): void {
@@ -70,10 +71,10 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
       throw new Error('VS Code Server has not been prepared')
     if (typeof path !== 'string' || !path.trim())
       throw new Error('Invalid worktree path')
-    let entry = this.entries.get(key(path))
+    let entry = this.entries.get(vscodeBasePath(path))
     if (!entry) {
       entry = { status: { path, state: 'stopped' } }
-      this.entries.set(key(path), entry)
+      this.entries.set(vscodeBasePath(path), entry)
     }
     if (entry.status.state !== 'stopped') {
       log.info(
@@ -91,7 +92,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
 
   clearError(path: string, errorId: string): void {
     this.controller.signal.throwIfAborted()
-    const entry = this.entries.get(key(path))
+    const entry = this.entries.get(vscodeBasePath(path))
     // A delayed dismissal must not clear a newer failure.
     if (!entry || entry.status.error?.id !== errorId) return
     delete entry.status.error
@@ -112,8 +113,10 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
         signal,
       )
       entry.process = child
-      await child.ready
+      const connection = await child.ready
       signal.throwIfAborted()
+      entry.target = `http://127.0.0.1:${connection.port}`
+      entry.status.browserPath = `${vscodeBasePath(entry.status.path)}/?tkn=${encodeURIComponent(connection.token)}`
       entry.status.state = 'running'
       log.info({ path: entry.status.path }, 'VS Code Server ready')
       this.publish()
@@ -135,6 +138,8 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
         )
       }
     } finally {
+      entry.target = undefined
+      delete entry.status.browserPath
       // A failed readiness check must not leave a process behind.
       try {
         await entry.process?.stop()

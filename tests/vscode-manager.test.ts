@@ -3,7 +3,11 @@ import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
 import type { VscodeServerStatus } from '../src/shared/api'
-import type { VscodeProcess } from '../src/server/vscode-process'
+import type {
+  VscodeConnection,
+  VscodeProcess,
+} from '../src/server/vscode-process'
+import { vscodeBasePath } from '../src/server/vscode-route'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -29,7 +33,11 @@ async function waitFor(predicate: () => boolean) {
 function fixture() {
   const children: ReturnType<typeof child>[] = []
   function child() {
-    const ready = deferred<void>()
+    const readiness = deferred<VscodeConnection>()
+    const ready = {
+      ...readiness,
+      resolve: () => readiness.resolve({ port: 1234, token: 'test-token' }),
+    }
     const exit = deferred<Awaited<VscodeProcess['exited']>>()
     let stops = 0
     const handle: VscodeProcess = {
@@ -74,13 +82,24 @@ test('preparation is required and concurrent clicks share one launch until readi
   assert.equal(f.manager.snapshot[0].state, 'starting')
   await waitFor(() => f.children.length === 1)
   assert.equal(f.manager.snapshot[0].state, 'starting')
+  assert.equal(f.manager.getTarget(vscodeBasePath(f.worktree.path)), undefined)
   f.children[0].ready.resolve()
   await waitFor(() => f.manager.snapshot[0].state === 'running')
+  assert.equal(
+    f.manager.getTarget(vscodeBasePath(f.worktree.path)),
+    'http://127.0.0.1:1234',
+  )
+  assert.equal(
+    f.manager.snapshot[0].browserPath,
+    `${vscodeBasePath(f.worktree.path)}/?tkn=test-token`,
+  )
   f.manager.ensure(f.worktree.path)
   assert.equal(f.children.length, 1)
   f.children[0].exit.resolve({ code: 0, signal: null })
   await waitFor(() => f.manager.snapshot[0].state === 'stopped')
   assert.equal(f.manager.snapshot[0].error, undefined)
+  assert.equal(f.manager.getTarget(vscodeBasePath(f.worktree.path)), undefined)
+  assert.equal(f.manager.snapshot[0].browserPath, undefined)
 })
 
 test('different worktrees start concurrently and failures remain isolated', async (t) => {

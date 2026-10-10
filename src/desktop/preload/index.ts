@@ -7,11 +7,15 @@ import type {
 import {
   type DesktopApi,
   CONNECTION_STATE_CHANGED,
-  INITIALIZE,
+  WORKTREE_PICKER_INITIALIZE,
+  EDITOR_INITIALIZE,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVERS_CHANGED,
-  VSCODE_SERVER_ENSURE,
+  WORKTREE_OPEN,
+  EDITOR_STATE_CHANGED,
+  EDITOR_RETRY,
+  type EditorState,
   VSCODE_SERVER_CLEAR_ERROR,
 } from '../api'
 
@@ -41,8 +45,17 @@ ipcRenderer.on(
   },
 )
 
+let onEditorStateChangedListener: ((state: EditorState) => void) | undefined
+ipcRenderer.on(
+  EDITOR_STATE_CHANGED,
+  (_event: IpcRendererEvent, state: EditorState) => {
+    onEditorStateChangedListener?.(state)
+  },
+)
+
 const api: DesktopApi = {
-  initialize: () => ipcRenderer.send(INITIALIZE),
+  initializeWorktreePicker: () => ipcRenderer.send(WORKTREE_PICKER_INITIALIZE),
+  initializeEditorWindow: () => ipcRenderer.send(EDITOR_INITIALIZE),
   setOnConnectionStateChangedListener(listener) {
     onConnectionStateChangedListener = listener
   },
@@ -50,7 +63,11 @@ const api: DesktopApi = {
     onWorktreesChangedListener = listener
   },
   refreshWorktrees: () => ipcRenderer.invoke(WORKTREES_REFRESH),
-  ensureVscodeServer: (path) => ipcRenderer.invoke(VSCODE_SERVER_ENSURE, path),
+  openWorktree: (path) => ipcRenderer.invoke(WORKTREE_OPEN, path),
+  retryEditor: () => ipcRenderer.invoke(EDITOR_RETRY),
+  setOnEditorStateChangedListener(listener) {
+    onEditorStateChangedListener = listener
+  },
   clearVscodeServerError: (path, errorId) =>
     ipcRenderer.invoke(VSCODE_SERVER_CLEAR_ERROR, path, errorId),
   setOnVscodeServersChangedListener(listener) {

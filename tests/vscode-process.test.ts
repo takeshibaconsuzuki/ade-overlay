@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { NodeVscodeLauncher } from '../src/server/vscode-process'
+import { vscodeBasePath } from '../src/server/vscode-route'
 
 async function fixture(t: TestContext, code: string) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-vscode-process-'))
@@ -47,12 +48,18 @@ test(
     server.listen(0, '127.0.0.1', () => console.log('Extension host agent listening on ' + server.address().port));
   `,
     )
-    await f.child.ready
+    const connection = await f.child.ready
+    assert.ok(connection.port > 0)
+    assert.match(connection.token, /^[a-f0-9]{64}$/)
     assert.equal(await readFile(join(f.directory, 'probed'), 'utf8'), 'yes')
     const args: string[] = JSON.parse(
       await readFile(join(f.directory, 'arguments.json'), 'utf8'),
     )
     assert.equal(args[args.indexOf('--default-folder') + 1], f.directory)
+    assert.equal(
+      args[args.indexOf('--server-base-path') + 1],
+      vscodeBasePath(f.directory),
+    )
     assert.equal(args[args.indexOf('--host') + 1], '127.0.0.1')
     assert.equal(args.includes('--without-connection-token'), false)
     const descendant = Number(

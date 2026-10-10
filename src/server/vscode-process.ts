@@ -8,12 +8,18 @@ import pRetry from 'p-retry'
 import treeKill from 'tree-kill'
 import { logger } from '../shared/logger'
 import type { VscodeInstallation } from './vscode-runtime'
+import { vscodeBasePath } from './vscode-route'
 
 const log = logger.child({ component: 'vscode-process' })
 type Exit = { code: number | null; signal: NodeJS.Signals | null }
 
+export interface VscodeConnection {
+  port: number
+  token: string
+}
+
 export interface VscodeProcess {
-  readonly ready: Promise<void>
+  readonly ready: Promise<VscodeConnection>
   readonly exited: Promise<Exit>
   stop(): Promise<void>
 }
@@ -39,7 +45,7 @@ export class NodeVscodeLauncher implements VscodeLauncher {
 }
 
 export class NodeVscodeProcess implements VscodeProcess {
-  readonly ready: Promise<void>
+  readonly ready: Promise<VscodeConnection>
   readonly exited: Promise<Exit>
   private readonly child: ChildProcessByStdio<null, Readable, Readable>
   private resolvePort!: (port: number) => void
@@ -76,6 +82,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       tokenFile,
       token,
       signal,
+      vscodeBasePath(path),
     )
   }
 
@@ -86,6 +93,7 @@ export class NodeVscodeProcess implements VscodeProcess {
     tokenFile: string,
     private readonly token: string,
     private readonly signal: AbortSignal,
+    basePath: string,
   ) {
     this.child = spawn(
       installation.node,
@@ -102,6 +110,8 @@ export class NodeVscodeProcess implements VscodeProcess {
         directory,
         '--default-folder',
         path,
+        '--server-base-path',
+        basePath,
       ],
       { cwd: path, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
     )
@@ -182,7 +192,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       )
   }
 
-  private async waitUntilReady(): Promise<void> {
+  private async waitUntilReady(): Promise<VscodeConnection> {
     const readinessSignal = AbortSignal.any([
       this.signal,
       AbortSignal.timeout(60_000),
@@ -197,6 +207,7 @@ export class NodeVscodeProcess implements VscodeProcess {
         shouldRetry: () => !this.closed,
       })
       if (this.closed) throw new Error('VS Code Server exited during startup')
+      return { port, token: this.token }
     } catch (error) {
       await this.stop()
       if (readinessSignal.aborted && !this.signal.aborted)

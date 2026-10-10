@@ -55,8 +55,8 @@ test(
         launch: async () => {
           launches++
           return {
-            ready: new Promise<void>((resolve) => {
-              ready = resolve
+            ready: new Promise<{ port: number; token: string }>((resolve) => {
+              ready = () => resolve({ port: 1234, token: 'test-token' })
             }),
             exited: new Promise<{ code: number; signal: null }>((resolve) => {
               exit = resolve

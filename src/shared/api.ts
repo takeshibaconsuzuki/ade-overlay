@@ -10,6 +10,8 @@ export interface VscodeServerStatus {
   path: string
   state: 'stopped' | 'starting' | 'running'
   error?: { id: string; message: string }
+  // Authenticated browser route, available once the server is ready.
+  browserPath?: string
 }
 
 export interface ServerMethods {
