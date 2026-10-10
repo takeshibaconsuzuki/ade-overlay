@@ -13,6 +13,7 @@ export default tseslint.config(
   {
     files: [
       'electron.vite.config.ts',
+      'scripts/**/*.ts',
       'src/desktop/*.ts',
       'src/desktop/main/**/*.ts',
       'src/desktop/preload/**/*.ts',

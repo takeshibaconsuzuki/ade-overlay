@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { simpleGit } from 'simple-git'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
+import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
 import { listWorktrees, parseWorktrees } from '../src/server/git-utils'
 import type { ClientMethods, ServerMethods, Worktree } from '../src/shared/api'
 import { RPC_PATH } from '../src/shared/constants'
@@ -108,7 +109,20 @@ test(
         projects: paths.map((mainWorktreePath) => ({ mainWorktreePath })),
       })
     await writeFile(path, config([first.path, second.path]))
-    const server = await startServer(path)
+    const server = await startServer(
+      path,
+      new ProcessVscodeServerManager(
+        {
+          dataDirectory: directory,
+          prepare: async () => ({ node: '', entrypoint: '' }),
+        },
+        {
+          launch: async () => {
+            throw new Error('Unexpected launch')
+          },
+        },
+      ),
+    )
     t.after(() => server.close())
     const connect = () => {
       const updates: Worktree[][] = []
@@ -116,6 +130,7 @@ test(
         `ws://127.0.0.1:${server.port}${RPC_PATH}`,
         {
           getClientInfo: () => ({ name: 'test', version: '1' }),
+          vscodeServersChanged: () => {},
           worktreesChanged: (worktrees) => {
             updates.push(worktrees)
           },

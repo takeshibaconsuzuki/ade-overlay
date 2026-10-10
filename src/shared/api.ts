@@ -6,12 +6,21 @@ export interface Worktree {
   branchName: string | null
 }
 
+export interface VscodeServerStatus {
+  path: string
+  state: 'stopped' | 'starting' | 'running'
+  error?: { id: string; message: string }
+}
+
 export interface ServerMethods {
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
+  ensureVscodeServer(path: string): void
+  clearVscodeServerError(path: string, errorId: string): void
 }
 
 export interface ClientMethods {
   getClientInfo(): { name: string; version: string }
   worktreesChanged(worktrees: Worktree[]): void
+  vscodeServersChanged(statuses: VscodeServerStatus[]): void
 }

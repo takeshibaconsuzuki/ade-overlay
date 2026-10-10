@@ -1,11 +1,19 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
-import type { ClientMethods, ServerMethods, Worktree } from '../../shared/api'
+import type {
+  ClientMethods,
+  ServerMethods,
+  Worktree,
+  VscodeServerStatus,
+} from '../../shared/api'
 import {
   CONNECTION_STATE_CHANGED,
   INITIALIZE,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
+  VSCODE_SERVERS_CHANGED,
+  VSCODE_SERVER_ENSURE,
+  VSCODE_SERVER_CLEAR_ERROR,
 } from '../api'
 import { DEFAULT_SERVER_URL } from '../constants'
 import { connectRpc } from '../../shared/rpc-client'
@@ -42,6 +50,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   let worktrees: Worktree[] = []
+  let vscodeServers: VscodeServerStatus[] = []
   const server = connectRpc<ServerMethods, ClientMethods>(
     process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL,
     {
@@ -50,9 +59,19 @@ app.whenReady().then(() => {
         worktrees = next
         window?.webContents.send(WORKTREES_CHANGED, worktrees)
       },
+      vscodeServersChanged: (next) => {
+        vscodeServers = next
+        window?.webContents.send(VSCODE_SERVERS_CHANGED, vscodeServers)
+      },
     },
     {
       onStateChange: (state) => {
+        if (state !== 'connected') {
+          worktrees = []
+          vscodeServers = []
+          window?.webContents.send(VSCODE_SERVERS_CHANGED, vscodeServers)
+          window?.webContents.send(WORKTREES_CHANGED, worktrees)
+        }
         log.info({ state }, 'Server connection changed')
         window?.webContents.send(CONNECTION_STATE_CHANGED, state)
       },
@@ -61,8 +80,17 @@ app.whenReady().then(() => {
   ipcMain.on(INITIALIZE, (event) => {
     event.sender.send(CONNECTION_STATE_CHANGED, server.state)
     event.sender.send(WORKTREES_CHANGED, worktrees)
+    event.sender.send(VSCODE_SERVERS_CHANGED, vscodeServers)
   })
   ipcMain.handle(WORKTREES_REFRESH, () => server.rpc.refreshWorktrees())
+  ipcMain.handle(VSCODE_SERVER_ENSURE, (_event, path: string) =>
+    server.rpc.ensureVscodeServer(path),
+  )
+  ipcMain.handle(
+    VSCODE_SERVER_CLEAR_ERROR,
+    (_event, path: string, errorId: string) =>
+      server.rpc.clearVscodeServerError(path, errorId),
+  )
   app.once('before-quit', () => {
     void server.close()
   })

@@ -3,6 +3,10 @@ import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
 import { startServer } from './application'
+import { FetchHttpClient } from '../shared/http-client'
+import { ProcessVscodeServerManager } from './vscode-manager'
+import { NodeVscodeLauncher } from './vscode-process'
+import { DownloadedVscodeRuntime } from './vscode-runtime'
 
 const log = logger.child({ component: 'server' })
 
@@ -17,7 +21,13 @@ async function main(): Promise<void> {
     )
     .parse()
     .opts<{ config: string }>()
-  const server = await startServer(flags.config)
+  const server = await startServer(
+    flags.config,
+    new ProcessVscodeServerManager(
+      new DownloadedVscodeRuntime(new FetchHttpClient()),
+      new NodeVscodeLauncher(),
+    ),
+  )
   log.info(
     { host: server.host, port: server.port, path: RPC_PATH },
     'Server listening',

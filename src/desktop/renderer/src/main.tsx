@@ -1,18 +1,104 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useId, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { APP_DISPLAY_NAME } from '../../../shared/constants'
-import type { ConnectionState, Worktree } from '../../../shared/api'
+import type {
+  ConnectionState,
+  Worktree,
+  VscodeServerStatus,
+} from '../../../shared/api'
 import './style.css'
+
+function WorktreeRow({
+  worktree,
+  status,
+}: {
+  worktree: Worktree
+  status?: VscodeServerStatus
+}): React.JSX.Element {
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const tooltipId = useId()
+  const state = status?.state ?? 'stopped'
+  const message = requestError ?? status?.error?.message
+  const start = async () => {
+    setRequestError(null)
+    try {
+      await window.desktop.ensureVscodeServer(worktree.path)
+    } catch (error) {
+      setRequestError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to start VS Code Server',
+      )
+    }
+  }
+  const clear = async () => {
+    setRequestError(null)
+    if (!status?.error) return
+    try {
+      await window.desktop.clearVscodeServerError(
+        worktree.path,
+        status.error.id,
+      )
+    } catch (error) {
+      setRequestError(
+        error instanceof Error ? error.message : 'Unable to dismiss error',
+      )
+    }
+  }
+  return (
+    <li className="worktree-row">
+      <button
+        className="worktree-open"
+        type="button"
+        title={worktree.path}
+        onClick={() => void start()}
+      >
+        <span className="worktree-name">{worktree.basename}</span>
+        <span className="worktree-branch">
+          {worktree.branchName ?? 'Detached HEAD'}
+        </span>
+      </button>
+      {message ? (
+        <span className="worktree-error">
+          <button
+            className="status-error"
+            type="button"
+            aria-label={`Dismiss error for ${worktree.basename}`}
+            aria-describedby={tooltipId}
+            onClick={() => void clear()}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="8" />
+              <path d="M10 5v6m0 3v1" />
+            </svg>
+          </button>
+          <span className="error-tooltip" id={tooltipId} role="tooltip">
+            {message}
+          </span>
+        </span>
+      ) : (
+        <span
+          className={`server-status server-status-${state}`}
+          role="status"
+          aria-label={`VS Code Server ${state}`}
+          title={`VS Code Server ${state}`}
+        />
+      )}
+    </li>
+  )
+}
 
 function App(): React.JSX.Element {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
+  const [vscodeServers, setVscodeServers] = useState<VscodeServerStatus[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     window.desktop.setOnConnectionStateChangedListener(setConnectionState)
+    window.desktop.setOnVscodeServersChangedListener(setVscodeServers)
     window.desktop.setOnWorktreesChangedListener((worktrees) => {
       setWorktrees(worktrees)
       setError(null)
@@ -20,6 +106,7 @@ function App(): React.JSX.Element {
     window.desktop.initialize()
     return () => {
       window.desktop.setOnConnectionStateChangedListener(undefined)
+      window.desktop.setOnVscodeServersChangedListener(undefined)
       window.desktop.setOnWorktreesChangedListener(undefined)
     }
   }, [])
@@ -72,12 +159,13 @@ function App(): React.JSX.Element {
       ) : (
         <ul aria-label="Worktrees" aria-busy={refreshing}>
           {worktrees.map((worktree) => (
-            <li key={worktree.path} title={worktree.path}>
-              <span className="worktree-name">{worktree.basename}</span>
-              <span className="worktree-branch">
-                {worktree.branchName ?? 'Detached HEAD'}
-              </span>
-            </li>
+            <WorktreeRow
+              key={worktree.path}
+              worktree={worktree}
+              status={vscodeServers.find(
+                (status) => status.path === worktree.path,
+              )}
+            />
           ))}
         </ul>
       )}
