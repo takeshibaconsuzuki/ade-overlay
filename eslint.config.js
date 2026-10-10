@@ -13,15 +13,19 @@ export default tseslint.config(
   {
     files: [
       'electron.vite.config.ts',
-      'src/main/**/*.ts',
-      'src/preload/**/*.ts',
+      'src/desktop/*.ts',
+      'src/desktop/main/**/*.ts',
+      'src/desktop/preload/**/*.ts',
+      'src/shared/**/*.ts',
+      'src/server/**/*.ts',
+      'tests/**/*.ts',
     ],
     languageOptions: {
       globals: globals.node,
     },
   },
   {
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: ['src/desktop/renderer/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.browser,
     },

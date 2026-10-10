@@ -28,6 +28,7 @@ eval "$(python scripts/bootstrap.py)"
 ```
 
 - `npm run dev`: start the development app.
+- `npm run dev:server`: start the development server.
 - `npm run lint:fix`: run lint with auto-fixes.
 - `npm run format`: format files.
 

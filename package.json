@@ -1,12 +1,16 @@
 {
   "name": "ade-overlay",
+  "productName": "ADE",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev:server": "tsx src/server/index.ts",
+    "build": "electron-vite build && npm run build:server",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=out/server/index.cjs --external:bufferutil --external:utf-8-validate",
+    "test": "tsx --test tests/*.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier . --write",
@@ -15,23 +19,34 @@
     "postinstall": "install-electron"
   },
   "dependencies": {
+    "birpc": "4.2.0",
+    "commander": "15.0.0",
+    "p-retry": "8.0.1",
+    "pino": "10.4.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "serialize-error": "13.0.2",
+    "ws": "8.22.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.2",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "44.7.0",
     "electron-vite": "5.0.0",
+    "esbuild": "0.28.2",
     "eslint": "10.12.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",
     "npm-check-updates": "23.1.0",
     "prettier": "3.9.10",
+    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "7.3.7"

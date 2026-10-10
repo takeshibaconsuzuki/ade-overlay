@@ -5,7 +5,11 @@
   },
   "include": [
     "electron.vite.config.ts",
-    "src/main/**/*.ts",
-    "src/preload/**/*.ts"
+    "src/desktop/*.ts",
+    "src/desktop/main/**/*.ts",
+    "src/desktop/preload/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/server/**/*.ts",
+    "tests/**/*.ts"
   ]
 }
