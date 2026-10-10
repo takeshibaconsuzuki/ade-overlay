@@ -1,9 +1,14 @@
 import type { VscodeServerStatus, Worktree } from '../../shared/api'
 import type { EditorState } from '../api'
+import { logger } from '../../shared/logger'
+
+const log = logger.child({ component: 'editor-manager' })
 
 export interface EditorPage {
   // Resolves when initial navigation completes; VS Code owns the subsequent connection lifecycle.
   load(url: string): Promise<void>
+  // Persists the session before disposal. Must reject within a bounded time if the page cannot respond.
+  prepareForDisconnect(): Promise<void>
   // Releases the retained page and its resources.
   dispose(): void
 }
@@ -47,6 +52,7 @@ export class EditorWindowManager {
   private statuses: VscodeServerStatus[] = []
   private selected: Entry | undefined
   private closed = false
+  private closing: Promise<void> | undefined
   private readonly origin: URL
 
   constructor(
@@ -202,9 +208,29 @@ export class EditorWindowManager {
     })
   }
 
-  close(): void {
+  // Stops new work immediately, then persists all retained pages in parallel before disposal.
+  close(): Promise<void> {
     this.closed = true
-    for (const entry of this.entries.values()) entry.page?.dispose()
+    this.closing ??= this.closePages()
+    return this.closing
+  }
+
+  private async closePages(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()].map(async (entry) => {
+        if (!entry.page) return
+        try {
+          await entry.page.prepareForDisconnect()
+        } catch (error) {
+          log.error(
+            { err: error, path: entry.worktree.path },
+            'Unable to persist VS Code session before closing',
+          )
+        } finally {
+          entry.page.dispose()
+        }
+      }),
+    )
     this.entries.clear()
     this.host.close()
   }

@@ -19,7 +19,7 @@ export default tseslint.config(
       'src/desktop/preload/**/*.ts',
       'src/shared/**/*.ts',
       'src/server/**/*.ts',
-      'tests/**/*.ts',
+      'tests/**/*.{ts,mjs}',
     ],
     languageOptions: {
       globals: globals.node,

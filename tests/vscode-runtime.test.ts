@@ -20,33 +20,39 @@ import {
   vscodePlatform,
 } from '../src/server/vscode-runtime'
 
-// A tiny Windows distribution fixture containing node.exe and out/server-main.js.
-const zip = Buffer.from(
-  'UEsDBBQAAAAIABFfSl3uQOUFCQAAAAcAAAAPAAAAdnNjb2RlL25vZGUuZXhlS8usKCktSgUAUEsDBBQAAAAIABFfSl3uQOUFCQAAAAcAAAAZAAAAdnNjb2RlL291dC9zZXJ2ZXItbWFpbi5qc0vLrCgpLUoFAFBLAQIUABQAAAAIABFfSl3uQOUFCQAAAAcAAAAPAAAAAAAAAAAAAACAAQAAAAB2c2NvZGUvbm9kZS5leGVQSwECFAAUAAAACAARX0pd7kDlBQkAAAAHAAAAGQAAAAAAAAAAAAAAgAE2AAAAdnNjb2RlL291dC9zZXJ2ZXItbWFpbi5qc1BLBQYAAAAAAgACAIQAAAB2AAAAAAA=',
-  'base64',
-)
+import { workbenchFixture } from './fixtures/vscode-workbench'
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-vscode-runtime-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  let archive = zip
-  if (process.platform !== 'win32') {
-    await mkdir(join(directory, 'vscode', 'out'), { recursive: true })
-    await writeFile(join(directory, 'vscode', 'node'), 'fixture', {
-      mode: 0o755,
-    })
-    await writeFile(
-      join(directory, 'vscode', 'out', 'server-main.js'),
-      'fixture',
-    )
-    const file = join(directory, 'fixture.tar.gz')
-    await createTar({ cwd: directory, file, gzip: true }, ['vscode'])
-    archive = await readFile(file)
-  }
+  await mkdir(join(directory, 'vscode/out/vs/code/browser/workbench'), {
+    recursive: true,
+  })
+  await writeFile(
+    join(
+      directory,
+      'vscode',
+      process.platform === 'win32' ? 'node.exe' : 'node',
+    ),
+    'fixture',
+    { mode: 0o755 },
+  )
+  await writeFile(join(directory, 'vscode/out/server-main.js'), 'fixture')
+  await writeFile(
+    join(directory, 'vscode/out/vs/code/browser/workbench/workbench.js'),
+    workbenchFixture,
+  )
+  await writeFile(
+    join(directory, 'vscode/out/vs/code/browser/workbench/workbench.html'),
+    '<script type="module" src="{{WORKBENCH_WEB_BASE_URL}}/out/vs/code/browser/workbench/workbench.js"></script>',
+  )
+  const file = join(directory, 'fixture.tar.gz')
+  await createTar({ cwd: directory, file, gzip: true }, ['vscode'])
+  const archive = await readFile(file)
   const release = {
     version: VSCODE_SERVER_COMMIT,
     sha256hash: createHash('sha256').update(archive).digest('hex'),
-    url: `https://example.test/vscode.${process.platform === 'win32' ? 'zip' : 'tar.gz'}`,
+    url: 'https://example.test/vscode.tar.gz',
   }
   const options = {
     cacheDirectory: join(directory, 'cache'),
@@ -89,6 +95,15 @@ test('installation is verified and shared, and a new runtime uses the cache offl
   assert.equal(f.requests(), 2)
   assert.equal(await readFile(a.node, 'utf8'), 'fixture')
   assert.equal(await readFile(a.entrypoint, 'utf8'), 'fixture')
+  const browserDirectory = join(a.entrypoint, '..', 'vs/code/browser/workbench')
+  assert.match(
+    await readFile(join(browserDirectory, 'workbench.js'), 'utf8'),
+    /globalThis.getAdeHandle/,
+  )
+  assert.match(
+    await readFile(join(browserDirectory, 'workbench.html'), 'utf8'),
+    /workbench\.js\?ade=[a-f0-9]{16}"/,
+  )
   const offline = new DownloadedVscodeRuntime(
     {
       fetch: async () => {

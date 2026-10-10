@@ -23,6 +23,7 @@ import type { HttpClient } from '../shared/http-client'
 import { logger } from '../shared/logger'
 import { VSCODE_SERVER_COMMIT } from './constants'
 import { extractVscodeArchive } from './vscode-archive'
+import { prepareVscodeWorkbench } from './vscode-workbench-patch'
 
 const log = logger.child({ component: 'vscode-runtime' })
 const paths = envPaths(APP_NAME)
@@ -159,7 +160,10 @@ export class DownloadedVscodeRuntime implements VscodeRuntime {
     const target = join(directory, VSCODE_SERVER_COMMIT)
     const cached = await this.readCached(target)
     signal.throwIfAborted()
-    if (cached) return cached
+    if (cached) {
+      await prepareVscodeWorkbench(target)
+      return cached
+    }
     const downloadSignal = AbortSignal.any([
       signal,
       AbortSignal.timeout(300_000),
@@ -246,6 +250,7 @@ export class DownloadedVscodeRuntime implements VscodeRuntime {
     release: Release,
     signal: AbortSignal,
   ): Promise<VscodeInstallation> {
+    await prepareVscodeWorkbench(extracted)
     await writeFile(
       join(extracted, 'ade-release.json'),
       JSON.stringify(release),

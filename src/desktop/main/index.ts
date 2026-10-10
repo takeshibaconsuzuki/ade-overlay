@@ -122,8 +122,7 @@ app.whenReady().then(() => {
     return editor.open(worktree)
   })
   ipcMain.handle(EDITOR_RETRY, (event) => {
-    if (!editorHost.isAdeSender(event.sender))
-      throw new Error('Invalid sender')
+    if (!editorHost.isAdeSender(event.sender)) throw new Error('Invalid sender')
     return editor.retry()
   })
   ipcMain.handle(
@@ -134,9 +133,22 @@ app.whenReady().then(() => {
       return server.rpc.clearVscodeServerError(path, errorId)
     },
   )
-  app.once('before-quit', () => {
-    editor.close()
-    void server.close()
+  let quitting: Promise<void> | undefined
+  let readyToQuit = false
+  app.on('before-quit', (event) => {
+    if (readyToQuit) return
+    event.preventDefault()
+    quitting ??= (async () => {
+      try {
+        await editor.close()
+        await server.close()
+      } catch (error) {
+        log.error({ err: error }, 'Desktop shutdown failed')
+      } finally {
+        readyToQuit = true
+        app.quit()
+      }
+    })()
   })
   createWorktreePickerWindow()
 })

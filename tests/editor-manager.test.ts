@@ -28,6 +28,7 @@ class Page implements EditorPage {
     this.urls.push(url)
     return this.loading.promise
   }
+  async prepareForDisconnect(): Promise<void> {}
   dispose(): void {
     this.disposed = true
   }
@@ -97,7 +98,7 @@ test('duplicate clicks share startup; readiness and page load gate presentation'
   await manager.open(a)
   assert.equal(starts, 1)
   assert.equal(host.pages[0].urls.length, 1)
-  manager.close()
+  await manager.close()
 })
 
 test('latest selection wins; background completion never steals focus or reloads pages', async () => {
@@ -130,7 +131,7 @@ test('latest selection wins; background completion never steals focus or reloads
   ])
   assert.equal(host.current, host.pages[0])
   assert.equal(host.state.error, undefined)
-  manager.close()
+  await manager.close()
   assert.ok(host.pages.every((page) => page.disposed))
   assert.ok(host.closed)
 })
@@ -174,7 +175,7 @@ test('startup and initial navigation failures need explicit retry', async () => 
   assert.equal(host.state.error, undefined)
   host.pages[1].crash()
   assert.match(host.state.error!, /closed unexpectedly/)
-  manager.close()
+  await manager.close()
 })
 
 test('shutdown ignores late acknowledgments and page loads', async () => {
@@ -186,7 +187,7 @@ test('shutdown ignores late acknowledgments and page loads', async () => {
   )
   await manager.open(a)
   manager.updateStatuses([running(a)])
-  manager.close()
+  await manager.close()
   host.pages[0].loading.resolve()
   await setImmediate()
   assert.equal(host.current, undefined)
@@ -206,7 +207,7 @@ test('closing before a pending launch prevents new server requests', async () =>
     'ws://remote.example/rpc',
   )
   const opening = manager.open(a)
-  manager.close()
+  await manager.close()
   await assert.rejects(opening, /closed/)
   assert.equal(starts, 0)
 })
@@ -230,5 +231,38 @@ test('malformed and off-server browser routes fail without navigating', async ()
   await manager.retry()
   assert.match(host.state.error!, /Invalid VS Code browser route/)
   assert.equal(host.pages.length, 0)
-  manager.close()
+  await manager.close()
+})
+
+test('quitting saves pages concurrently, waits before disposal, and tolerates a failed page', async () => {
+  const host = new Host()
+  const manager = new EditorWindowManager(
+    host,
+    { ensure: async () => {} },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  await manager.open(b)
+  manager.updateStatuses([running(a), running(b)])
+  const saves = [deferred<void>(), deferred<void>()]
+  const started: number[] = []
+  host.pages.forEach((page, index) => {
+    page.prepareForDisconnect = () => {
+      started.push(index)
+      return saves[index].promise
+    }
+  })
+  const closing = manager.close()
+  assert.equal(manager.close(), closing)
+  assert.deepEqual(started, [0, 1])
+  assert.ok(host.pages.every((page) => !page.disposed))
+  await assert.rejects(manager.open(a), /closed/)
+  saves[0].resolve()
+  await setImmediate()
+  assert.ok(host.pages[0].disposed)
+  assert.equal(host.closed, false)
+  saves[1].reject(new Error('unresponsive page'))
+  await closing
+  assert.ok(host.pages.every((page) => page.disposed))
+  assert.ok(host.closed)
 })

@@ -11,6 +11,7 @@
     "build": "electron-vite build && npm run build:server",
     "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=out/server/index.cjs --external:bufferutil --external:utf-8-validate --external:@aws-sdk/client-s3",
     "test": "tsx --test tests/*.test.ts",
+    "test:session": "npm run build && tsx scripts/test-vscode-session.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier . --write",

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { EDITOR_STATE_CHANGED, type EditorState } from '../api'
 import type { EditorHost, EditorPage } from './editor-manager'
+import { persistVscodeSession } from './vscode-session'
 
 class ElectronEditorPage implements EditorPage {
   readonly view: WebContentsView
@@ -46,6 +47,25 @@ class ElectronEditorPage implements EditorPage {
   dispose(): void {
     if (!this.view.webContents.isDestroyed())
       this.view.webContents.close({ waitForBeforeUnload: false })
+  }
+
+  async prepareForDisconnect(): Promise<void> {
+    const contents = this.view.webContents
+    if (contents.isDestroyed() || contents.isCrashed()) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        contents.executeJavaScript(`(${persistVscodeSession.toString()})()`),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Timed out saving VS Code session')),
+            5000,
+          )
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }
 
