@@ -178,6 +178,164 @@ test('startup and initial navigation failures need explicit retry', async () => 
   await manager.close()
 })
 
+for (const loaded of [false, true]) {
+  for (const change of ['missing', 'stopped', 'starting', 'route'] as const) {
+    test(`opening a ${loaded ? 'loaded' : 'loading'} page replaces it when the server is ${change}`, async () => {
+      const host = new Host()
+      let starts = 0
+      const manager = new EditorWindowManager(
+        host,
+        {
+          ensure: async () => {
+            starts++
+            manager.updateStatuses([running(a)])
+          },
+        },
+        'ws://localhost/rpc',
+      )
+      await manager.open(a)
+      const oldPage = host.pages[0]
+      if (loaded) {
+        oldPage.loading.resolve()
+        await setImmediate()
+      }
+      const save = deferred<void>()
+      let saves = 0
+      oldPage.prepareForDisconnect = () => {
+        saves++
+        return save.promise
+      }
+      manager.onServerDisconnected()
+      manager.updateStatuses(
+        change === 'missing'
+          ? []
+          : [
+              change === 'route'
+                ? {
+                    ...running(a),
+                    browserPath: `${running(a).browserPath}-new`,
+                  }
+                : { path: a.path, state: change },
+            ],
+      )
+      const opening = manager.open(a)
+      assert.equal(manager.open(a), opening)
+      assert.equal(host.current, undefined)
+      assert.equal(saves, 1)
+      assert.equal(oldPage.disposed, false)
+      assert.equal(starts, 1)
+      oldPage.loading.resolve()
+      oldPage.crash()
+      await setImmediate()
+      assert.equal(host.current, undefined)
+      assert.equal(host.state.error, undefined)
+      save.resolve()
+      await opening
+      assert.equal(starts, 2)
+      assert.equal(oldPage.disposed, true)
+      assert.equal(host.pages.length, 2)
+      host.pages[1].loading.resolve()
+      await setImmediate()
+      assert.equal(host.current, host.pages[1])
+      assert.equal(host.state.error, undefined)
+      await manager.close()
+    })
+  }
+}
+
+test('temporary disconnect and an unchanged server reuse the page without startup or saving', async () => {
+  const host = new Host()
+  let starts = 0
+  const manager = new EditorWindowManager(
+    host,
+    {
+      ensure: async () => {
+        starts++
+      },
+    },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  manager.updateStatuses([running(a)])
+  const page = host.pages[0]
+  page.loading.resolve()
+  await setImmediate()
+  let saves = 0
+  page.prepareForDisconnect = async () => {
+    saves++
+  }
+  manager.onServerDisconnected()
+  await manager.open(a)
+  manager.updateStatuses([running(a)])
+  await manager.open(a)
+  assert.equal(starts, 1)
+  assert.equal(saves, 0)
+  assert.equal(host.current, page)
+  assert.equal(host.pages.length, 1)
+  assert.equal(page.disposed, false)
+  await manager.close()
+})
+
+test('replacement continues after a session save fails and uses the new browser route', async () => {
+  const host = new Host()
+  const manager = new EditorWindowManager(
+    host,
+    { ensure: async () => {} },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  manager.updateStatuses([running(a)])
+  const page = host.pages[0]
+  page.loading.resolve()
+  await setImmediate()
+  page.prepareForDisconnect = async () => {
+    throw new Error('page unavailable')
+  }
+  const status = { ...running(a), browserPath: `${running(a).browserPath}-new` }
+  manager.updateStatuses([status])
+  await manager.open(a)
+  assert.equal(page.disposed, true)
+  assert.equal(host.pages[1].urls[0], `http://localhost${status.browserPath}`)
+  await manager.close()
+})
+
+test('shutdown waits for an in-progress replacement save without starting the server', async () => {
+  const host = new Host()
+  let starts = 0
+  const manager = new EditorWindowManager(
+    host,
+    {
+      ensure: async () => {
+        starts++
+      },
+    },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  manager.updateStatuses([running(a)])
+  const page = host.pages[0]
+  page.loading.resolve()
+  await setImmediate()
+  const save = deferred<void>()
+  let saves = 0
+  page.prepareForDisconnect = () => {
+    saves++
+    return save.promise
+  }
+  manager.updateStatuses([])
+  const opening = manager.open(a)
+  const rejected = assert.rejects(opening, /closed/)
+  const closing = manager.close()
+  assert.equal(saves, 1)
+  assert.equal(page.disposed, false)
+  assert.equal(host.closed, false)
+  save.resolve()
+  await Promise.all([closing, rejected])
+  assert.equal(starts, 1)
+  assert.equal(page.disposed, true)
+  assert.equal(host.closed, true)
+})
+
 test('shutdown ignores late acknowledgments and page loads', async () => {
   const host = new Host()
   const manager = new EditorWindowManager(

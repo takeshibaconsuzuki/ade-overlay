@@ -43,13 +43,16 @@ interface Entry {
   worktree: Worktree
   state: EditorPageState
   page?: EditorPage
+  browserPath?: string
+  disposal?: Promise<void>
   error?: string
   request?: Promise<void>
 }
 
 export class EditorWindowManager {
   private readonly entries = new Map<string, Entry>()
-  private statuses: VscodeServerStatus[] = []
+  // An absent snapshot means connection state is unknown, not that servers stopped.
+  private statuses: Map<string, VscodeServerStatus> | undefined
   private selected: Entry | undefined
   private closed = false
   private closing: Promise<void> | undefined
@@ -77,8 +80,15 @@ export class EditorWindowManager {
     this.host.showAndFocusWindow(`${worktree.basename} — VS Code`)
     this.render()
     if (entry.request) return entry.request
-    if (entry.state === 'loaded' || entry.state === 'loadingPage')
-      return Promise.resolve()
+    if (entry.state === 'loaded' || entry.state === 'loadingPage') {
+      const status = this.statuses?.get(worktree.path)
+      if (
+        !this.statuses ||
+        (status?.state === 'running' &&
+          status.browserPath === entry.browserPath)
+      )
+        return Promise.resolve()
+    }
     return this.start(entry)
   }
 
@@ -90,14 +100,14 @@ export class EditorWindowManager {
 
   // Applies a server snapshot to pages awaiting readiness; loaded pages remain independent.
   updateStatuses(statuses: VscodeServerStatus[]): void {
-    this.statuses = statuses
+    this.statuses = new Map(statuses.map((status) => [status.path, status]))
     for (const entry of this.entries.values()) this.advance(entry)
   }
 
   // Called whenever ADE's RPC connection is unavailable, including initial connection attempts.
   // Clears cached statuses and fails pages awaiting readiness; loading and loaded pages continue independently.
   onServerDisconnected(): void {
-    this.statuses = []
+    this.statuses = undefined
     for (const entry of this.entries.values()) {
       if (entry.state === 'waitingForServer')
         this.fail(
@@ -108,12 +118,11 @@ export class EditorWindowManager {
   }
 
   private start(entry: Entry): Promise<void> {
-    entry.page?.dispose()
-    entry.page = undefined
+    const disposal = this.disposePage(entry)
     entry.error = undefined
     entry.state = 'waitingForServer'
     this.render()
-    const request = Promise.resolve().then(() => {
+    const request = disposal.then(() => {
       if (this.closed) throw new Error('Editor is closed')
       return this.server.ensure(entry.worktree.path)
     })
@@ -139,9 +148,7 @@ export class EditorWindowManager {
   private advance(entry: Entry): void {
     if (this.closed || entry.state !== 'waitingForServer' || entry.request)
       return
-    const status = this.statuses.find(
-      (status) => status.path === entry.worktree.path,
-    )
+    const status = this.statuses?.get(entry.worktree.path)
     if (status?.state === 'stopped') {
       this.fail(
         entry,
@@ -170,6 +177,7 @@ export class EditorWindowManager {
         },
       )
       entry.page = page
+      entry.browserPath = status.browserPath
       void page.load(url.href).then(
         () => {
           if (
@@ -217,21 +225,33 @@ export class EditorWindowManager {
 
   private async closePages(): Promise<void> {
     await Promise.all(
-      [...this.entries.values()].map(async (entry) => {
-        if (!entry.page) return
-        try {
-          await entry.page.prepareForDisconnect()
-        } catch (error) {
-          log.error(
-            { err: error, path: entry.worktree.path },
-            'Unable to persist VS Code session before closing',
-          )
-        } finally {
-          entry.page.dispose()
-        }
-      }),
+      [...this.entries.values()].map((entry) => this.disposePage(entry)),
     )
     this.entries.clear()
     this.host.close()
+  }
+
+  // Replacement and shutdown share disposal so a pending session save is awaited once.
+  private disposePage(entry: Entry): Promise<void> {
+    if (entry.disposal) return entry.disposal
+    const page = entry.page
+    if (!page) return Promise.resolve()
+    entry.page = undefined
+    entry.browserPath = undefined
+    entry.disposal = (async () => {
+      try {
+        await page.prepareForDisconnect()
+      } catch (error) {
+        log.error(
+          { err: error, path: entry.worktree.path },
+          'Unable to persist VS Code session before closing',
+        )
+      } finally {
+        page.dispose()
+      }
+    })()
+    return entry.disposal.finally(() => {
+      entry.disposal = undefined
+    })
   }
 }
