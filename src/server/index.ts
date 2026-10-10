@@ -1,10 +1,8 @@
 import { Command } from 'commander'
-import type { ClientMethods, ServerMethods } from '../shared/api'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
-import { optionsFromFile } from './options'
-import { startRpcServer } from './server'
+import { startServer } from './application'
 
 const log = logger.child({ component: 'server' })
 
@@ -19,16 +17,9 @@ async function main(): Promise<void> {
     )
     .parse()
     .opts<{ config: string }>()
-  const options = await optionsFromFile(flags.config)
-  const methods: ServerMethods = {
-    getServerInfo: () => ({ name: APP_NAME }),
-  }
-  const server = await startRpcServer<ClientMethods, ServerMethods>(
-    methods,
-    options,
-  )
+  const server = await startServer(flags.config)
   log.info(
-    { host: options.host, port: server.port, path: RPC_PATH },
+    { host: server.host, port: server.port, path: RPC_PATH },
     'Server listening',
   )
   const shutdown = () => {

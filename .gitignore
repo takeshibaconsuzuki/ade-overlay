@@ -4,3 +4,4 @@
 node_modules/
 out/
 *.tsbuildinfo
+/server.config.yaml

@@ -1,6 +1,7 @@
 import type { BirpcReturn } from 'birpc'
 import pRetry from 'p-retry'
 import WebSocket from 'ws'
+import type { ConnectionState } from './api'
 import {
   CONNECT_TIMEOUT_MS,
   RETRY_MAX_DELAY_MS,
@@ -8,8 +9,6 @@ import {
 } from '../desktop/constants'
 import { MAX_RPC_PAYLOAD_BYTES } from './constants'
 import { createRpcPeer } from './rpc'
-
-export type ConnectionState = 'connecting' | 'connected' | 'retrying' | 'closed'
 
 interface ClientOptions {
   onStateChange?: (state: ConnectionState) => void

@@ -35,6 +35,7 @@ test('partial file config receives defaults and survives YAML serialization', as
   assert.deepEqual(parse(serialized), {
     host: '127.0.0.1',
     port: DEFAULT_SERVER_PORT,
+    projects: [],
   })
   assert.deepEqual(serverOptionsSchema.parse(parse(serialized)), options)
 })
@@ -54,6 +55,11 @@ test('schema rejects invalid values and unknown config keys', () => {
     { port: '4317' },
     { port: null },
     { hostname: 'localhost' },
+    { projects: null },
+    { projects: ['repository'] },
+    { projects: [{}] },
+    { projects: [{ mainWorktreePath: '  ' }] },
+    { projects: [{ mainWorktreePath: 'repo', name: 'extra' }] },
   ]) {
     assert.throws(
       () => serverOptionsSchema.parse(config),

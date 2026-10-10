@@ -18,7 +18,11 @@ export interface RpcServer<Remote extends object, Local extends object> {
 export async function startRpcServer<
   Remote extends object,
   Local extends object,
->(methods: Local, options: ServerOptions): Promise<RpcServer<Remote, Local>> {
+>(
+  methods: Local,
+  options: Pick<ServerOptions, 'host' | 'port'>,
+  onClient?: (client: BirpcReturn<Remote, Local>) => void,
+): Promise<RpcServer<Remote, Local>> {
   const httpServer = createServer((_request, response) => {
     response.writeHead(426, { 'Content-Type': 'text/plain' })
     response.end(STATUS_CODES[426])
@@ -41,6 +45,7 @@ export async function startRpcServer<
       clients.delete(rpc)
       clientLog.info({ code, reason: reason.toString() }, 'Client disconnected')
     })
+    onClient?.(rpc)
   })
   httpServer.listen(options.port, options.host)
   await once(server, 'listening')

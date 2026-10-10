@@ -3,10 +3,20 @@ import { parse } from 'yaml'
 import { z } from 'zod'
 import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from './constants'
 
+export const projectSchema = z.strictObject({
+  mainWorktreePath: z
+    .string()
+    .min(1)
+    .refine((path) => path.trim().length > 0),
+})
+
+export type Project = z.infer<typeof projectSchema>
+
 export const serverOptionsSchema = z.strictObject({
   host: z.string().trim().min(1).default(DEFAULT_SERVER_HOST),
   // Port 0 asks the operating system to allocate an available port.
   port: z.int().min(0).max(65535).default(DEFAULT_SERVER_PORT),
+  projects: z.array(projectSchema).default([]),
 })
 
 export type ServerOptions = z.infer<typeof serverOptionsSchema>

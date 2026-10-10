@@ -20,12 +20,14 @@
   },
   "dependencies": {
     "birpc": "4.2.0",
+    "chokidar": "5.0.0",
     "commander": "15.0.0",
     "p-retry": "8.0.1",
     "pino": "10.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "serialize-error": "13.0.2",
+    "simple-git": "4.0.2",
     "ws": "8.22.0",
     "yaml": "2.9.1",
     "zod": "4.6.5"
