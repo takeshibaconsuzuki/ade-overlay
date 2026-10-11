@@ -1,0 +1,4 @@
+src/**
+webview/**
+tsconfig*.json
+**/*.map

@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'node_modules/**'],
+    ignores: ['**/out/**', 'node_modules/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -24,7 +24,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/desktop/**/renderer/**/*.{ts,tsx}'],
+    files: [
+      'src/desktop/**/renderer/**/*.{ts,tsx}',
+      'vscode-extension/webview/**/*.{ts,tsx}',
+    ],
     languageOptions: {
       globals: globals.browser,
     },

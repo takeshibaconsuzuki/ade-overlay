@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build ADE Extension",
+      "type": "shell",
+      "command": "eval \"$(python scripts/bootstrap.py)\" && npm run build:extension",
+      "windows": {
+        "command": "python scripts/bootstrap.py | iex; npm run build:extension",
+        "options": {
+          "shell": {
+            "executable": "powershell.exe",
+            "args": ["-NoProfile", "-Command"]
+          }
+        }
+      },
+      "problemMatcher": []
+    }
+  ]
+}

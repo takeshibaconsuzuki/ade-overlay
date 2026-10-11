@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ADE Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"
+      ],
+      "outFiles": ["${workspaceFolder}/vscode-extension/out/**/*.cjs"],
+      "preLaunchTask": "Build ADE Extension"
+    }
+  ]
+}
