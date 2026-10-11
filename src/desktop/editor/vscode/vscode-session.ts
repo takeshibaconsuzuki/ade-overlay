@@ -1,4 +1,4 @@
-import type { AdeWorkbenchGlobal } from '../../shared/vscode-ade-handle'
+import type { AdeWorkbenchGlobal } from '../../../shared/vscode-ade-handle'
 
 // Only the internal contracts used by persistence are described here. VS Code owns the objects.
 // eslint-disable-next-line @typescript-eslint/no-namespace -- Groups type-only contracts without emitting a runtime namespace.

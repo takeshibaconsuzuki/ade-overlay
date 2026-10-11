@@ -6,6 +6,7 @@ import type {
   Worktree,
   VscodeServerStatus,
 } from '../../../shared/api'
+import '../../shared/style.css'
 import './style.css'
 
 function WorktreeRow({
@@ -22,7 +23,7 @@ function WorktreeRow({
   const start = async () => {
     setRequestError(null)
     try {
-      await window.desktop.openWorktree(worktree.path)
+      await window.picker.openWorktree(worktree.path)
     } catch (error) {
       setRequestError(
         error instanceof Error
@@ -35,10 +36,7 @@ function WorktreeRow({
     setRequestError(null)
     if (!status?.error) return
     try {
-      await window.desktop.clearVscodeServerError(
-        worktree.path,
-        status.error.id,
-      )
+      await window.picker.clearVscodeServerError(worktree.path, status.error.id)
     } catch (error) {
       setRequestError(
         error instanceof Error ? error.message : 'Unable to dismiss error',
@@ -97,17 +95,17 @@ function WorktreePicker(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    window.desktop.setOnConnectionStateChangedListener(setConnectionState)
-    window.desktop.setOnVscodeServersChangedListener(setVscodeServers)
-    window.desktop.setOnWorktreesChangedListener((worktrees) => {
+    window.picker.setOnConnectionStateChangedListener(setConnectionState)
+    window.picker.setOnVscodeServersChangedListener(setVscodeServers)
+    window.picker.setOnWorktreesChangedListener((worktrees) => {
       setWorktrees(worktrees)
       setError(null)
     })
-    window.desktop.initializeWorktreePicker()
+    window.picker.initializeWorktreePicker()
     return () => {
-      window.desktop.setOnConnectionStateChangedListener(undefined)
-      window.desktop.setOnVscodeServersChangedListener(undefined)
-      window.desktop.setOnWorktreesChangedListener(undefined)
+      window.picker.setOnConnectionStateChangedListener(undefined)
+      window.picker.setOnVscodeServersChangedListener(undefined)
+      window.picker.setOnWorktreesChangedListener(undefined)
     }
   }, [])
 
@@ -115,7 +113,7 @@ function WorktreePicker(): React.JSX.Element {
     setRefreshing(true)
     setError(null)
     try {
-      await window.desktop.refreshWorktrees()
+      await window.picker.refreshWorktrees()
     } catch (error) {
       setError(
         error instanceof Error ? error.message : 'Unable to refresh worktrees',
@@ -173,37 +171,4 @@ function WorktreePicker(): React.JSX.Element {
   )
 }
 
-function EditorShell(): React.JSX.Element {
-  const [state, setState] = useState<import('../../api').EditorState>({
-    title: 'VS Code',
-  })
-  useEffect(() => {
-    window.desktop.setOnEditorStateChangedListener(setState)
-    window.desktop.initializeEditorWindow()
-    return () => window.desktop.setOnEditorStateChangedListener(undefined)
-  }, [])
-  return state.error ? (
-    <main className="editor-error">
-      <h1>{state.title}</h1>
-      <p role="alert">{state.error}</p>
-      <button
-        type="button"
-        onClick={() => void window.desktop.retryEditor().catch(() => {})}
-      >
-        Retry
-      </button>
-    </main>
-  ) : (
-    <div
-      className="connection-screen"
-      role="status"
-      aria-label={`Loading ${state.title}`}
-    >
-      <span className="connection-spinner" aria-hidden="true" />
-    </div>
-  )
-}
-
-createRoot(document.getElementById('root')!).render(
-  window.location.hash === '#editor' ? <EditorShell /> : <WorktreePicker />,
-)
+createRoot(document.getElementById('root')!).render(<WorktreePicker />)

@@ -2,6 +2,11 @@
 export interface AdeHandle {
   // Resolves a service in the workbench container, or a named contribution. Unknown IDs throw.
   get(id: string): unknown
+  // The preload attaches notifications; the page adapter installs application behavior on first use.
+  vscodeSettings?: {
+    changed(generation: number, content: string): void
+    apply?(content: string, generation: number): Promise<void>
+  }
 }
 
 export interface AdeWorkbenchGlobal {

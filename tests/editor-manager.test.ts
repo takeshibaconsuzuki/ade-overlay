@@ -5,8 +5,8 @@ import {
   EditorWindowManager,
   type EditorHost,
   type EditorPage,
-} from '../src/desktop/main/editor-manager'
-import type { EditorState } from '../src/desktop/api'
+} from '../src/desktop/editor/manager'
+import type { EditorState } from '../src/desktop/editor/api'
 import type { VscodeServerStatus, Worktree } from '../src/shared/api'
 
 function deferred<T>() {

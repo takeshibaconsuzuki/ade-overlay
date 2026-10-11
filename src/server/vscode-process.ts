@@ -30,6 +30,7 @@ export interface VscodeLauncher {
     path: string,
     dataDirectory: string,
     signal: AbortSignal,
+    extensionsDirectory: string,
   ): Promise<VscodeProcess>
 }
 
@@ -39,8 +40,15 @@ export class NodeVscodeLauncher implements VscodeLauncher {
     path: string,
     dataDirectory: string,
     signal: AbortSignal,
+    extensionsDirectory: string,
   ): Promise<VscodeProcess> {
-    return NodeVscodeProcess.start(installation, path, dataDirectory, signal)
+    return NodeVscodeProcess.start(
+      installation,
+      path,
+      dataDirectory,
+      signal,
+      extensionsDirectory,
+    )
   }
 }
 
@@ -64,6 +72,7 @@ export class NodeVscodeProcess implements VscodeProcess {
     path: string,
     dataDirectory: string,
     signal: AbortSignal,
+    extensionsDirectory: string,
   ): Promise<NodeVscodeProcess> {
     const cwd = await realpath(path)
     const directory = join(
@@ -83,6 +92,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       token,
       signal,
       vscodeBasePath(path),
+      extensionsDirectory,
     )
   }
 
@@ -94,6 +104,7 @@ export class NodeVscodeProcess implements VscodeProcess {
     private readonly token: string,
     private readonly signal: AbortSignal,
     basePath: string,
+    extensionsDirectory: string,
   ) {
     this.child = spawn(
       installation.node,
@@ -108,6 +119,8 @@ export class NodeVscodeProcess implements VscodeProcess {
         tokenFile,
         '--server-data-dir',
         directory,
+        '--extensions-dir',
+        extensionsDirectory,
         '--default-folder',
         path,
         '--server-base-path',

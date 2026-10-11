@@ -14,9 +14,7 @@ export default tseslint.config(
     files: [
       'electron.vite.config.ts',
       'scripts/**/*.ts',
-      'src/desktop/*.ts',
-      'src/desktop/main/**/*.ts',
-      'src/desktop/preload/**/*.ts',
+      'src/desktop/**/*.ts',
       'src/shared/**/*.ts',
       'src/server/**/*.ts',
       'tests/**/*.{ts,mjs}',
@@ -26,7 +24,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/desktop/renderer/**/*.{ts,tsx}'],
+    files: ['src/desktop/**/renderer/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.browser,
     },

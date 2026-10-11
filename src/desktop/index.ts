@@ -1,64 +1,37 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'node:path'
+import { app, type BrowserWindow, ipcMain } from 'electron'
 import type {
   ClientMethods,
   ServerMethods,
   Worktree,
   VscodeServerStatus,
-} from '../../shared/api'
+} from '../shared/api'
 import {
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
-  EDITOR_INITIALIZE,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVERS_CHANGED,
   WORKTREE_OPEN,
-  EDITOR_RETRY,
   VSCODE_SERVER_CLEAR_ERROR,
-} from '../api'
-import { DEFAULT_SERVER_URL } from '../constants'
-import { connectRpc } from '../../shared/rpc-client'
-import { APP_DISPLAY_NAME, APP_NAME } from '../../shared/constants'
-import { logger } from '../../shared/logger'
-import { EditorWindowManager } from './editor-manager'
-import { ElectronEditorWindow } from './editor-window'
+} from './picker/api'
+import { DEFAULT_SERVER_URL } from './constants'
+import { connectRpc } from '../shared/rpc-client'
+import { APP_NAME } from '../shared/constants'
+import { logger } from '../shared/logger'
+import { EditorWindowManager } from './editor/manager'
+import { ElectronEditorWindow } from './editor/window'
+import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
+import { createWorktreePickerWindow } from './picker/window'
 
 const log = logger.child({ component: 'desktop' })
 let worktreePickerWindow: BrowserWindow | undefined
 
-function createWorktreePickerWindow(): void {
-  worktreePickerWindow = new BrowserWindow({
-    title: APP_DISPLAY_NAME,
-    width: 900,
-    height: 600,
-    webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  })
-  worktreePickerWindow.once('closed', () => {
-    worktreePickerWindow = undefined
-    app.quit()
-  })
-
-  const devServerUrl = process.env.ELECTRON_RENDERER_URL
-
-  if (devServerUrl) {
-    worktreePickerWindow.loadURL(devServerUrl)
-  } else {
-    worktreePickerWindow.loadFile(
-      join(import.meta.dirname, '../renderer/index.html'),
-    )
-  }
-}
-
 app.whenReady().then(() => {
   let worktrees: Worktree[] = []
   let vscodeServers: VscodeServerStatus[] = []
-  const editorHost = new ElectronEditorWindow()
+  const editorHost = new ElectronEditorWindow({
+    writeSettings: (content) => server.rpc.writeSettings(content),
+  })
   const serverUrl = process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL
   const editor = new EditorWindowManager(
     editorHost,
@@ -69,6 +42,7 @@ app.whenReady().then(() => {
     serverUrl,
     {
       getClientInfo: () => ({ name: APP_NAME, version: app.getVersion() }),
+      settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
       worktreesChanged: (next) => {
         worktrees = next
         worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
@@ -84,6 +58,7 @@ app.whenReady().then(() => {
     },
     {
       onStateChange: (state) => {
+        editorHost.receiveVscodeSettings(null)
         if (state !== 'connected') {
           worktrees = []
           vscodeServers = []
@@ -150,5 +125,9 @@ app.whenReady().then(() => {
       }
     })()
   })
-  createWorktreePickerWindow()
+  worktreePickerWindow = createWorktreePickerWindow()
+  worktreePickerWindow.once('closed', () => {
+    worktreePickerWindow = undefined
+    app.quit()
+  })
 })

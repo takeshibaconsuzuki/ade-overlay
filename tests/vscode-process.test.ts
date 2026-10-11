@@ -17,6 +17,7 @@ async function fixture(t: TestContext, code: string) {
     directory,
     join(directory, 'data'),
     controller.signal,
+    join(directory, 'host extensions'),
   )
   t.after(async () => {
     controller.abort()
@@ -61,6 +62,10 @@ test(
       vscodeBasePath(f.directory),
     )
     assert.equal(args[args.indexOf('--host') + 1], '127.0.0.1')
+    assert.equal(
+      args[args.indexOf('--extensions-dir') + 1],
+      join(f.directory, 'host extensions'),
+    )
     assert.equal(args.includes('--without-connection-token'), false)
     const descendant = Number(
       await readFile(join(f.directory, 'descendant.pid'), 'utf8'),

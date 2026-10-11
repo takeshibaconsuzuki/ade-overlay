@@ -107,6 +107,7 @@ test(
         host: '127.0.0.1',
         port: 0,
         projects: paths.map((mainWorktreePath) => ({ mainWorktreePath })),
+        vscode: { settingsFile: join(directory, 'settings.json') },
       })
     await writeFile(path, config([first.path, second.path]))
     const server = await startServer(
@@ -130,6 +131,7 @@ test(
         `ws://127.0.0.1:${server.port}${RPC_PATH}`,
         {
           getClientInfo: () => ({ name: 'test', version: '1' }),
+          settingsChanged: () => {},
           vscodeServersChanged: () => {},
           worktreesChanged: (worktrees) => {
             updates.push(worktrees)

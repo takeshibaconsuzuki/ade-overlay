@@ -9,7 +9,7 @@ export default defineConfig({
       target: 'node24.15',
       externalizeDeps: true,
       rollupOptions: {
-        input: resolve(import.meta.dirname, 'src/desktop/main/index.ts'),
+        input: resolve(import.meta.dirname, 'src/desktop/index.ts'),
       },
     },
   },
@@ -18,16 +18,34 @@ export default defineConfig({
       target: 'node24.15',
       externalizeDeps: true,
       rollupOptions: {
-        input: resolve(import.meta.dirname, 'src/desktop/preload/index.ts'),
+        input: {
+          picker: resolve(import.meta.dirname, 'src/desktop/picker/preload.ts'),
+          editor: resolve(import.meta.dirname, 'src/desktop/editor/preload.ts'),
+          vscode: resolve(
+            import.meta.dirname,
+            'src/desktop/editor/vscode/preload.ts',
+          ),
+        },
+        // Sandboxed workbench preloads require CommonJS.
+        output: { format: 'cjs', entryFileNames: '[name].cjs' },
       },
     },
   },
   renderer: {
-    root: resolve(import.meta.dirname, 'src/desktop/renderer'),
+    root: resolve(import.meta.dirname, 'src/desktop'),
     build: {
       target: 'chrome148',
       rollupOptions: {
-        input: resolve(import.meta.dirname, 'src/desktop/renderer/index.html'),
+        input: {
+          picker: resolve(
+            import.meta.dirname,
+            'src/desktop/picker/renderer/index.html',
+          ),
+          editor: resolve(
+            import.meta.dirname,
+            'src/desktop/editor/renderer/index.html',
+          ),
+        },
       },
     },
     plugins: [

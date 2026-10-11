@@ -6,11 +6,10 @@
   "include": [
     "electron.vite.config.ts",
     "scripts/**/*.ts",
-    "src/desktop/*.ts",
-    "src/desktop/main/**/*.ts",
-    "src/desktop/preload/**/*.ts",
+    "src/desktop/**/*.ts",
     "src/shared/**/*.ts",
     "src/server/**/*.ts",
     "tests/**/*.ts"
-  ]
+  ],
+  "exclude": ["src/desktop/**/renderer/**"]
 }

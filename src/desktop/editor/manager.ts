@@ -1,5 +1,5 @@
 import type { VscodeServerStatus, Worktree } from '../../shared/api'
-import type { EditorState } from '../api'
+import type { EditorState } from './api'
 import { logger } from '../../shared/logger'
 
 const log = logger.child({ component: 'editor-manager' })

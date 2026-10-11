@@ -5,7 +5,7 @@ import { setImmediate } from 'node:timers/promises'
 import {
   persistVscodeSession,
   type SessionServices,
-} from '../src/desktop/main/vscode-session'
+} from '../src/desktop/editor/vscode/vscode-session'
 import type { AdeHandle } from '../src/shared/vscode-ade-handle'
 
 function deferred() {

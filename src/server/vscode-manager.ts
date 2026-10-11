@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { resolve } from 'node:path'
 import type { VscodeServerStatus } from '../shared/api'
 import { logger } from '../shared/logger'
 import type { VscodeLauncher, VscodeProcess } from './vscode-process'
@@ -20,7 +21,7 @@ export interface VscodeServerManager extends VscodeProxyTargets {
   setOnChangedListener(
     listener: ((snapshot: VscodeServerStatus[]) => void) | undefined,
   ): void
-  prepare(): Promise<void>
+  prepare(extensionsDirectory: string): Promise<void>
   ensure(path: string): void
   clearError(path: string, errorId: string): void
   close(): Promise<void>
@@ -33,6 +34,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
   private preparing: Promise<void> | undefined
   private installation: VscodeInstallation | undefined
   private closing: Promise<void> | undefined
+  private extensionsDirectory = ''
 
   constructor(
     private readonly runtime: VscodeRuntime,
@@ -55,8 +57,9 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
     this.onChanged = listener
   }
 
-  prepare(): Promise<void> {
+  prepare(extensionsDirectory: string): Promise<void> {
     this.controller.signal.throwIfAborted()
+    if (!this.preparing) this.extensionsDirectory = resolve(extensionsDirectory)
     this.preparing ??= this.runtime
       .prepare(this.controller.signal)
       .then((installation) => {
@@ -111,6 +114,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
         entry.status.path,
         this.runtime.dataDirectory,
         signal,
+        this.extensionsDirectory,
       )
       entry.process = child
       const connection = await child.ready

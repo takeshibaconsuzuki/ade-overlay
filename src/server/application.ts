@@ -12,6 +12,7 @@ import { startRpcServer, type RpcServer } from './server'
 import { WorktreeStore } from './worktree-store'
 import type { VscodeServerManager } from './vscode-manager'
 import { VscodeProxy } from './vscode-proxy'
+import { VscodeSettingsStore, type SettingsStore } from './settings-store'
 
 const log = logger.child({ component: 'server' })
 
@@ -30,6 +31,17 @@ export async function startServer(
   const worktrees = new WorktreeStore(options.projects)
   let server: RpcServer<ClientMethods, ServerMethods> | undefined
   let closing: Promise<void> | undefined
+  let settings: SettingsStore | undefined
+
+  const sendSettings = (
+    client: BirpcReturn<ClientMethods, ServerMethods>,
+    content: string | null,
+  ) => {
+    void client.settingsChanged.asEvent(content).catch((error: unknown) => {
+      if (!closing)
+        log.warn({ err: error }, 'Failed to send settings to client')
+    })
+  }
 
   const sendWorktrees = (
     client: BirpcReturn<ClientMethods, ServerMethods>,
@@ -75,6 +87,7 @@ export async function startServer(
       vscode.setOnChangedListener(undefined)
       await Promise.all([
         config.close(),
+        settings?.close(),
         worktrees.close(),
         vscode.close(),
         server?.close(),
@@ -83,11 +96,16 @@ export async function startServer(
     return closing
   }
   try {
-    await vscode.prepare()
+    settings = await VscodeSettingsStore.open(options.vscode.settingsFile)
+    settings.setOnChangedListener((content) => {
+      for (const client of server?.clients ?? []) sendSettings(client, content)
+    })
+    await vscode.prepare(options.vscode.extensionsDirectory)
     await worktrees.queueRefresh()
     server = await startRpcServer<ClientMethods, ServerMethods>(
       {
         getServerInfo: () => ({ name: APP_NAME }),
+        writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
         ensureVscodeServer: (path) => {
           const worktree = worktrees.snapshot.find(
@@ -101,6 +119,7 @@ export async function startServer(
       },
       options,
       (client) => {
+        sendSettings(client, settings!.snapshot)
         sendVscodeServers(client, vscode.snapshot)
         sendWorktrees(client, worktrees.snapshot)
       },

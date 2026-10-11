@@ -41,6 +41,7 @@ test(
         host: '127.0.0.1',
         port: 0,
         projects: [{ mainWorktreePath: repo }],
+        vscode: { settingsFile: join(directory, 'settings.json') },
       }),
     )
     let ready!: () => void
@@ -78,6 +79,7 @@ test(
         `ws://127.0.0.1:${server.port}${RPC_PATH}`,
         {
           getClientInfo: () => ({ name: 'test', version: '1' }),
+          settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next
           },
@@ -133,7 +135,14 @@ test('runtime preparation failure rejects startup and closes the manager', async
   const directory = await mkdtemp(join(tmpdir(), 'ade-vscode-startup-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const config = join(directory, 'server.yaml')
-  await writeFile(config, stringify({ host: '127.0.0.1', port: 0 }))
+  await writeFile(
+    config,
+    stringify({
+      host: '127.0.0.1',
+      port: 0,
+      vscode: { settingsFile: join(directory, 'settings.json') },
+    }),
+  )
   let attempts = 0
   const vscode = new ProcessVscodeServerManager(
     {

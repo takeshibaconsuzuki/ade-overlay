@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { parse, stringify, YAMLParseError } from 'yaml'
 import {
   DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
 } from '../src/server/constants'
-import { optionsFromFile, serverOptionsSchema } from '../src/server/options'
+import {
+  optionsFromFile,
+  serverOptionsSchema,
+  vscodeOptionsSchema,
+} from '../src/server/options'
 import { startRpcServer } from '../src/server/server'
 
 async function configFile(t: TestContext, contents: string): Promise<string> {
@@ -36,8 +40,32 @@ test('partial file config receives defaults and survives YAML serialization', as
     host: '127.0.0.1',
     port: DEFAULT_SERVER_PORT,
     projects: [],
+    vscode: vscodeOptionsSchema.parse({}),
   })
   assert.deepEqual(serverOptionsSchema.parse(parse(serialized)), options)
+})
+
+test('VS Code paths resolve relative to the config file and preserve absolute overrides', async (t) => {
+  const path = await configFile(
+    t,
+    stringify({
+      vscode: {
+        extensionsDirectory: './extensions',
+        settingsFile: '../profile/settings.json',
+      },
+    }),
+  )
+  const expected = {
+    extensionsDirectory: join(dirname(path), 'extensions'),
+    settingsFile: join(dirname(path), '../profile/settings.json'),
+  }
+  assert.deepEqual((await optionsFromFile(path)).vscode, expected)
+  assert.deepEqual(
+    (await optionsFromFile(relative(process.cwd(), path))).vscode,
+    expected,
+  )
+  await writeFile(path, stringify({ vscode: expected }))
+  assert.deepEqual((await optionsFromFile(path)).vscode, expected)
 })
 
 test('schema rejects invalid values and unknown config keys', () => {
@@ -60,6 +88,10 @@ test('schema rejects invalid values and unknown config keys', () => {
     { projects: [{}] },
     { projects: [{ mainWorktreePath: '  ' }] },
     { projects: [{ mainWorktreePath: 'repo', name: 'extra' }] },
+    { vscode: null },
+    { vscode: { extensionsDirectory: ' ' } },
+    { vscode: { settingsFile: '' } },
+    { vscode: { profile: 'unknown' } },
   ]) {
     assert.throws(
       () => serverOptionsSchema.parse(config),
