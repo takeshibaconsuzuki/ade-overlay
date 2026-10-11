@@ -14,6 +14,9 @@ export function createWorktreePickerWindow(): BrowserWindow {
       sandbox: false,
     },
   })
+  window.on('blur', () => {
+    window.hide()
+  })
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
 
   if (devServerUrl) {

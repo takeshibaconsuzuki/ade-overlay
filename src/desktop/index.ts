@@ -1,4 +1,4 @@
-import { app, type BrowserWindow, ipcMain } from 'electron'
+import { app, type BrowserWindow, globalShortcut, ipcMain } from 'electron'
 import type {
   ClientMethods,
   ServerMethods,
@@ -27,6 +27,28 @@ const log = logger.child({ component: 'desktop' })
 let worktreePickerWindow: BrowserWindow | undefined
 
 app.whenReady().then(() => {
+  const pickerShortcut = 'CommandOrControl+Shift+Space'
+  if (
+    !globalShortcut.register(pickerShortcut, () => {
+      if (worktreePickerWindow?.isVisible()) {
+        // Relinquish focus before hiding; blur cannot activate another window once hidden.
+        if (worktreePickerWindow.isFocused()) worktreePickerWindow.blur()
+        worktreePickerWindow.hide()
+      } else {
+        worktreePickerWindow?.show()
+      }
+    })
+  ) {
+    log.error(
+      { shortcut: pickerShortcut },
+      'Picker shortcut registration failed; aborting startup',
+    )
+    app.exit(1)
+    return
+  }
+  app.once('will-quit', () => {
+    globalShortcut.unregister(pickerShortcut)
+  })
   let worktrees: Worktree[] = []
   let vscodeServers: VscodeServerStatus[] = []
   const editorHost = new ElectronEditorWindow({
