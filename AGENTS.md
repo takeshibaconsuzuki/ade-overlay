@@ -1,6 +1,7 @@
 # Agent Rules
 
 - Activate the development environment before running any other command.
+- During reviews, treat TODOs that explicitly defer behavior as intentional scope decisions. Do not flag the deferred behavior itself; flag defects outside that scope or consequences the TODO does not acknowledge. A TODO alone does not exempt surrounding code from review.
 - Do not install dependencies globally. Install them into the project instead, using methods such as vendoring or virtual environments.
 - Use `npm run upgrade` instead of manually editing version ranges when updating dependencies.
 - Keep prose focused on durable intent and contracts. Preserve general wording that already describes the behavior correctly. Don’t add implementation details or enumerate current components. Change documentation only when the task makes it inaccurate or incomplete.

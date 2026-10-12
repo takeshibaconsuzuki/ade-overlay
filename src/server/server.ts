@@ -1,7 +1,6 @@
-import { once } from 'node:events'
-import { createServer, STATUS_CODES } from 'node:http'
 import { Socket } from 'node:net'
 import type { BirpcReturn } from 'birpc'
+import Fastify, { LogController, type FastifyPluginAsync } from 'fastify'
 import { WebSocketServer } from 'ws'
 import { MAX_RPC_PAYLOAD_BYTES, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
@@ -25,15 +24,27 @@ export async function startRpcServer<
   options: Pick<ServerOptions, 'host' | 'port'>,
   onClient?: (client: BirpcReturn<Remote, Local>) => void,
   proxy?: ServerProxy,
+  routes?: FastifyPluginAsync,
 ): Promise<RpcServer<Remote, Local>> {
-  const httpServer = createServer((request, response) => {
-    if (proxy && request.url?.startsWith('/vscode/')) {
-      proxy.request(request, response)
-      return
-    }
-    response.writeHead(426, { 'Content-Type': 'text/plain' })
-    response.end(STATUS_CODES[426])
+  const app = Fastify({
+    loggerInstance: log,
+    logController: new LogController({ disableRequestLogging: true }),
+    forceCloseConnections: true,
   })
+  if (proxy) {
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.raw.url?.startsWith('/vscode/')) {
+        // Hand off before body parsing so proxy uploads keep their original stream.
+        reply.hijack()
+        proxy.request(request.raw, reply.raw)
+      }
+    })
+  }
+  app.get(RPC_PATH, async (_request, reply) =>
+    reply.code(426).type('text/plain').send('Upgrade Required'),
+  )
+  if (routes) app.register(routes)
+  const httpServer = app.server
   const server = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_RPC_PAYLOAD_BYTES,
@@ -71,8 +82,20 @@ export async function startRpcServer<
     })
     onClient?.(rpc)
   })
-  httpServer.listen(options.port, options.host)
-  await once(httpServer, 'listening')
+  app.addHook('preClose', async () => {
+    proxy?.close()
+    const closed = new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+    })
+    for (const socket of server.clients) socket.terminate()
+    await closed
+  })
+  try {
+    await app.listen(options)
+  } catch (error) {
+    await app.close()
+    throw error
+  }
   const address = httpServer.address()
   if (!address || typeof address === 'string') {
     throw new Error('Server did not bind a TCP port')
@@ -83,19 +106,7 @@ export async function startRpcServer<
     port: address.port,
     clients,
     close(): Promise<void> {
-      closing ??= (async () => {
-        proxy?.close()
-        const httpClosed = new Promise<void>((resolve, reject) => {
-          httpServer.close((error) => (error ? reject(error) : resolve()))
-        })
-        const webSocketsClosed = new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()))
-        })
-        // Stop accepting connections before closing those still awaiting upgrade.
-        httpServer.closeAllConnections()
-        for (const socket of server.clients) socket.terminate()
-        await Promise.all([httpClosed, webSocketsClosed])
-      })()
+      closing ??= app.close()
       return closing
     },
   }

@@ -13,6 +13,10 @@ import { WorktreeStore } from './worktree-store'
 import type { VscodeServerManager } from './vscode-manager'
 import { VscodeProxy } from './vscode-proxy'
 import { VscodeSettingsStore, type SettingsStore } from './settings-store'
+import { ChatStore } from './chat-store'
+import { NodeProcessProbe } from './process-probe'
+import type { ChatProvider } from './chat-provider'
+import { chatRoutes } from './chat-routes'
 
 const log = logger.child({ component: 'server' })
 
@@ -25,10 +29,12 @@ export interface ServerApplication {
 export async function startServer(
   configPath: string,
   vscode: VscodeServerManager,
+  providers: ChatProvider[],
 ): Promise<ServerApplication> {
   const config = await createConfigStore(configPath)
   const options = config.snapshot
   const worktrees = new WorktreeStore(options.projects)
+  const chats = new ChatStore(new NodeProcessProbe(), providers)
   let server: RpcServer<ClientMethods, ServerMethods> | undefined
   let closing: Promise<void> | undefined
   let settings: SettingsStore | undefined
@@ -85,6 +91,7 @@ export async function startServer(
       config.setOnChangedListener(undefined)
       worktrees.setOnChangedListener(undefined)
       vscode.setOnChangedListener(undefined)
+      chats.close()
       await Promise.all([
         config.close(),
         settings?.close(),
@@ -104,6 +111,7 @@ export async function startServer(
     await worktrees.queueRefresh()
     server = await startRpcServer<ClientMethods, ServerMethods>(
       {
+        getChats: () => chats.snapshot,
         getServerInfo: () => ({ name: APP_NAME }),
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
@@ -124,7 +132,11 @@ export async function startServer(
         sendWorktrees(client, worktrees.snapshot)
       },
       new VscodeProxy(vscode),
+      async (app) => {
+        app.register(chatRoutes, { chats })
+      },
     )
+    for (const provider of providers) await provider.install()
   } catch (error) {
     await close()
     throw error

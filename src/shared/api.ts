@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export type ConnectionState = 'connecting' | 'connected' | 'retrying' | 'closed'
 
 export interface Worktree {
@@ -5,6 +7,24 @@ export interface Worktree {
   basename: string
   branchName: string | null
 }
+
+export const chatSchema = z.strictObject({
+  providerId: z.string().trim().min(1),
+  sessionId: z.string().trim().min(1),
+  worktreePath: z.string().min(1),
+  title: z.string(),
+  description: z.string().optional(),
+  status: z.enum(['idle', 'working']),
+  // Unix milliseconds, captured when the server receives the report.
+  mtime: z.int().nonnegative(),
+  // The owning provider process, never the short-lived hook process.
+  pid: z
+    .int()
+    .positive()
+    .max(2 ** 31 - 1),
+})
+
+export type Chat = z.infer<typeof chatSchema>
 
 export interface VscodeServerStatus {
   path: string
@@ -15,6 +35,8 @@ export interface VscodeServerStatus {
 }
 
 export interface ServerMethods {
+  // Keys are provider ID + ":" + session ID; sessions can share worktrees and processes.
+  getChats(): Record<string, Chat>
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   ensureVscodeServer(path: string): void

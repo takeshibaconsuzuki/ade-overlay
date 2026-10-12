@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { dirname, join, resolve } from 'node:path'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
@@ -7,6 +8,7 @@ import { FetchHttpClient } from '../shared/http-client'
 import { ProcessVscodeServerManager } from './vscode-manager'
 import { NodeVscodeLauncher } from './vscode-process'
 import { DownloadedVscodeRuntime } from './vscode-runtime'
+import { CodexChatProvider } from './chat-providers/codex/provider'
 
 const log = logger.child({ component: 'server' })
 
@@ -27,6 +29,16 @@ async function main(): Promise<void> {
       new DownloadedVscodeRuntime(new FetchHttpClient()),
       new NodeVscodeLauncher(),
     ),
+    [
+      new CodexChatProvider(
+        join(
+          dirname(resolve(process.argv[1])),
+          process.argv[1].endsWith('.ts')
+            ? '../../scripts/report-chat.mjs'
+            : 'report-chat.mjs',
+        ),
+      ),
+    ],
   )
   log.info(
     { host: server.host, port: server.port, path: RPC_PATH },

@@ -70,7 +70,7 @@ test(
         },
       },
     )
-    const server = await startServer(config, vscode)
+    const server = await startServer(config, vscode, [])
     t.after(() => server.close())
     const connect = () => {
       let latest: VscodeServerStatus[] = []
@@ -158,7 +158,7 @@ test('runtime preparation failure rejects startup and closes the manager', async
       },
     },
   )
-  await assert.rejects(startServer(config, vscode), /Download unavailable/)
+  await assert.rejects(startServer(config, vscode, []), /Download unavailable/)
   assert.equal(attempts, 1)
   assert.throws(() => vscode.ensure(directory), /closed/)
 })

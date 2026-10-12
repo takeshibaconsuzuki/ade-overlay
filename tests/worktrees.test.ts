@@ -123,6 +123,7 @@ test(
           },
         },
       ),
+      [],
     )
     t.after(() => server.close())
     const connect = () => {

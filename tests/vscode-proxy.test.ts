@@ -74,7 +74,7 @@ async function fixture(t: TestContext) {
     host?: string
     forwarded?: string | string[]
   }[] = []
-  const upstream = createServer((request, response) => {
+  const upstream = createServer(async (request, response) => {
     requests.push({
       url: request.url,
       host: request.headers.host,
@@ -93,6 +93,10 @@ async function fixture(t: TestContext) {
           'Set-Cookie': 'vscode-tkn=secret; SameSite=Lax',
         })
         .end()
+    } else if (url.pathname === `${base}/upload`) {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(chunk)
+      response.writeHead(200).end(Buffer.concat(chunks))
     } else {
       response.writeHead(200, { 'Content-Type': 'text/plain' }).end(request.url)
     }
@@ -186,3 +190,18 @@ test(
     await closed
   },
 )
+
+test('proxy uploads bypass HTTP API body parsing and limits', async (t) => {
+  const f = await fixture(t)
+  const body = 'x'.repeat(1024 * 1024 + 1)
+  const response = await fetch(`${f.url}${base}/upload`, {
+    method: 'POST',
+    headers: {
+      Cookie: 'vscode-tkn=secret',
+      'Content-Type': 'application/octet-stream',
+    },
+    body,
+  })
+  assert.equal(response.status, 200)
+  assert.equal(await response.text(), body)
+})
