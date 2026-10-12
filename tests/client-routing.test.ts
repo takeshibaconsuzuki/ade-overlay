@@ -7,8 +7,9 @@ import { test, type TestContext } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 import { stringify } from 'yaml'
+import { simpleGit } from 'simple-git'
 import { startServer } from '../src/server/application'
-import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
+import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import type {
   Chat,
   ClientInfo,
@@ -39,16 +40,18 @@ async function waitFor(predicate: () => boolean) {
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-client-routing-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
+  await simpleGit(directory).init(['--initial-branch=main'])
   const config = join(directory, 'server.yaml')
   await writeFile(
     config,
     stringify({
       host: '127.0.0.1',
       port: 0,
+      projects: [{ mainWorktreePath: directory }],
       vscode: { settingsFile: join(directory, 'settings.json') },
     }),
   )
-  const vscode = new ProcessVscodeServerManager(
+  const vscode = new ProcessVscodeServerFactory(
     {
       dataDirectory: directory,
       prepare: async () => ({ node: '', entrypoint: '' }),
@@ -102,7 +105,6 @@ const desktopMethods: DesktopClientMethods = {
   getClientInfo: () => ({ kind: 'desktop', name: 'test', version: '1' }),
   settingsChanged: () => {},
   worktreesChanged: () => {},
-  vscodeServersChanged: () => {},
 }
 
 test('large descriptions are previewed without disconnecting extensions or truncating stored reports', async (t) => {
@@ -164,17 +166,17 @@ test('snapshots are routed exclusively to the identified client kind, including 
   }
   const desktop = await f.connect(desktopMethods)
   const extension = await f.connect(extensionMethods)
-  await waitFor(() => desktop.requests.length === 4 && snapshots.length === 1)
+  await waitFor(() => desktop.requests.length === 3 && snapshots.length === 1)
   assert.deepEqual(snapshots, [{}])
   await f.report('First')
   await waitFor(() => snapshots.length === 2)
   await desktop.rpc.writeSettings('{"editor.fontSize": 18}')
   await desktop.rpc.refreshWorktrees()
-  f.vscode.ensure(f.directory, f.url)
+  await desktop.rpc.ensureVscodeServer(f.directory)
   await waitFor(
     () =>
-      desktop.requests.filter((name) => name === 'vscodeServersChanged')
-        .length === 3,
+      desktop.requests.filter((name) => name === 'worktreesChanged').length ===
+      5,
   )
   // Round trips flush prior events on both sockets before testing exclusions.
   await Promise.all([
@@ -183,12 +185,7 @@ test('snapshots are routed exclusively to the identified client kind, including 
   ])
   assert.deepEqual(
     new Set(desktop.requests),
-    new Set([
-      'getClientInfo',
-      'settingsChanged',
-      'worktreesChanged',
-      'vscodeServersChanged',
-    ]),
+    new Set(['getClientInfo', 'settingsChanged', 'worktreesChanged']),
   )
   assert.deepEqual(extension.requests, [
     'getClientInfo',
@@ -198,7 +195,7 @@ test('snapshots are routed exclusively to the identified client kind, including 
   for (const name of ['settingsChanged', 'worktreesChanged'])
     assert.equal(
       desktop.requests.filter((request) => request === name).length,
-      2,
+      name === 'settingsChanged' ? 2 : 5,
     )
 
   const closed = once(extension.socket, 'close')

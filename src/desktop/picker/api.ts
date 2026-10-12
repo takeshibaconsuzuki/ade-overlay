@@ -1,10 +1,6 @@
-import type {
-  ConnectionState,
-  Worktree,
-  VscodeServerStatus,
-} from '../../shared/api'
+import type { ConnectionState, Worktree } from '../../shared/api'
 
-// Worktree-picker renderer → main: requests current connection state, worktrees, and VS Code server statuses after listeners are registered.
+// Worktree-picker renderer → main: requests current connection state and worktrees after listeners are registered.
 export const WORKTREE_PICKER_INITIALIZE = 'worktreePicker:initialize'
 
 // Main → renderer: delivers the latest worktrees after a server update or initialization.
@@ -16,14 +12,17 @@ export const WORKTREES_REFRESH = 'worktrees:refresh'
 // Main → renderer: reports connection state changes, including disconnects and retries.
 export const CONNECTION_STATE_CHANGED = 'connection:stateChanged'
 
-// Main → renderer: delivers current VS Code server statuses after an update or initialization.
-export const VSCODE_SERVERS_CHANGED = 'vscode:changed'
-
 // Renderer → main: selects a worktree in the editor window and ensures its server is running.
 export const WORKTREE_OPEN = 'worktree:open'
 
-// Renderer → main: dismisses the identified error without changing the server lifecycle.
-export const VSCODE_SERVER_CLEAR_ERROR = 'vscode:clearError'
+// Renderer → main: dismisses the identified error without changing the worktree or server lifecycle.
+export const WORKTREE_CLEAR_ERROR = 'worktree:clearError'
+
+// Renderer → main: requests server termination and resolves when accepted. Progress and failures arrive through worktree updates. Pages persist and dispose independently in response to server broadcasts.
+export const VSCODE_SERVER_STOP = 'vscode:stop'
+
+// Renderer → main: confirms deletion, then requests it from the server. Resolves on cancellation or accepted deletion; rejects invalid requests. Progress and failures arrive through worktree updates. Pages follow server broadcasts.
+export const WORKTREE_DELETE = 'worktree:delete'
 
 export interface PickerApi {
   setOnConnectionStateChangedListener(
@@ -35,8 +34,7 @@ export interface PickerApi {
   initializeWorktreePicker(): void
   refreshWorktrees(): Promise<void>
   openWorktree(path: string): Promise<void>
-  clearVscodeServerError(path: string, errorId: string): Promise<void>
-  setOnVscodeServersChangedListener(
-    listener: ((statuses: VscodeServerStatus[]) => void) | undefined,
-  ): void
+  clearWorktreeError(path: string, errorId: string): Promise<void>
+  stopVscodeServer(path: string): Promise<void>
+  deleteWorktree(path: string): Promise<void>
 }

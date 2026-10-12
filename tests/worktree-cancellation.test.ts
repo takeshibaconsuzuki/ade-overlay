@@ -3,6 +3,8 @@ import childProcess, {
   type ChildProcess,
   type SpawnOptions,
 } from 'node:child_process'
+import { dirname } from 'node:path'
+import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import { once } from 'node:events'
 import { syncBuiltinESMExports } from 'node:module'
 import { test } from 'node:test'
@@ -32,10 +34,23 @@ test(
       },
     )
     syncBuiltinESMExports()
-    const store = new WorktreeStore([
-      { mainWorktreePath: process.cwd() },
-      { mainWorktreePath: process.cwd() },
-    ])
+    const store = new WorktreeStore(
+      [
+        { mainWorktreePath: process.cwd() },
+        { mainWorktreePath: dirname(process.cwd()) },
+      ],
+      new ProcessVscodeServerFactory(
+        {
+          dataDirectory: '',
+          prepare: async () => ({ node: '', entrypoint: '' }),
+        },
+        {
+          launch: async () => {
+            throw new Error('Unexpected launch')
+          },
+        },
+      ),
+    )
     t.after(async () => {
       for (const child of children) {
         if (child.exitCode === null && child.signalCode === null)

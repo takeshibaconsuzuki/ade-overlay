@@ -1,25 +1,19 @@
 import React, { useEffect, useId, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { APP_DISPLAY_NAME } from '../../../shared/constants'
-import type {
-  ConnectionState,
-  Worktree,
-  VscodeServerStatus,
-} from '../../../shared/api'
+import type { ConnectionState, Worktree } from '../../../shared/api'
 import '../../shared/style.css'
 import './style.css'
 
-function WorktreeRow({
-  worktree,
-  status,
-}: {
-  worktree: Worktree
-  status?: VscodeServerStatus
-}): React.JSX.Element {
+function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
+  const status = worktree.vscode
+  const [pending, setPending] = useState(false)
   const [requestError, setRequestError] = useState<string | null>(null)
   const tooltipId = useId()
-  const state = status?.state ?? 'stopped'
-  const message = requestError ?? status?.error?.message
+  const state = status.state
+  const error = worktree.error
+  const message = requestError ?? error?.message
+  const unavailable = pending || worktree.deleting || state === 'stopping'
   const start = async () => {
     setRequestError(null)
     try {
@@ -34,19 +28,33 @@ function WorktreeRow({
   }
   const clear = async () => {
     setRequestError(null)
-    if (!status?.error) return
+    if (!error) return
     try {
-      await window.picker.clearVscodeServerError(worktree.path, status.error.id)
+      await window.picker.clearWorktreeError(worktree.path, error.id)
     } catch (error) {
       setRequestError(
         error instanceof Error ? error.message : 'Unable to dismiss error',
       )
     }
   }
+  const perform = async (operation: () => Promise<void>) => {
+    setPending(true)
+    setRequestError(null)
+    try {
+      await operation()
+    } catch (error) {
+      setRequestError(
+        error instanceof Error ? error.message : 'Worktree operation failed',
+      )
+    } finally {
+      setPending(false)
+    }
+  }
   return (
     <li className="worktree-row">
       <button
         className="worktree-open"
+        disabled={unavailable}
         type="button"
         title={worktree.path}
         onClick={() => void start()}
@@ -76,12 +84,47 @@ function WorktreeRow({
         </span>
       ) : (
         <span
-          className={`server-status server-status-${state}`}
+          className={`server-status server-status-${worktree.deleting ? 'deleting' : state}`}
+          aria-busy={
+            worktree.deleting || state === 'starting' || state === 'stopping'
+          }
           role="status"
-          aria-label={`VS Code Server ${state}`}
-          title={`VS Code Server ${state}`}
+          aria-label={
+            worktree.deleting ? 'Deleting worktree' : `VS Code Server ${state}`
+          }
+          title={
+            worktree.deleting ? 'Deleting worktree' : `VS Code Server ${state}`
+          }
         />
       )}
+      <div className="worktree-actions">
+        <button
+          type="button"
+          // Only a worktree error enables another Stop request while stopping.
+          disabled={
+            pending ||
+            worktree.deleting ||
+            state === 'stopped' ||
+            (state === 'stopping' && !error)
+          }
+          onClick={() =>
+            void perform(() => window.picker.stopVscodeServer(worktree.path))
+          }
+        >
+          Stop
+        </button>
+        {worktree.path !== worktree.mainWorktreePath && (
+          <button
+            type="button"
+            disabled={unavailable}
+            onClick={() =>
+              void perform(() => window.picker.deleteWorktree(worktree.path))
+            }
+          >
+            {worktree.deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
+      </div>
     </li>
   )
 }
@@ -90,13 +133,11 @@ function WorktreePicker(): React.JSX.Element {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
-  const [vscodeServers, setVscodeServers] = useState<VscodeServerStatus[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     window.picker.setOnConnectionStateChangedListener(setConnectionState)
-    window.picker.setOnVscodeServersChangedListener(setVscodeServers)
     window.picker.setOnWorktreesChangedListener((worktrees) => {
       setWorktrees(worktrees)
       setError(null)
@@ -104,7 +145,6 @@ function WorktreePicker(): React.JSX.Element {
     window.picker.initializeWorktreePicker()
     return () => {
       window.picker.setOnConnectionStateChangedListener(undefined)
-      window.picker.setOnVscodeServersChangedListener(undefined)
       window.picker.setOnWorktreesChangedListener(undefined)
     }
   }, [])
@@ -157,13 +197,7 @@ function WorktreePicker(): React.JSX.Element {
       ) : (
         <ul aria-label="Worktrees" aria-busy={refreshing}>
           {worktrees.map((worktree) => (
-            <WorktreeRow
-              key={worktree.path}
-              worktree={worktree}
-              status={vscodeServers.find(
-                (status) => status.path === worktree.path,
-              )}
-            />
+            <WorktreeRow key={worktree.path} worktree={worktree} />
           ))}
         </ul>
       )}

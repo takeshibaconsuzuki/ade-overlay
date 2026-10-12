@@ -4,12 +4,14 @@ export const EDITOR_INITIALIZE = 'editor:initialize'
 // Main → editor-window renderer: delivers current editor presentation state after a change or initialization.
 export const EDITOR_STATE_CHANGED = 'editor:stateChanged'
 
-// Editor-window renderer → main: retries opening the selected worktree after a failure. Resolves when the startup request is acknowledged; page loading completes asynchronously. Does nothing unless the selected worktree has failed.
+// Editor-window renderer → main: retries opening the selected worktree after a failure. Resolves when the startup request is acknowledged; page loading completes asynchronously. Does nothing unless the selected page has failed and the current server snapshot permits retry.
 export const EDITOR_RETRY = 'editor:retry'
 
 // Presentation state for the editor window's loading and error UI. Loaded pages are displayed separately.
 export interface EditorState {
   title: string
+  // Whether the selected page can be retried given the authoritative worktree snapshot.
+  canRetry: boolean
   error?: string
 }
 

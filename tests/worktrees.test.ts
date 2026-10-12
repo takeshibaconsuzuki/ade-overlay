@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { simpleGit } from 'simple-git'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
-import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
+import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import { listWorktrees, parseWorktrees } from '../src/server/git-utils'
 import type {
   DesktopClientMethods,
@@ -64,7 +64,7 @@ test('porcelain records preserve unusual paths and branch names and omit bare re
   )
 })
 
-test('discovers worktrees from all projects, deduplicates and isolates invalid projects', async (t) => {
+test('discovers worktrees from all projects', async (t) => {
   const directory = await fixture(t)
   const first = await repository(directory, 'first project')
   const second = await repository(directory, 'second')
@@ -84,8 +84,6 @@ test('discovers worktrees from all projects, deduplicates and isolates invalid p
   const worktrees = await listWorktrees([
     { mainWorktreePath: first.path },
     { mainWorktreePath: second.path },
-    { mainWorktreePath: first.path },
-    { mainWorktreePath: join(directory, 'missing') },
   ])
   assert.deepEqual(
     worktrees.map(({ basename, branchName }) => ({ basename, branchName })),
@@ -116,7 +114,7 @@ test(
     await writeFile(path, config([first.path, second.path]))
     const server = await startServer(
       path,
-      new ProcessVscodeServerManager(
+      new ProcessVscodeServerFactory(
         {
           dataDirectory: directory,
           prepare: async () => ({ node: '', entrypoint: '' }),
@@ -141,7 +139,6 @@ test(
             version: '1',
           }),
           settingsChanged: () => {},
-          vscodeServersChanged: () => {},
           worktreesChanged: (worktrees) => {
             updates.push(worktrees)
           },
@@ -197,7 +194,10 @@ test(
 
     await writeFile(path, config([first.path]))
     await waitFor(() => a.latest()?.length === 2 && b.latest()?.length === 2)
-    await first.git.raw(['worktree', 'remove', join(directory, 'new tree')])
+    const linked = b
+      .latest()!
+      .find((worktree) => worktree.basename === 'new tree')!
+    await b.client.rpc.deleteWorktree(linked.path)
     await b.client.rpc.refreshWorktrees()
     await waitFor(() => a.latest()?.length === 1 && b.latest()?.length === 1)
     assert.equal(a.latest()?.[0].basename, 'first')
@@ -205,3 +205,73 @@ test(
     assert.equal(server.close(), server.close())
   },
 )
+
+test('rejects linked roots, subdirectories, bare roots, duplicate projects and discovery errors', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'linked', linked])
+  const nested = join(repo.path, 'nested')
+  await mkdir(nested)
+  const bare = join(directory, 'bare')
+  await mkdir(bare)
+  await simpleGit(bare).init(true)
+  for (const invalid of [linked, nested, bare]) {
+    await assert.rejects(
+      listWorktrees([{ mainWorktreePath: invalid }]),
+      /not the main worktree root/,
+    )
+  }
+  await assert.rejects(
+    listWorktrees([
+      { mainWorktreePath: repo.path },
+      { mainWorktreePath: join(repo.path, '.') },
+    ]),
+    /Duplicate project/,
+  )
+  await assert.rejects(
+    listWorktrees([
+      { mainWorktreePath: repo.path },
+      { mainWorktreePath: join(directory, 'missing') },
+    ]),
+  )
+})
+
+test('failed deletion preserves a dirty worktree and external disappearance rejects refresh', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'linked', linked])
+  const factory = new ProcessVscodeServerFactory(
+    {
+      dataDirectory: directory,
+      prepare: async () => ({ node: '', entrypoint: '' }),
+    },
+    {
+      launch: async () => {
+        throw new Error('Unexpected launch')
+      },
+    },
+  )
+  const { WorktreeStore } = await import('../src/server/worktree-store')
+  const store = new WorktreeStore([{ mainWorktreePath: repo.path }], factory)
+  t.after(() => store.close())
+  await store.queueRefresh()
+  const before = store.snapshot
+  await writeFile(join(linked, 'untracked.txt'), 'keep me')
+  store.deleteWorktree(linked)
+  await waitFor(
+    () => !store.snapshot.find((entry) => entry.path === linked)?.deleting,
+  )
+  const failed = store.snapshot.find((entry) => entry.path === linked)!
+  assert.match(failed.error!.message, /untracked|modified/)
+  store.clearWorktreeError(linked, failed.error!.id)
+  assert.deepEqual(store.snapshot, before)
+  assert.throws(
+    () => store.deleteWorktree(repo.path),
+    /main worktree cannot be deleted/,
+  )
+  await repo.git.raw(['worktree', 'remove', '--force', linked])
+  await assert.rejects(store.queueRefresh(), /disappeared outside ADE/)
+  assert.deepEqual(store.snapshot, before)
+})

@@ -7,7 +7,7 @@ import electron from 'electron'
 import treeKill from 'tree-kill'
 import { stringify } from 'yaml'
 import { startServer } from '../../src/server/application'
-import { ProcessVscodeServerManager } from '../../src/server/vscode-manager'
+import { ProcessVscodeServerFactory } from '../../src/server/vscode-server'
 import { NodeVscodeLauncher } from '../../src/server/vscode-process'
 import { DownloadedVscodeRuntime } from '../../src/server/vscode-runtime'
 import { FetchHttpClient } from '../../src/shared/http-client'
@@ -32,7 +32,7 @@ export async function startIntegrationServer(
   )
   return startServer(
     config,
-    new ProcessVscodeServerManager(
+    new ProcessVscodeServerFactory(
       new DownloadedVscodeRuntime(new FetchHttpClient(), {
         dataDirectory: join(directory, 'vscode-data'),
       }),
@@ -51,10 +51,20 @@ export async function runDesktopClient(
   const filename = `vscode-${name}-client.mjs`
   const entry = join('out/main', filename)
   await copyFile(join('tests/integration', filename), entry)
+  // These scenarios exercise workbenches, not global shortcuts. Leave the user's
+  // live picker shortcut alone and allow isolated test clients to start alongside it.
+  const bootstrap = join('out/main', `vscode-${name}-bootstrap.mjs`)
+  await writeFile(
+    bootstrap,
+    `import { globalShortcut } from 'electron'
+globalShortcut.register = () => true
+await import('./${filename}')
+`,
+  )
   const env = { ...process.env, ...environment }
   delete env.ELECTRON_RUN_AS_NODE
   delete env.ELECTRON_RENDERER_URL
-  const child = spawn(electron as unknown as string, [entry], {
+  const child = spawn(electron as unknown as string, [bootstrap], {
     env,
     stdio: 'inherit',
     windowsHide: true,

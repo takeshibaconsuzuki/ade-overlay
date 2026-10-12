@@ -21,6 +21,8 @@ export interface VscodeConnection {
 export interface VscodeProcess {
   readonly ready: Promise<VscodeConnection>
   readonly exited: Promise<Exit>
+  // Concurrent calls share one termination attempt. After success, further calls
+  // resolve without repeating termination. After failure, a later call retries.
   stop(): Promise<void>
 }
 
@@ -266,7 +268,10 @@ export class NodeVscodeProcess implements VscodeProcess {
   }
 
   stop(): Promise<void> {
-    this.stopping ??= this.terminate()
+    this.stopping ??= this.terminate().catch((error: unknown) => {
+      this.stopping = undefined
+      throw error
+    })
     return this.stopping
   }
 }

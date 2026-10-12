@@ -6,7 +6,6 @@ import type {
   ExtensionClientMethods,
   ServerMethods,
   Worktree,
-  VscodeServerStatus,
 } from '../shared/api'
 import { clientInfoSchema } from '../shared/api'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
@@ -14,7 +13,7 @@ import { logger } from '../shared/logger'
 import { createConfigStore } from './config-store'
 import { startRpcServer, type RpcServer } from './server'
 import { WorktreeStore } from './worktree-store'
-import type { VscodeServerManager } from './vscode-manager'
+import type { VscodeServerFactory } from './vscode-server'
 import { VscodeProxy } from './vscode-proxy'
 import { VscodeSettingsStore, type SettingsStore } from './settings-store'
 import { ChatStore } from './chat-store'
@@ -33,12 +32,12 @@ export interface ServerApplication {
 
 export async function startServer(
   configPath: string,
-  vscode: VscodeServerManager,
+  vscode: VscodeServerFactory,
   providers: ChatProvider[],
 ): Promise<ServerApplication> {
   const config = await createConfigStore(configPath)
   const options = config.snapshot
-  const worktrees = new WorktreeStore(options.projects)
+  const worktrees = new WorktreeStore(options.projects, vscode)
   const chats = new ChatStore(new NodeProcessProbe(), providers)
   let server: RpcServer<ClientMethods, ServerMethods> | undefined
   let closing: Promise<void> | undefined
@@ -98,20 +97,6 @@ export async function startServer(
         log.warn({ err: error }, 'Failed to send worktrees to client')
     })
   }
-  const sendVscodeServers = (
-    client: BirpcReturn<DesktopClientMethods, ServerMethods>,
-    snapshot: VscodeServerStatus[],
-  ) => {
-    void client.vscodeServersChanged
-      .asEvent(snapshot)
-      .catch((error: unknown) => {
-        if (!closing)
-          log.warn({ err: error }, 'Failed to send VS Code status to client')
-      })
-  }
-  vscode.setOnChangedListener((snapshot) => {
-    for (const client of desktops) sendVscodeServers(client, snapshot)
-  })
   worktrees.setOnChangedListener((snapshot) => {
     for (const client of desktops) sendWorktrees(client, snapshot)
   })
@@ -129,7 +114,6 @@ export async function startServer(
     closing ??= (async () => {
       config.setOnChangedListener(undefined)
       worktrees.setOnChangedListener(undefined)
-      vscode.setOnChangedListener(undefined)
       chats.close()
       await Promise.all([
         config.close(),
@@ -155,10 +139,6 @@ export async function startServer(
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
         ensureVscodeServer: (path) => {
-          const worktree = worktrees.snapshot.find(
-            (worktree) => worktree.path === path,
-          )
-          if (!worktree) throw new Error('Unknown worktree')
           const host =
             options.host === '0.0.0.0'
               ? '127.0.0.1'
@@ -166,13 +146,15 @@ export async function startServer(
                 ? '::1'
                 : options.host
           const authority = host.includes(':') ? `[${host}]` : host
-          vscode.ensure(
-            worktree.path,
+          worktrees.ensureVscodeServer(
+            path,
             `ws://${authority}:${server!.port}${RPC_PATH}`,
           )
         },
-        clearVscodeServerError: (path, errorId) =>
-          vscode.clearError(path, errorId),
+        stopVscodeServer: (path) => worktrees.stopVscodeServer(path),
+        deleteWorktree: (path) => worktrees.deleteWorktree(path),
+        clearWorktreeError: (path, errorId) =>
+          worktrees.clearWorktreeError(path, errorId),
       },
       options,
       async (client, signal) => {
@@ -200,11 +182,10 @@ export async function startServer(
             once: true,
           })
           sendSettings(desktop, settings!.snapshot)
-          sendVscodeServers(desktop, vscode.snapshot)
           sendWorktrees(desktop, worktrees.snapshot)
         }
       },
-      new VscodeProxy(vscode),
+      new VscodeProxy(worktrees),
       async (app) => {
         app.register(chatRoutes, { chats })
       },

@@ -5,7 +5,7 @@ import { logger } from '../shared/logger'
 import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
 import { startServer } from './application'
 import { FetchHttpClient } from '../shared/http-client'
-import { ProcessVscodeServerManager } from './vscode-manager'
+import { ProcessVscodeServerFactory } from './vscode-server'
 import { NodeVscodeLauncher } from './vscode-process'
 import { DownloadedVscodeRuntime } from './vscode-runtime'
 import { CodexChatProvider } from './chat-providers/codex/provider'
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     .opts<{ config: string }>()
   const server = await startServer(
     flags.config,
-    new ProcessVscodeServerManager(
+    new ProcessVscodeServerFactory(
       new DownloadedVscodeRuntime(new FetchHttpClient()),
       new NodeVscodeLauncher(),
     ),

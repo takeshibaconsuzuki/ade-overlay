@@ -58,7 +58,9 @@ ul {
   background: #4ade80;
 }
 
-.server-status-starting {
+.server-status-deleting,
+.server-status-starting,
+.server-status-stopping {
   border: 2px solid #52525b;
   border-top-color: #f4f4f5;
   animation: spin 0.8s linear infinite;
@@ -118,7 +120,20 @@ ul {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .server-status-starting {
+  .server-status-deleting,
+  .server-status-starting,
+  .server-status-stopping {
     animation: none;
   }
+}
+
+.worktree-actions {
+  display: flex;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.worktree-actions button {
+  padding: 6px 10px;
+  font-size: 12px;
 }

@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto'
-import { resolve } from 'node:path'
+import { pathKey } from './path-key'
 
 export function vscodeBasePath(path: string): string {
-  const absolute = resolve(path)
-  const key = process.platform === 'win32' ? absolute.toLowerCase() : absolute
+  const key = pathKey(path)
   return `/vscode/${createHash('sha256').update(key).digest('hex')}`
 }

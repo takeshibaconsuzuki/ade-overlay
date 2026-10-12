@@ -12,7 +12,7 @@ import { startServer } from '../src/server/application'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
 import type { ChatProvider } from '../src/server/chat-provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
-import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
+import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import type {
   Chat,
   ExtensionClientMethods,
@@ -33,7 +33,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   )
   const entry = join(directory, 'hook.cjs')
   await writeFile(entry, '')
-  const vscode = new ProcessVscodeServerManager(
+  const vscode = new ProcessVscodeServerFactory(
     {
       dataDirectory: directory,
       prepare: async () => ({ node: '', entrypoint: '' }),
@@ -212,7 +212,7 @@ test('hook installation failure rolls back server startup', async (t) => {
       vscode: { settingsFile: join(directory, 'settings.json') },
     }),
   )
-  const vscode = new ProcessVscodeServerManager(
+  const vscode = new ProcessVscodeServerFactory(
     {
       dataDirectory: directory,
       prepare: async () => ({ node: '', entrypoint: '' }),

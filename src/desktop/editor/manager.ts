@@ -1,4 +1,4 @@
-import type { VscodeServerStatus, Worktree } from '../../shared/api'
+import type { Worktree } from '../../shared/api'
 import type { EditorState } from './api'
 import { logger } from '../../shared/logger'
 
@@ -52,7 +52,7 @@ interface Entry {
 export class EditorWindowManager {
   private readonly entries = new Map<string, Entry>()
   // An absent snapshot means connection state is unknown, not that servers stopped.
-  private statuses: Map<string, VscodeServerStatus> | undefined
+  private worktrees: Map<string, Worktree> | undefined
   private selected: Entry | undefined
   private closed = false
   private closing: Promise<void> | undefined
@@ -71,6 +71,13 @@ export class EditorWindowManager {
 
   open(worktree: Worktree): Promise<void> {
     if (this.closed) return Promise.reject(new Error('Editor is closed'))
+    if (this.worktrees && !this.worktrees.has(worktree.path))
+      return Promise.reject(new Error('Unknown worktree'))
+    worktree = this.worktrees?.get(worktree.path) ?? worktree
+    if (worktree.deleting)
+      return Promise.reject(new Error('Worktree is being deleted'))
+    if (worktree.vscode.state === 'stopping')
+      return Promise.reject(new Error('VS Code Server is stopping'))
     let entry = this.entries.get(worktree.path)
     if (!entry) {
       entry = { worktree, state: 'waitingForServer' }
@@ -81,9 +88,9 @@ export class EditorWindowManager {
     this.render()
     if (entry.request) return entry.request
     if (entry.state === 'loaded' || entry.state === 'loadingPage') {
-      const status = this.statuses?.get(worktree.path)
+      const status = this.worktrees?.get(worktree.path)?.vscode
       if (
-        !this.statuses ||
+        !this.worktrees ||
         (status?.state === 'running' &&
           status.browserPath === entry.browserPath)
       )
@@ -93,21 +100,47 @@ export class EditorWindowManager {
   }
 
   retry(): Promise<void> {
-    if (!this.selected || this.selected.state !== 'failed')
+    if (!this.selected || !this.canRetry(this.selected))
       return Promise.resolve()
     return this.open(this.selected.worktree)
   }
 
-  // Applies a server snapshot to pages awaiting readiness; loaded pages remain independent.
-  updateStatuses(statuses: VscodeServerStatus[]): void {
-    this.statuses = new Map(statuses.map((status) => [status.path, status]))
-    for (const entry of this.entries.values()) this.advance(entry)
+  // Authoritative snapshots stop or remove pages in every client. Persistence is local
+  // and completes before disposal; reopening and shutdown await the same disposal.
+  updateWorktrees(worktrees: Worktree[]): void {
+    if (this.closed) return
+    this.worktrees = new Map(
+      worktrees.map((worktree) => [worktree.path, worktree]),
+    )
+    for (const entry of this.entries.values()) {
+      const worktree = this.worktrees.get(entry.worktree.path)
+      if (worktree) entry.worktree = worktree
+      if (!worktree) {
+        this.fail(entry, 'This worktree has been removed.')
+        void this.disposePage(entry)
+      } else if (worktree.vscode.state === 'stopped') {
+        // A stopped snapshot can precede acknowledgment of our pending start request.
+        if (entry.state !== 'waitingForServer' || !entry.request) {
+          this.fail(
+            entry,
+            worktree.deleting
+              ? 'Worktree is being deleted.'
+              : (worktree.error?.message ??
+                  'VS Code Server stopped. Open the worktree to restart it.'),
+          )
+        }
+        void this.disposePage(entry)
+      } else {
+        this.advance(entry)
+      }
+    }
+    this.render()
   }
 
   // Called whenever ADE's RPC connection is unavailable, including initial connection attempts.
   // Clears cached statuses and fails pages awaiting readiness; loading and loaded pages continue independently.
   onServerDisconnected(): void {
-    this.statuses = undefined
+    this.worktrees = undefined
     for (const entry of this.entries.values()) {
       if (entry.state === 'waitingForServer')
         this.fail(
@@ -115,6 +148,7 @@ export class EditorWindowManager {
           'Disconnected from ADE before VS Code was ready. Retry once ADE reconnects.',
         )
     }
+    this.render()
   }
 
   private start(entry: Entry): Promise<void> {
@@ -124,6 +158,12 @@ export class EditorWindowManager {
     this.render()
     const request = disposal.then(() => {
       if (this.closed) throw new Error('Editor is closed')
+      if (this.worktrees && !this.worktrees.has(entry.worktree.path))
+        throw new Error('Unknown worktree')
+      if (this.worktrees?.get(entry.worktree.path)?.deleting)
+        throw new Error('Worktree is being deleted')
+      if (this.worktrees?.get(entry.worktree.path)?.vscode.state === 'stopping')
+        throw new Error('VS Code Server is stopping')
       return this.server.ensure(entry.worktree.path)
     })
     entry.request = request
@@ -134,12 +174,13 @@ export class EditorWindowManager {
       },
       (error: unknown) => {
         entry.request = undefined
-        this.fail(
-          entry,
-          error instanceof Error
-            ? error.message
-            : 'Unable to start VS Code Server',
-        )
+        if (entry.state === 'waitingForServer')
+          this.fail(
+            entry,
+            error instanceof Error
+              ? error.message
+              : 'Unable to start VS Code Server',
+          )
       },
     )
     return request
@@ -148,11 +189,16 @@ export class EditorWindowManager {
   private advance(entry: Entry): void {
     if (this.closed || entry.state !== 'waitingForServer' || entry.request)
       return
-    const status = this.statuses?.get(entry.worktree.path)
+    const worktree = this.worktrees?.get(entry.worktree.path)
+    if (worktree?.deleting) {
+      this.fail(entry, 'Worktree is being deleted.')
+      return
+    }
+    const status = worktree?.vscode
     if (status?.state === 'stopped') {
       this.fail(
         entry,
-        status.error?.message ??
+        worktree?.error?.message ??
           'VS Code Server stopped before the page loaded',
       )
     } else if (status?.state === 'running' && status.browserPath) {
@@ -207,11 +253,22 @@ export class EditorWindowManager {
     this.render()
   }
 
+  private canRetry(entry: Entry): boolean {
+    const worktree = this.worktrees?.get(entry.worktree.path)
+    return (
+      entry.state === 'failed' &&
+      !!worktree &&
+      !worktree.deleting &&
+      worktree.vscode.state !== 'stopping'
+    )
+  }
+
   private render(): void {
     if (this.closed || !this.selected) return
     const entry = this.selected
     this.host.setContent(entry.state === 'loaded' ? entry.page : undefined, {
       title: entry.worktree.basename,
+      canRetry: this.canRetry(entry),
       error: entry.error,
     })
   }
@@ -231,7 +288,7 @@ export class EditorWindowManager {
     this.host.close()
   }
 
-  // Replacement and shutdown share disposal so a pending session save is awaited once.
+  // Server updates, replacement, and shutdown share one pending session save and disposal.
   private disposePage(entry: Entry): Promise<void> {
     if (entry.disposal) return entry.disposal
     const page = entry.page
@@ -249,9 +306,9 @@ export class EditorWindowManager {
       } finally {
         page.dispose()
       }
-    })()
-    return entry.disposal.finally(() => {
+    })().finally(() => {
       entry.disposal = undefined
     })
+    return entry.disposal
   }
 }

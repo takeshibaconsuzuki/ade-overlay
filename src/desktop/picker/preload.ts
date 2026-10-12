@@ -1,18 +1,15 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type {
-  ConnectionState,
-  Worktree,
-  VscodeServerStatus,
-} from '../../shared/api'
+import type { ConnectionState, Worktree } from '../../shared/api'
 import {
   type PickerApi,
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
-  VSCODE_SERVERS_CHANGED,
+  VSCODE_SERVER_STOP,
+  WORKTREE_DELETE,
   WORKTREE_OPEN,
-  VSCODE_SERVER_CLEAR_ERROR,
+  WORKTREE_CLEAR_ERROR,
 } from './api'
 
 let onConnectionStateChangedListener:
@@ -32,15 +29,6 @@ ipcRenderer.on(
   },
 )
 
-let onVscodeServersChangedListener:
-  ((statuses: VscodeServerStatus[]) => void) | undefined
-ipcRenderer.on(
-  VSCODE_SERVERS_CHANGED,
-  (_event: IpcRendererEvent, statuses: VscodeServerStatus[]) => {
-    onVscodeServersChangedListener?.(statuses)
-  },
-)
-
 const api: PickerApi = {
   initializeWorktreePicker: () => ipcRenderer.send(WORKTREE_PICKER_INITIALIZE),
   setOnConnectionStateChangedListener(listener) {
@@ -51,11 +39,10 @@ const api: PickerApi = {
   },
   refreshWorktrees: () => ipcRenderer.invoke(WORKTREES_REFRESH),
   openWorktree: (path) => ipcRenderer.invoke(WORKTREE_OPEN, path),
-  clearVscodeServerError: (path, errorId) =>
-    ipcRenderer.invoke(VSCODE_SERVER_CLEAR_ERROR, path, errorId),
-  setOnVscodeServersChangedListener(listener) {
-    onVscodeServersChangedListener = listener
-  },
+  clearWorktreeError: (path, errorId) =>
+    ipcRenderer.invoke(WORKTREE_CLEAR_ERROR, path, errorId),
+  stopVscodeServer: (path) => ipcRenderer.invoke(VSCODE_SERVER_STOP, path),
+  deleteWorktree: (path) => ipcRenderer.invoke(WORKTREE_DELETE, path),
 }
 
 contextBridge.exposeInMainWorld('picker', api)
