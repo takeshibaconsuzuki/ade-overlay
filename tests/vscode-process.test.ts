@@ -18,6 +18,7 @@ async function fixture(t: TestContext, code: string) {
     join(directory, 'data'),
     controller.signal,
     join(directory, 'host extensions'),
+    'ws://127.0.0.1:54321/rpc',
   )
   t.after(async () => {
     controller.abort()
@@ -40,6 +41,7 @@ test(
     fs.writeFileSync('descendant.pid', String(descendant.pid));
     const args = process.argv.slice(2);
     fs.writeFileSync('arguments.json', JSON.stringify(args));
+    fs.writeFileSync('ade-server-url', process.env.ADE_SERVER_URL);
     const token = fs.readFileSync(args[args.indexOf('--connection-token-file') + 1], 'utf8');
     const server = http.createServer((request, response) => {
       fs.writeFileSync('probed', 'yes');
@@ -53,6 +55,10 @@ test(
     assert.ok(connection.port > 0)
     assert.match(connection.token, /^[a-f0-9]{64}$/)
     assert.equal(await readFile(join(f.directory, 'probed'), 'utf8'), 'yes')
+    assert.equal(
+      await readFile(join(f.directory, 'ade-server-url'), 'utf8'),
+      'ws://127.0.0.1:54321/rpc',
+    )
     const args: string[] = JSON.parse(
       await readFile(join(f.directory, 'arguments.json'), 'utf8'),
     )

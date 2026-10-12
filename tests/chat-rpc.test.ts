@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { simpleGit } from 'simple-git'
 import WebSocket from 'ws'
 import { stringify } from 'yaml'
@@ -12,7 +13,11 @@ import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
 import type { ChatProvider } from '../src/server/chat-provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
 import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
-import type { Chat, ServerMethods } from '../src/shared/api'
+import type {
+  Chat,
+  ExtensionClientMethods,
+  ServerMethods,
+} from '../src/shared/api'
 import { createRpcPeer } from '../src/shared/rpc'
 
 test('startup installs hooks and accepts raw HTTP reports from any worktree', async (t) => {
@@ -62,10 +67,18 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
       body: JSON.stringify(payload),
     })
   const socket = new WebSocket(url)
-  const rpc = createRpcPeer<ServerMethods, object>(socket, {})
+  const snapshots: Record<string, Chat>[] = []
+  const rpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(socket, {
+    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    chatsChanged: (snapshot) => {
+      snapshots.push(snapshot)
+    },
+  })
   t.after(() => socket.terminate())
   await once(socket, 'open')
   assert.deepEqual(await rpc.getChats(), {})
+  await waitFor(() => snapshots.length === 1)
+  assert.deepEqual(snapshots, [{}])
   const repo = join(directory, 'repo')
   const subdirectory = join(repo, 'nested')
   await mkdir(subdirectory, { recursive: true })
@@ -80,6 +93,25 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   const receivedAfter = Date.now()
   assert.equal((await post({ ...event, mtime: 1 })).status, 204)
   let chats = await rpc.getChats()
+  assert.deepEqual(snapshots.at(-1), chats)
+  assert.equal(snapshots.length, 2)
+  // A newly connected extension receives existing chats without waiting for another report.
+  const secondSocket = new WebSocket(url)
+  const secondSnapshots: Record<string, Chat>[] = []
+  const secondRpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(
+    secondSocket,
+    {
+      getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+      chatsChanged: (snapshot) => {
+        secondSnapshots.push(snapshot)
+      },
+    },
+  )
+  t.after(() => secondSocket.terminate())
+  await once(secondSocket, 'open')
+  assert.deepEqual(await secondRpc.getChats(), chats)
+  await waitFor(() => secondSnapshots.length === 1)
+  assert.deepEqual(secondSnapshots, [chats])
   assert.deepEqual(chats['codex:first'], {
     providerId: 'codex',
     sessionId: 'first',
@@ -103,6 +135,10 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   })
   chats = await rpc.getChats()
   assert.equal(Object.keys(chats).length, 2)
+  assert.deepEqual(snapshots.at(-1), chats)
+  await secondRpc.getChats()
+  assert.deepEqual(secondSnapshots.at(-1), chats)
+  assert.equal(secondSnapshots.length, 3)
   assert.equal(chats['codex:first'].status, 'idle')
   assert.equal(chats['codex:first'].description, 'Done')
   metadata
@@ -193,3 +229,11 @@ test('hook installation failure rolls back server startup', async (t) => {
     /Hook installation failed/,
   )
 })
+
+async function waitFor(predicate: () => boolean) {
+  const deadline = Date.now() + 5000
+  while (!predicate()) {
+    assert.ok(Date.now() < deadline, 'Expected snapshot did not arrive')
+    await delay(5)
+  }
+}

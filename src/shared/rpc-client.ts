@@ -6,8 +6,8 @@ import {
   CONNECT_TIMEOUT_MS,
   RETRY_MAX_DELAY_MS,
   RETRY_MIN_DELAY_MS,
-} from '../desktop/constants'
-import { MAX_RPC_PAYLOAD_BYTES } from './constants'
+  MAX_RPC_PAYLOAD_BYTES,
+} from './constants'
 import { createRpcPeer } from './rpc'
 
 interface ClientOptions {

@@ -22,7 +22,11 @@ export async function startRpcServer<
 >(
   methods: Local,
   options: Pick<ServerOptions, 'host' | 'port'>,
-  onClient?: (client: BirpcReturn<Remote, Local>) => void,
+  // The signal ends the connection lifetime; initialization failures disconnect the peer.
+  onClient?: (
+    client: BirpcReturn<Remote, Local>,
+    signal: AbortSignal,
+  ) => void | Promise<void>,
   proxy?: ServerProxy,
   routes?: FastifyPluginAsync,
 ): Promise<RpcServer<Remote, Local>> {
@@ -74,13 +78,21 @@ export async function startRpcServer<
       remotePort: request.socket.remotePort,
     })
     const rpc = createRpcPeer<Remote, Local>(socket, methods)
+    const controller = new AbortController()
     clients.add(rpc)
     clientLog.info('Client connected')
     socket.once('close', (code, reason) => {
       clients.delete(rpc)
+      controller.abort()
       clientLog.info({ code, reason: reason.toString() }, 'Client disconnected')
     })
-    onClient?.(rpc)
+    void Promise.resolve()
+      .then(() => onClient?.(rpc, controller.signal))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          clientLog.warn({ err: error }, 'Client initialization failed')
+        socket.terminate()
+      })
   })
   app.addHook('preClose', async () => {
     proxy?.close()

@@ -10,6 +10,7 @@ export class ChatStore {
   private pending = Promise.resolve()
   private readonly timer: NodeJS.Timeout
   private closed = false
+  private onChanged: ((snapshot: Record<string, Chat>) => void) | undefined
 
   constructor(
     private readonly processes: ProcessProbe,
@@ -30,6 +31,12 @@ export class ChatStore {
     return Object.fromEntries(
       [...this.chats].map(([id, chat]) => [id, { ...chat }]),
     )
+  }
+
+  setOnChangedListener(
+    listener: ((snapshot: Record<string, Chat>) => void) | undefined,
+  ): void {
+    this.onChanged = listener
   }
 
   async report(providerId: string, value: unknown): Promise<void> {
@@ -54,6 +61,7 @@ export class ChatStore {
         ),
       })
       this.chats.set(id, chat)
+      this.onChanged?.(this.snapshot)
     })
     // A failed report rejects its caller without blocking later reports.
     this.pending = pending.catch(() => {})
@@ -63,17 +71,21 @@ export class ChatStore {
   purge(): void {
     if (this.closed) return
     const alive = new Map<number, boolean>()
+    let changed = false
     for (const [id, chat] of this.chats) {
       if (!alive.has(chat.pid))
         alive.set(chat.pid, this.processes.isAlive(chat.pid))
       if (!alive.get(chat.pid)) {
         this.chats.delete(id)
+        changed = true
       }
     }
+    if (changed) this.onChanged?.(this.snapshot)
   }
 
   close(): void {
     this.closed = true
+    this.onChanged = undefined
     clearInterval(this.timer)
   }
 }

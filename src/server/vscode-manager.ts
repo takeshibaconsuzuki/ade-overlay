@@ -22,7 +22,7 @@ export interface VscodeServerManager extends VscodeProxyTargets {
     listener: ((snapshot: VscodeServerStatus[]) => void) | undefined,
   ): void
   prepare(extensionsDirectory: string): Promise<void>
-  ensure(path: string): void
+  ensure(path: string, serverUrl: string): void
   clearError(path: string, errorId: string): void
   close(): Promise<void>
 }
@@ -68,7 +68,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
     return this.preparing
   }
 
-  ensure(path: string): void {
+  ensure(path: string, serverUrl: string): void {
     this.controller.signal.throwIfAborted()
     if (!this.installation)
       throw new Error('VS Code Server has not been prepared')
@@ -89,7 +89,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
     entry.status = { path: entry.status.path, state: 'starting' }
     log.info({ path: entry.status.path }, 'Starting VS Code Server')
     // Set starting synchronously so concurrent RPCs join the same launch.
-    entry.task = this.start(entry, this.installation)
+    entry.task = this.start(entry, this.installation, serverUrl)
     this.publish()
   }
 
@@ -105,6 +105,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
   private async start(
     entry: Entry,
     installation: VscodeInstallation,
+    serverUrl: string,
   ): Promise<void> {
     const signal = this.controller.signal
     try {
@@ -115,6 +116,7 @@ export class ProcessVscodeServerManager implements VscodeServerManager {
         this.runtime.dataDirectory,
         signal,
         this.extensionsDirectory,
+        serverUrl,
       )
       entry.process = child
       const connection = await child.ready

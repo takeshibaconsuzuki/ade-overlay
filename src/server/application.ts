@@ -1,11 +1,15 @@
 import type { BirpcReturn } from 'birpc'
 import type {
+  Chat,
   ClientMethods,
+  DesktopClientMethods,
+  ExtensionClientMethods,
   ServerMethods,
   Worktree,
   VscodeServerStatus,
 } from '../shared/api'
-import { APP_NAME } from '../shared/constants'
+import { clientInfoSchema } from '../shared/api'
+import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { createConfigStore } from './config-store'
 import { startRpcServer, type RpcServer } from './server'
@@ -17,6 +21,7 @@ import { ChatStore } from './chat-store'
 import { NodeProcessProbe } from './process-probe'
 import type { ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
+import { MAX_CHAT_DESCRIPTION_LENGTH } from './constants'
 
 const log = logger.child({ component: 'server' })
 
@@ -38,9 +43,44 @@ export async function startServer(
   let server: RpcServer<ClientMethods, ServerMethods> | undefined
   let closing: Promise<void> | undefined
   let settings: SettingsStore | undefined
+  const desktops = new Set<BirpcReturn<DesktopClientMethods, ServerMethods>>()
+  const extensions = new Set<
+    BirpcReturn<ExtensionClientMethods, ServerMethods>
+  >()
+
+  const sendChats = (
+    client: BirpcReturn<ExtensionClientMethods, ServerMethods>,
+    snapshot: Record<string, Chat>,
+  ) => {
+    // Sidebar descriptions are previews; keep full reports in the registry.
+    // Accepted limitation: the aggregate snapshot can still exceed MAX_RPC_PAYLOAD_BYTES,
+    // causing extension reconnect loops until the registry shrinks. We do not expect
+    // enough simultaneous chats with large descriptions to reach that limit; aggregate
+    // budgeting and chunking are intentionally out of scope.
+    const preview = Object.fromEntries(
+      Object.entries(snapshot).map(([id, chat]) => [
+        id,
+        {
+          ...chat,
+          description:
+            chat.description === undefined
+              ? undefined
+              : Array.from(chat.description)
+                  .slice(0, MAX_CHAT_DESCRIPTION_LENGTH)
+                  .join(''),
+        },
+      ]),
+    )
+    void client.chatsChanged.asEvent(preview).catch((error: unknown) => {
+      if (!closing) log.warn({ err: error }, 'Failed to send chats to client')
+    })
+  }
+  chats.setOnChangedListener((snapshot) => {
+    for (const client of extensions) sendChats(client, snapshot)
+  })
 
   const sendSettings = (
-    client: BirpcReturn<ClientMethods, ServerMethods>,
+    client: BirpcReturn<DesktopClientMethods, ServerMethods>,
     content: string | null,
   ) => {
     void client.settingsChanged.asEvent(content).catch((error: unknown) => {
@@ -50,7 +90,7 @@ export async function startServer(
   }
 
   const sendWorktrees = (
-    client: BirpcReturn<ClientMethods, ServerMethods>,
+    client: BirpcReturn<DesktopClientMethods, ServerMethods>,
     snapshot: Worktree[],
   ) => {
     void client.worktreesChanged.asEvent(snapshot).catch((error: unknown) => {
@@ -59,7 +99,7 @@ export async function startServer(
     })
   }
   const sendVscodeServers = (
-    client: BirpcReturn<ClientMethods, ServerMethods>,
+    client: BirpcReturn<DesktopClientMethods, ServerMethods>,
     snapshot: VscodeServerStatus[],
   ) => {
     void client.vscodeServersChanged
@@ -70,11 +110,10 @@ export async function startServer(
       })
   }
   vscode.setOnChangedListener((snapshot) => {
-    for (const client of server?.clients ?? [])
-      sendVscodeServers(client, snapshot)
+    for (const client of desktops) sendVscodeServers(client, snapshot)
   })
   worktrees.setOnChangedListener((snapshot) => {
-    for (const client of server?.clients ?? []) sendWorktrees(client, snapshot)
+    for (const client of desktops) sendWorktrees(client, snapshot)
   })
   config.setOnChangedListener((next) => {
     void worktrees.setProjects(next.projects).catch((error: unknown) => {
@@ -105,7 +144,7 @@ export async function startServer(
   try {
     settings = await VscodeSettingsStore.open(options.vscode.settingsFile)
     settings.setOnChangedListener((content) => {
-      for (const client of server?.clients ?? []) sendSettings(client, content)
+      for (const client of desktops) sendSettings(client, content)
     })
     await vscode.prepare(options.vscode.extensionsDirectory)
     await worktrees.queueRefresh()
@@ -120,16 +159,50 @@ export async function startServer(
             (worktree) => worktree.path === path,
           )
           if (!worktree) throw new Error('Unknown worktree')
-          vscode.ensure(worktree.path)
+          const host =
+            options.host === '0.0.0.0'
+              ? '127.0.0.1'
+              : options.host === '::'
+                ? '::1'
+                : options.host
+          const authority = host.includes(':') ? `[${host}]` : host
+          vscode.ensure(
+            worktree.path,
+            `ws://${authority}:${server!.port}${RPC_PATH}`,
+          )
         },
         clearVscodeServerError: (path, errorId) =>
           vscode.clearError(path, errorId),
       },
       options,
-      (client) => {
-        sendSettings(client, settings!.snapshot)
-        sendVscodeServers(client, vscode.snapshot)
-        sendWorktrees(client, worktrees.snapshot)
+      async (client, signal) => {
+        const info = clientInfoSchema.parse(await client.getClientInfo())
+        if (signal.aborted || closing) return
+        // The validated kind selects the peer's contract. Register and send the
+        // current snapshot together so changes during identification are included.
+        if (info.kind === 'extension') {
+          const extension = client as BirpcReturn<
+            ExtensionClientMethods,
+            ServerMethods
+          >
+          extensions.add(extension)
+          signal.addEventListener('abort', () => extensions.delete(extension), {
+            once: true,
+          })
+          sendChats(extension, chats.snapshot)
+        } else {
+          const desktop = client as BirpcReturn<
+            DesktopClientMethods,
+            ServerMethods
+          >
+          desktops.add(desktop)
+          signal.addEventListener('abort', () => desktops.delete(desktop), {
+            once: true,
+          })
+          sendSettings(desktop, settings!.snapshot)
+          sendVscodeServers(desktop, vscode.snapshot)
+          sendWorktrees(desktop, worktrees.snapshot)
+        }
       },
       new VscodeProxy(vscode),
       async (app) => {

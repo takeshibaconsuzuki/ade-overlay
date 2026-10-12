@@ -4,12 +4,13 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { DatabaseSync } from 'node:sqlite'
+import { executePowerShell } from 'powershell-utils'
 import lockfile from 'proper-lockfile'
 import { simpleGit } from 'simple-git'
 import writeFileAtomic from 'write-file-atomic'
 import { z } from 'zod'
 import type { Chat } from '../../../shared/api'
-import { quotePosixArgument, quoteCmdPath } from '../../../shared/shell'
+import { quotePosixArgument } from '../../../shared/shell'
 import type { ChatProvider } from '../../chat-provider'
 import { CODEX_CHAT_EVENTS, codexReportSchema } from './report'
 
@@ -84,7 +85,13 @@ export class CodexChatProvider implements ChatProvider {
         type: 'command',
         command: args.map(quotePosixArgument).join(' ') + marker,
         ...(process.platform === 'win32'
-          ? { commandWindows: args.map(quoteCmdPath).join(' ') + marker }
+          ? // PowerShell needs the call operator to invoke a quoted executable path.
+            {
+              commandWindows:
+                '& ' +
+                args.map(executePowerShell.escapeArgument).join(' ') +
+                marker,
+            }
           : {}),
         timeout: 3,
       }

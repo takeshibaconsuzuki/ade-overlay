@@ -44,10 +44,29 @@ export interface ServerMethods {
   writeSettings(content: string): Promise<void>
 }
 
+export const clientInfoSchema = z.strictObject({
+  kind: z.enum(['desktop', 'extension']),
+  name: z.string().min(1),
+  version: z.string().min(1),
+})
+
+export type ClientInfo = z.infer<typeof clientInfoSchema>
+
 export interface ClientMethods {
-  getClientInfo(): { name: string; version: string }
+  getClientInfo(): ClientInfo
+}
+
+export interface DesktopClientMethods extends ClientMethods {
+  getClientInfo(): ClientInfo & { kind: 'desktop' }
   worktreesChanged(worktrees: Worktree[]): void
   vscodeServersChanged(statuses: VscodeServerStatus[]): void
   // A complete host document is sent on every connection and change. null suspends sync.
   settingsChanged(content: string | null): void
+}
+
+export interface ExtensionClientMethods extends ClientMethods {
+  getClientInfo(): ClientInfo & { kind: 'extension' }
+  // Complete live registry, sent after identification on every connection and change.
+  // Descriptions are truncated previews; other fields retain their reported values.
+  chatsChanged(chats: Record<string, Chat>): void
 }

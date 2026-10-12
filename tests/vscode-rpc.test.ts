@@ -9,7 +9,7 @@ import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
 import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
 import type {
-  ClientMethods,
+  DesktopClientMethods,
   ServerMethods,
   VscodeServerStatus,
   Worktree,
@@ -75,10 +75,14 @@ test(
     const connect = () => {
       let latest: VscodeServerStatus[] = []
       let worktrees: Worktree[] = []
-      const client = connectRpc<ServerMethods, ClientMethods>(
+      const client = connectRpc<ServerMethods, DesktopClientMethods>(
         `ws://127.0.0.1:${server.port}${RPC_PATH}`,
         {
-          getClientInfo: () => ({ name: 'test', version: '1' }),
+          getClientInfo: () => ({
+            kind: 'desktop',
+            name: 'test',
+            version: '1',
+          }),
           settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next
@@ -160,5 +164,8 @@ test('runtime preparation failure rejects startup and closes the manager', async
   )
   await assert.rejects(startServer(config, vscode, []), /Download unavailable/)
   assert.equal(attempts, 1)
-  assert.throws(() => vscode.ensure(directory), /closed/)
+  assert.throws(
+    () => vscode.ensure(directory, 'ws://127.0.0.1:4317/rpc'),
+    /closed/,
+  )
 })

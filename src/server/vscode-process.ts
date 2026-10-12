@@ -31,6 +31,7 @@ export interface VscodeLauncher {
     dataDirectory: string,
     signal: AbortSignal,
     extensionsDirectory: string,
+    serverUrl: string,
   ): Promise<VscodeProcess>
 }
 
@@ -41,6 +42,7 @@ export class NodeVscodeLauncher implements VscodeLauncher {
     dataDirectory: string,
     signal: AbortSignal,
     extensionsDirectory: string,
+    serverUrl: string,
   ): Promise<VscodeProcess> {
     return NodeVscodeProcess.start(
       installation,
@@ -48,6 +50,7 @@ export class NodeVscodeLauncher implements VscodeLauncher {
       dataDirectory,
       signal,
       extensionsDirectory,
+      serverUrl,
     )
   }
 }
@@ -73,6 +76,7 @@ export class NodeVscodeProcess implements VscodeProcess {
     dataDirectory: string,
     signal: AbortSignal,
     extensionsDirectory: string,
+    serverUrl: string,
   ): Promise<NodeVscodeProcess> {
     const cwd = await realpath(path)
     const directory = join(
@@ -93,6 +97,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       signal,
       vscodeBasePath(path),
       extensionsDirectory,
+      serverUrl,
     )
   }
 
@@ -105,6 +110,7 @@ export class NodeVscodeProcess implements VscodeProcess {
     private readonly signal: AbortSignal,
     basePath: string,
     extensionsDirectory: string,
+    serverUrl: string,
   ) {
     this.child = spawn(
       installation.node,
@@ -126,7 +132,12 @@ export class NodeVscodeProcess implements VscodeProcess {
         '--server-base-path',
         basePath,
       ],
-      { cwd: path, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+      {
+        cwd: path,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ADE_SERVER_URL: serverUrl },
+      },
     )
     this.exited = this.observeProcess()
     signal.addEventListener('abort', this.abort, { once: true })

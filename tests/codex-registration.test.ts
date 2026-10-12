@@ -13,9 +13,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { createServer } from 'node:http'
+import { executePowerShell } from 'powershell-utils'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
 import { CODEX_CHAT_EVENTS } from '../src/server/chat-providers/codex/report'
-import { quoteCmdPath, quotePosixArgument } from '../src/shared/shell'
+import { quotePosixArgument } from '../src/shared/shell'
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade hooks '))
@@ -103,7 +104,9 @@ for (const { architecture, provider, executable } of scenarios) {
     `the standalone script forwards the raw ${provider} payload with its owning PID (${architecture})`,
     { timeout: 15_000 },
     async (t) => {
-      const directory = await mkdtemp(join(tmpdir(), 'standalone hook '))
+      const directory = await mkdtemp(
+        join(tmpdir(), "standalone hook '\u2018\u2019\u201a\u201b$literal` "),
+      )
       t.after(() => rm(directory, { recursive: true, force: true }))
       const received: unknown[] = []
       const server = createServer(async (request, response) => {
@@ -145,10 +148,11 @@ for (const { architecture, provider, executable } of scenarios) {
       const command =
         provider === 'codex'
           ? installedCommand
-          : [process.execPath, entrypoint, provider, executable]
+          : (process.platform === 'win32' ? '& ' : '') +
+            [process.execPath, entrypoint, provider, executable]
               .map(
                 process.platform === 'win32'
-                  ? quoteCmdPath
+                  ? executePowerShell.escapeArgument
                   : quotePosixArgument,
               )
               .join(' ')
@@ -161,9 +165,9 @@ for (const { architecture, provider, executable } of scenarios) {
       const script = `
     const { spawn } = require('node:child_process');
     const command = process.argv[1];
-    // Codex wraps the hook command in quotes before passing it verbatim to cmd.exe /C.
+    // Codex executes Windows hooks through PowerShell.
     const child = process.platform === 'win32'
-      ? spawn(process.env.ComSpec || 'cmd.exe', ['/C', '"' + command + '"'], { windowsVerbatimArguments: true, windowsHide: true, stdio: ['inherit', 'inherit', 'inherit'] })
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true, stdio: ['inherit', 'inherit', 'inherit'] })
       : spawn('/bin/sh', ['-c', command], { stdio: 'inherit' });
     child.on('exit', code => { process.exitCode = code; });
   `

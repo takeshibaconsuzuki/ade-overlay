@@ -73,12 +73,15 @@ test('preparation is required and concurrent clicks share one launch until readi
   const f = fixture()
   t.after(() => f.manager.close())
   const preparing = f.manager.prepare('extensions')
-  assert.throws(() => f.manager.ensure(f.worktree.path), /not been prepared/)
+  assert.throws(
+    () => f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc'),
+    /not been prepared/,
+  )
   assert.equal(f.children.length, 0)
   f.downloaded.resolve(f.installation)
   await preparing
-  f.manager.ensure(f.worktree.path)
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   assert.equal(f.manager.snapshot[0].state, 'starting')
   await waitFor(() => f.children.length === 1)
   assert.equal(f.manager.snapshot[0].state, 'starting')
@@ -93,7 +96,7 @@ test('preparation is required and concurrent clicks share one launch until readi
     f.manager.snapshot[0].browserPath,
     `${vscodeBasePath(f.worktree.path)}/?tkn=test-token`,
   )
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   assert.equal(f.children.length, 1)
   f.children[0].exit.resolve({ code: 0, signal: null })
   await waitFor(() => f.manager.snapshot[0].state === 'stopped')
@@ -107,8 +110,8 @@ test('different worktrees start concurrently and failures remain isolated', asyn
   t.after(() => f.manager.close())
   f.downloaded.resolve(f.installation)
   await f.manager.prepare('extensions')
-  f.manager.ensure(f.worktree.path)
-  f.manager.ensure(`${f.worktree.path}/other`)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
+  f.manager.ensure(`${f.worktree.path}/other`, 'ws://127.0.0.1:4317/rpc')
   await waitFor(() => f.children.length === 2)
   assert.deepEqual(
     f.manager.snapshot.map(({ state }) => state),
@@ -129,7 +132,7 @@ test('failures can be dismissed without launching, and stale dismissals preserve
   t.after(() => f.manager.close())
   f.downloaded.resolve(f.installation)
   await f.manager.prepare('extensions')
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   await waitFor(() => f.children.length === 1)
   f.children[0].ready.reject(new Error('Port unavailable'))
   await waitFor(() => f.manager.snapshot[0].state === 'stopped')
@@ -138,7 +141,7 @@ test('failures can be dismissed without launching, and stale dismissals preserve
   f.manager.clearError(f.worktree.path, first.id)
   assert.equal(f.manager.snapshot[0].error, undefined)
   assert.equal(f.children.length, 1)
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   await waitFor(() => f.children.length === 2)
   f.children[1].ready.resolve()
   await waitFor(() => f.manager.snapshot[0].state === 'running')
@@ -155,7 +158,7 @@ test('snapshots cannot mutate manager state', async (t) => {
   t.after(() => f.manager.close())
   f.downloaded.resolve(f.installation)
   await f.manager.prepare('extensions')
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   f.manager.snapshot[0].state = 'running'
   assert.equal(f.manager.snapshot[0].state, 'starting')
   await waitFor(() => f.children.length === 1)
@@ -168,14 +171,17 @@ test('shutdown waits for process termination and is idempotent', async (t) => {
   t.after(() => f.manager.close())
   f.downloaded.resolve(f.installation)
   await f.manager.prepare('extensions')
-  f.manager.ensure(f.worktree.path)
+  f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc')
   await waitFor(() => f.children.length === 1)
   f.children[0].ready.resolve()
   await waitFor(() => f.manager.snapshot[0].state === 'running')
   await f.manager.close()
   assert.ok(f.children[0].stops() > 0)
   assert.equal(f.manager.close(), f.manager.close())
-  assert.throws(() => f.manager.ensure(f.worktree.path), /closed/)
+  assert.throws(
+    () => f.manager.ensure(f.worktree.path, 'ws://127.0.0.1:4317/rpc'),
+    /closed/,
+  )
 })
 
 test('a preparation failure prevents launches and is not retried by a click', async (t) => {
@@ -196,7 +202,10 @@ test('a preparation failure prevents launches and is not retried by a click', as
   )
   t.after(() => manager.close())
   await assert.rejects(manager.prepare('extensions'), /Download unavailable/)
-  assert.throws(() => manager.ensure(process.cwd()), /not been prepared/)
+  assert.throws(
+    () => manager.ensure(process.cwd(), 'ws://127.0.0.1:4317/rpc'),
+    /not been prepared/,
+  )
   assert.equal(attempts, 1)
   assert.deepEqual(manager.snapshot, [])
 })

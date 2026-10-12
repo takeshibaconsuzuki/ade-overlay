@@ -9,7 +9,11 @@ import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
 import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
 import { listWorktrees, parseWorktrees } from '../src/server/git-utils'
-import type { ClientMethods, ServerMethods, Worktree } from '../src/shared/api'
+import type {
+  DesktopClientMethods,
+  ServerMethods,
+  Worktree,
+} from '../src/shared/api'
 import { RPC_PATH } from '../src/shared/constants'
 import { connectRpc } from '../src/shared/rpc-client'
 
@@ -128,10 +132,14 @@ test(
     t.after(() => server.close())
     const connect = () => {
       const updates: Worktree[][] = []
-      const client = connectRpc<ServerMethods, ClientMethods>(
+      const client = connectRpc<ServerMethods, DesktopClientMethods>(
         `ws://127.0.0.1:${server.port}${RPC_PATH}`,
         {
-          getClientInfo: () => ({ name: 'test', version: '1' }),
+          getClientInfo: () => ({
+            kind: 'desktop',
+            name: 'test',
+            version: '1',
+          }),
           settingsChanged: () => {},
           vscodeServersChanged: () => {},
           worktreesChanged: (worktrees) => {

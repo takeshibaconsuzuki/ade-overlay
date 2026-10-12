@@ -7,10 +7,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { startRpcServer } from '../src/server/server'
 import { serverOptionsSchema } from '../src/server/options'
 import { connectRpc } from '../src/shared/rpc-client'
-import {
-  CONNECT_TIMEOUT_MS,
-  RETRY_MAX_DELAY_MS,
-} from '../src/desktop/constants'
+import { CONNECT_TIMEOUT_MS, RETRY_MAX_DELAY_MS } from '../src/shared/constants'
 import { HEARTBEAT_INTERVAL_MS, RPC_PATH } from '../src/shared/constants'
 
 async function waitFor(predicate: () => boolean, timeout = 5000) {

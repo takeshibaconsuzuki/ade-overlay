@@ -1,6 +1,6 @@
 import { app, type BrowserWindow, globalShortcut, ipcMain } from 'electron'
 import type {
-  ClientMethods,
+  DesktopClientMethods,
   ServerMethods,
   Worktree,
   VscodeServerStatus,
@@ -14,7 +14,7 @@ import {
   WORKTREE_OPEN,
   VSCODE_SERVER_CLEAR_ERROR,
 } from './picker/api'
-import { DEFAULT_SERVER_URL } from './constants'
+import { DEFAULT_SERVER_URL } from '../shared/constants'
 import { connectRpc } from '../shared/rpc-client'
 import { APP_NAME } from '../shared/constants'
 import { logger } from '../shared/logger'
@@ -60,10 +60,14 @@ app.whenReady().then(() => {
     { ensure: (path): Promise<void> => server.rpc.ensureVscodeServer(path) },
     serverUrl,
   )
-  const server = connectRpc<ServerMethods, ClientMethods>(
+  const server = connectRpc<ServerMethods, DesktopClientMethods>(
     serverUrl,
     {
-      getClientInfo: () => ({ name: APP_NAME, version: app.getVersion() }),
+      getClientInfo: () => ({
+        kind: 'desktop',
+        name: APP_NAME,
+        version: app.getVersion(),
+      }),
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
       worktreesChanged: (next) => {
         worktrees = next
