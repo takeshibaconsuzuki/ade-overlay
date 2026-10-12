@@ -1,0 +1,35 @@
+{
+  "name": "ade",
+  "displayName": "ADE",
+  "description": "ADE integration for Visual Studio Code.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "ade",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.cjs",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ade",
+          "title": "ADE",
+          "icon": "media/ade.svg"
+        }
+      ]
+    },
+    "views": {
+      "ade": [
+        {
+          "type": "webview",
+          "id": "ade.sidebar",
+          "name": "ADE"
+        }
+      ]
+    }
+  }
+}
