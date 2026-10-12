@@ -52,6 +52,8 @@ export async function optionsFromFile(path: string): Promise<ServerOptions> {
     const config: unknown = parse(await readFile(path, 'utf8'))
     const options = serverOptionsSchema.parse(config)
     const directory = dirname(resolve(path))
+    for (const project of options.projects)
+      project.mainWorktreePath = resolve(directory, project.mainWorktreePath)
     options.vscode.extensionsDirectory = resolve(
       directory,
       options.vscode.extensionsDirectory,

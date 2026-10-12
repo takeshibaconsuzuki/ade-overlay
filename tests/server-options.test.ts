@@ -45,10 +45,14 @@ test('partial file config receives defaults and survives YAML serialization', as
   assert.deepEqual(serverOptionsSchema.parse(parse(serialized)), options)
 })
 
-test('VS Code paths resolve relative to the config file and preserve absolute overrides', async (t) => {
+test('configured paths resolve relative to the config file and preserve absolute overrides', async (t) => {
   const path = await configFile(
     t,
     stringify({
+      projects: [
+        { mainWorktreePath: './repo' },
+        { mainWorktreePath: '../another-repo' },
+      ],
       vscode: {
         extensionsDirectory: './extensions',
         settingsFile: '../profile/settings.json',
@@ -56,16 +60,23 @@ test('VS Code paths resolve relative to the config file and preserve absolute ov
     }),
   )
   const expected = {
-    extensionsDirectory: join(dirname(path), 'extensions'),
-    settingsFile: join(dirname(path), '../profile/settings.json'),
+    projects: [
+      { mainWorktreePath: join(dirname(path), 'repo') },
+      { mainWorktreePath: join(dirname(path), '../another-repo') },
+    ],
+    vscode: {
+      extensionsDirectory: join(dirname(path), 'extensions'),
+      settingsFile: join(dirname(path), '../profile/settings.json'),
+    },
   }
-  assert.deepEqual((await optionsFromFile(path)).vscode, expected)
-  assert.deepEqual(
-    (await optionsFromFile(relative(process.cwd(), path))).vscode,
-    expected,
-  )
-  await writeFile(path, stringify({ vscode: expected }))
-  assert.deepEqual((await optionsFromFile(path)).vscode, expected)
+  const defaults = serverOptionsSchema.parse({})
+  assert.deepEqual(await optionsFromFile(path), { ...defaults, ...expected })
+  assert.deepEqual(await optionsFromFile(relative(process.cwd(), path)), {
+    ...defaults,
+    ...expected,
+  })
+  await writeFile(path, stringify(expected))
+  assert.deepEqual(await optionsFromFile(path), { ...defaults, ...expected })
 })
 
 test('schema rejects invalid values and unknown config keys', () => {
