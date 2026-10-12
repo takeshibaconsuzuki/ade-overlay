@@ -1,18 +1,20 @@
-import { app, type BrowserWindow, globalShortcut, ipcMain } from 'electron'
-import type {
-  ClientMethods,
-  ServerMethods,
-  Worktree,
-  VscodeServerStatus,
-} from '../shared/api'
+import {
+  app,
+  type BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  dialog,
+} from 'electron'
+import type { ClientMethods, ServerMethods, Worktree } from '../shared/api'
 import {
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
-  VSCODE_SERVERS_CHANGED,
+  VSCODE_SERVER_STOP,
+  WORKTREE_DELETE,
   WORKTREE_OPEN,
-  VSCODE_SERVER_CLEAR_ERROR,
+  WORKTREE_CLEAR_ERROR,
 } from './picker/api'
 import { DEFAULT_SERVER_URL } from './constants'
 import { connectRpc } from '../shared/rpc-client'
@@ -50,7 +52,6 @@ app.whenReady().then(() => {
     globalShortcut.unregister(pickerShortcut)
   })
   let worktrees: Worktree[] = []
-  let vscodeServers: VscodeServerStatus[] = []
   const editorHost = new ElectronEditorWindow({
     writeSettings: (content) => server.rpc.writeSettings(content),
   })
@@ -67,15 +68,8 @@ app.whenReady().then(() => {
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
       worktreesChanged: (next) => {
         worktrees = next
+        editor.updateWorktrees(next)
         worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
-      },
-      vscodeServersChanged: (next) => {
-        vscodeServers = next
-        editor.updateStatuses(next)
-        worktreePickerWindow?.webContents.send(
-          VSCODE_SERVERS_CHANGED,
-          vscodeServers,
-        )
       },
     },
     {
@@ -83,12 +77,7 @@ app.whenReady().then(() => {
         editorHost.receiveVscodeSettings(null)
         if (state !== 'connected') {
           worktrees = []
-          vscodeServers = []
           editor.onServerDisconnected()
-          worktreePickerWindow?.webContents.send(
-            VSCODE_SERVERS_CHANGED,
-            vscodeServers,
-          )
           worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
         }
         log.info({ state }, 'Server connection changed')
@@ -104,7 +93,6 @@ app.whenReady().then(() => {
     if (event.sender !== worktreePickerWindow?.webContents) return
     event.sender.send(CONNECTION_STATE_CHANGED, server.state)
     event.sender.send(WORKTREES_CHANGED, worktrees)
-    event.sender.send(VSCODE_SERVERS_CHANGED, vscodeServers)
   })
   ipcMain.handle(WORKTREES_REFRESH, (event) => {
     if (event.sender !== worktreePickerWindow?.webContents)
@@ -123,13 +111,36 @@ app.whenReady().then(() => {
     return editor.retry()
   })
   ipcMain.handle(
-    VSCODE_SERVER_CLEAR_ERROR,
+    WORKTREE_CLEAR_ERROR,
     (event, path: string, errorId: string) => {
       if (event.sender !== worktreePickerWindow?.webContents)
         throw new Error('Invalid sender')
-      return server.rpc.clearVscodeServerError(path, errorId)
+      return server.rpc.clearWorktreeError(path, errorId)
     },
   )
+  ipcMain.handle(VSCODE_SERVER_STOP, (event, path: string) => {
+    if (event.sender !== worktreePickerWindow?.webContents)
+      throw new Error('Invalid sender')
+    return server.rpc.stopVscodeServer(path)
+  })
+  ipcMain.handle(WORKTREE_DELETE, async (event, path: string) => {
+    if (event.sender !== worktreePickerWindow?.webContents)
+      throw new Error('Invalid sender')
+    const worktree = worktrees.find((worktree) => worktree.path === path)
+    if (!worktree) throw new Error('Unknown worktree')
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      message: `Delete worktree ${worktree.basename}?`,
+      detail:
+        'Its VS Code server will stop and its directory will be removed. Worktrees with uncommitted changes will not be deleted.',
+      buttons: ['Cancel', 'Delete worktree'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (response !== 1) return
+    await server.rpc.deleteWorktree(path)
+  })
   let quitting: Promise<void> | undefined
   let readyToQuit = false
   app.on('before-quit', (event) => {

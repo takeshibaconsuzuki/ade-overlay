@@ -1,16 +1,11 @@
 import type { BirpcReturn } from 'birpc'
-import type {
-  ClientMethods,
-  ServerMethods,
-  Worktree,
-  VscodeServerStatus,
-} from '../shared/api'
+import type { ClientMethods, ServerMethods, Worktree } from '../shared/api'
 import { APP_NAME } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { createConfigStore } from './config-store'
 import { startRpcServer, type RpcServer } from './server'
 import { WorktreeStore } from './worktree-store'
-import type { VscodeServerManager } from './vscode-manager'
+import type { VscodeServerFactory } from './vscode-server'
 import { VscodeProxy } from './vscode-proxy'
 import { VscodeSettingsStore, type SettingsStore } from './settings-store'
 
@@ -24,11 +19,11 @@ export interface ServerApplication {
 
 export async function startServer(
   configPath: string,
-  vscode: VscodeServerManager,
+  vscode: VscodeServerFactory,
 ): Promise<ServerApplication> {
   const config = await createConfigStore(configPath)
   const options = config.snapshot
-  const worktrees = new WorktreeStore(options.projects)
+  const worktrees = new WorktreeStore(options.projects, vscode)
   let server: RpcServer<ClientMethods, ServerMethods> | undefined
   let closing: Promise<void> | undefined
   let settings: SettingsStore | undefined
@@ -52,21 +47,6 @@ export async function startServer(
         log.warn({ err: error }, 'Failed to send worktrees to client')
     })
   }
-  const sendVscodeServers = (
-    client: BirpcReturn<ClientMethods, ServerMethods>,
-    snapshot: VscodeServerStatus[],
-  ) => {
-    void client.vscodeServersChanged
-      .asEvent(snapshot)
-      .catch((error: unknown) => {
-        if (!closing)
-          log.warn({ err: error }, 'Failed to send VS Code status to client')
-      })
-  }
-  vscode.setOnChangedListener((snapshot) => {
-    for (const client of server?.clients ?? [])
-      sendVscodeServers(client, snapshot)
-  })
   worktrees.setOnChangedListener((snapshot) => {
     for (const client of server?.clients ?? []) sendWorktrees(client, snapshot)
   })
@@ -84,7 +64,6 @@ export async function startServer(
     closing ??= (async () => {
       config.setOnChangedListener(undefined)
       worktrees.setOnChangedListener(undefined)
-      vscode.setOnChangedListener(undefined)
       await Promise.all([
         config.close(),
         settings?.close(),
@@ -107,23 +86,18 @@ export async function startServer(
         getServerInfo: () => ({ name: APP_NAME }),
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
-        ensureVscodeServer: (path) => {
-          const worktree = worktrees.snapshot.find(
-            (worktree) => worktree.path === path,
-          )
-          if (!worktree) throw new Error('Unknown worktree')
-          vscode.ensure(worktree.path)
-        },
-        clearVscodeServerError: (path, errorId) =>
-          vscode.clearError(path, errorId),
+        ensureVscodeServer: (path) => worktrees.ensureVscodeServer(path),
+        stopVscodeServer: (path) => worktrees.stopVscodeServer(path),
+        deleteWorktree: (path) => worktrees.deleteWorktree(path),
+        clearWorktreeError: (path, errorId) =>
+          worktrees.clearWorktreeError(path, errorId),
       },
       options,
       (client) => {
         sendSettings(client, settings!.snapshot)
-        sendVscodeServers(client, vscode.snapshot)
         sendWorktrees(client, worktrees.snapshot)
       },
-      new VscodeProxy(vscode),
+      new VscodeProxy(worktrees),
     )
   } catch (error) {
     await close()

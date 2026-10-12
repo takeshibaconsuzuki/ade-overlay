@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { simpleGit } from 'simple-git'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
-import { ProcessVscodeServerManager } from '../src/server/vscode-manager'
+import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import type {
   ClientMethods,
   ServerMethods,
@@ -33,7 +33,22 @@ test(
     t.after(() => rm(directory, { recursive: true, force: true }))
     const repo = join(directory, 'repo')
     await mkdir(repo)
-    await simpleGit(repo).init()
+    const git = simpleGit(repo)
+    await git.init(['--initial-branch=main'])
+    await git.raw([
+      '-c',
+      'user.name=ADE Test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'Initial commit',
+    ])
+    const linked = join(directory, 'linked')
+    await git.raw(['worktree', 'add', '-b', 'linked', linked])
     const config = join(directory, 'server.yaml')
     await writeFile(
       config,
@@ -47,7 +62,11 @@ test(
     let ready!: () => void
     let exit!: (result: { code: number; signal: null }) => void
     let launches = 0
-    const vscode = new ProcessVscodeServerManager(
+    let stops = 0
+    let stopGate = Promise.resolve()
+    let releaseStop = () => {}
+    t.after(() => releaseStop())
+    const vscode = new ProcessVscodeServerFactory(
       {
         dataDirectory: directory,
         prepare: async () => ({ node: '', entrypoint: '' }),
@@ -63,6 +82,8 @@ test(
               exit = resolve
             }),
             stop: async () => {
+              stops++
+              await stopGate
               ready()
               exit({ code: 0, signal: null })
             },
@@ -82,19 +103,23 @@ test(
           settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next
-          },
-          vscodeServersChanged: (next) => {
-            latest = next
+            latest = next.map((worktree) => worktree.vscode)
           },
         },
       )
       t.after(() => client.close())
-      return { client, status: () => latest[0], path: () => worktrees[0]?.path }
+      return {
+        client,
+        status: () => latest[0],
+        error: () => worktrees[0]?.error,
+        path: () => worktrees[0]?.path,
+        linked: () => worktrees.find((worktree) => worktree.path === linked),
+      }
     }
     const a = connect()
     const b = connect()
     await waitFor(() => !!a.path() && !!b.path())
-    assert.equal(a.status(), undefined)
+    assert.equal(a.status().state, 'stopped')
     await assert.rejects(
       a.client.rpc.ensureVscodeServer(join(directory, 'unknown')),
       /Unknown worktree/,
@@ -119,15 +144,88 @@ test(
     await b.client.rpc.refreshWorktrees()
     assert.equal(b.status().state, 'running')
     assert.equal(launches, 1)
-    exit({ code: 17, signal: null })
-    await waitFor(() => !!b.status()?.error && !!reconnected.status()?.error)
-    await reconnected.client.rpc.clearVscodeServerError(
-      reconnected.path(),
-      reconnected.status().error!.id,
+    stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+    await b.client.rpc.stopVscodeServer(b.path())
+    await waitFor(
+      () =>
+        b.status()?.state === 'stopping' &&
+        reconnected.status()?.state === 'stopping',
     )
-    await waitFor(() => !b.status()?.error && !reconnected.status()?.error)
+    // The RPC returned while termination is still blocked.
+    await assert.rejects(b.client.rpc.ensureVscodeServer(b.path()), /stopping/)
+    releaseStop()
+    await waitFor(
+      () =>
+        b.status()?.state === 'stopped' &&
+        reconnected.status()?.state === 'stopped',
+    )
+    assert.ok(stops > 0)
+    await b.client.rpc.ensureVscodeServer(b.path())
+    await waitFor(() => b.status()?.state === 'starting')
+    ready()
+    await waitFor(() => b.status()?.state === 'running')
+    exit({ code: 17, signal: null })
+    await waitFor(() => !!b.error() && !!reconnected.error())
+    await reconnected.client.rpc.clearWorktreeError(
+      reconnected.path(),
+      reconnected.error()!.id,
+    )
+    await waitFor(() => !b.error() && !reconnected.error())
     assert.equal(b.status().state, 'stopped')
-    assert.equal(launches, 1)
+    assert.equal(launches, 2)
+    await writeFile(join(linked, 'dirty.txt'), 'keep me')
+    await b.client.rpc.ensureVscodeServer(linked)
+    ready()
+    await waitFor(() => b.linked()?.vscode.state === 'running')
+    stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+    await b.client.rpc.deleteWorktree(linked)
+    await waitFor(
+      () => !!b.linked()?.deleting && !!reconnected.linked()?.deleting,
+    )
+    await b.client.rpc.deleteWorktree(linked)
+    await assert.rejects(
+      b.client.rpc.ensureVscodeServer(linked),
+      /being deleted/,
+    )
+    // Discovery remains available while another client's accepted deletion is pending.
+    await reconnected.client.rpc.refreshWorktrees()
+    assert.equal(b.linked()?.deleting, true)
+    releaseStop()
+    await waitFor(() => !!b.linked()?.error && !!reconnected.linked()?.error)
+    assert.equal(b.linked()?.deleting, false)
+    assert.match(b.linked()!.error!.message, /untracked|modified/)
+    await reconnected.client.rpc.clearWorktreeError(
+      linked,
+      reconnected.linked()!.error!.id,
+    )
+    await waitFor(() => !b.linked()?.error && !reconnected.linked()?.error)
+    await rm(join(linked, 'dirty.txt'))
+    await b.client.rpc.deleteWorktree(linked)
+    await waitFor(() => !b.linked() && !reconnected.linked())
+    await b.client.rpc.ensureVscodeServer(b.path())
+    await waitFor(() => b.status()?.state === 'starting')
+    const previousStops = stops
+    await writeFile(
+      config,
+      stringify({
+        host: '127.0.0.1',
+        port: 0,
+        projects: [],
+        vscode: { settingsFile: join(directory, 'settings.json') },
+      }),
+    )
+    await waitFor(() => !b.path() && !reconnected.path())
+    assert.ok(
+      stops > previousStops,
+      'removing the project terminates its pending server launch',
+    )
+    ready()
+    await b.client.rpc.refreshWorktrees()
+    assert.equal(b.path(), undefined)
   },
 )
 
@@ -144,7 +242,7 @@ test('runtime preparation failure rejects startup and closes the manager', async
     }),
   )
   let attempts = 0
-  const vscode = new ProcessVscodeServerManager(
+  const vscode = new ProcessVscodeServerFactory(
     {
       dataDirectory: directory,
       prepare: async () => {
@@ -160,5 +258,5 @@ test('runtime preparation failure rejects startup and closes the manager', async
   )
   await assert.rejects(startServer(config, vscode), /Download unavailable/)
   assert.equal(attempts, 1)
-  assert.throws(() => vscode.ensure(directory), /closed/)
+  assert.throws(() => vscode.create(directory, () => {}), /closed/)
 })

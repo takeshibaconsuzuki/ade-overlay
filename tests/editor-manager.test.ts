@@ -37,7 +37,7 @@ class Page implements EditorPage {
 class Host implements EditorHost {
   pages: Page[] = []
   current: EditorPage | undefined
-  state: EditorState = { title: '' }
+  state: EditorState = { title: '', canRetry: false }
   shown = 0
   closed = false
   showAndFocusWindow(): void {
@@ -57,14 +57,33 @@ class Host implements EditorHost {
   }
 }
 
-const a: Worktree = { path: '/repo/a', basename: 'a', branchName: 'a' }
-const b: Worktree = { path: '/repo/b', basename: 'b', branchName: 'b' }
-function running(worktree: Worktree): VscodeServerStatus {
-  return {
-    path: worktree.path,
+const a: Worktree = {
+  path: '/repo/a',
+  basename: 'a',
+  branchName: 'a',
+  mainWorktreePath: '/repo/a',
+  deleting: false,
+  vscode: { path: '/repo/a', state: 'stopped' },
+}
+const b: Worktree = {
+  path: '/repo/b',
+  basename: 'b',
+  branchName: 'b',
+  mainWorktreePath: '/repo/a',
+  deleting: false,
+  vscode: { path: '/repo/b', state: 'stopped' },
+}
+function withStatus(
+  worktree: Worktree,
+  status: Omit<VscodeServerStatus, 'path'>,
+): Worktree {
+  return { ...worktree, vscode: { path: worktree.path, ...status } }
+}
+function running(worktree: Worktree): Worktree {
+  return withStatus(worktree, {
     state: 'running',
     browserPath: `/vscode/${'a'.repeat(64)}/?tkn=secret`,
-  }
+  })
 }
 
 test('duplicate clicks share startup; readiness and page load gate presentation', async () => {
@@ -85,7 +104,7 @@ test('duplicate clicks share startup; readiness and page load gate presentation'
   assert.equal(manager.open(a), first)
   await setImmediate()
   assert.equal(starts, 1)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   assert.equal(host.pages.length, 0)
   ack.resolve()
   await first
@@ -110,7 +129,7 @@ test('latest selection wins; background completion never steals focus or reloads
   )
   await manager.open(a)
   await manager.open(b)
-  manager.updateStatuses([running(a), running(b)])
+  manager.updateWorktrees([running(a), running(b)])
   host.pages[1].loading.resolve()
   await setImmediate()
   assert.equal(host.current, host.pages[1])
@@ -122,13 +141,6 @@ test('latest selection wins; background completion never steals focus or reloads
   assert.equal(host.current, host.pages[0])
   assert.equal(host.pages.length, 2)
   manager.onServerDisconnected()
-  manager.updateStatuses([
-    {
-      path: a.path,
-      state: 'stopped',
-      error: { id: '1', message: 'server exited' },
-    },
-  ])
   assert.equal(host.current, host.pages[0])
   assert.equal(host.state.error, undefined)
   await manager.close()
@@ -149,15 +161,11 @@ test('startup and initial navigation failures need explicit retry', async () => 
     'ws://remote.example/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([
-    {
-      path: a.path,
-      state: 'stopped',
-      error: { id: '1', message: 'launch failed' },
-    },
+  manager.updateWorktrees([
+    { ...a, error: { id: '1', message: 'launch failed' } },
   ])
   assert.equal(host.state.error, 'launch failed')
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   assert.equal(host.pages.length, 0)
   await manager.retry()
   host.pages[0].loading.reject(new Error('network failure with sensitive URL'))
@@ -179,7 +187,7 @@ test('startup and initial navigation failures need explicit retry', async () => 
 })
 
 for (const loaded of [false, true]) {
-  for (const change of ['missing', 'stopped', 'starting', 'route'] as const) {
+  for (const change of ['stopped', 'starting', 'route'] as const) {
     test(`opening a ${loaded ? 'loaded' : 'loading'} page replaces it when the server is ${change}`, async () => {
       const host = new Host()
       let starts = 0
@@ -188,7 +196,7 @@ for (const loaded of [false, true]) {
         {
           ensure: async () => {
             starts++
-            manager.updateStatuses([running(a)])
+            manager.updateWorktrees([running(a)])
           },
         },
         'ws://localhost/rpc',
@@ -206,18 +214,14 @@ for (const loaded of [false, true]) {
         return save.promise
       }
       manager.onServerDisconnected()
-      manager.updateStatuses(
-        change === 'missing'
-          ? []
-          : [
-              change === 'route'
-                ? {
-                    ...running(a),
-                    browserPath: `${running(a).browserPath}-new`,
-                  }
-                : { path: a.path, state: change },
-            ],
-      )
+      manager.updateWorktrees([
+        change === 'route'
+          ? withStatus(a, {
+              ...running(a).vscode,
+              browserPath: `${running(a).vscode.browserPath}-new`,
+            })
+          : withStatus(a, { state: change }),
+      ])
       const opening = manager.open(a)
       assert.equal(manager.open(a), opening)
       assert.equal(host.current, undefined)
@@ -256,7 +260,7 @@ test('temporary disconnect and an unchanged server reuse the page without startu
     'ws://localhost/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   const page = host.pages[0]
   page.loading.resolve()
   await setImmediate()
@@ -266,7 +270,7 @@ test('temporary disconnect and an unchanged server reuse the page without startu
   }
   manager.onServerDisconnected()
   await manager.open(a)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   await manager.open(a)
   assert.equal(starts, 1)
   assert.equal(saves, 0)
@@ -284,18 +288,24 @@ test('replacement continues after a session save fails and uses the new browser 
     'ws://localhost/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   const page = host.pages[0]
   page.loading.resolve()
   await setImmediate()
   page.prepareForDisconnect = async () => {
     throw new Error('page unavailable')
   }
-  const status = { ...running(a), browserPath: `${running(a).browserPath}-new` }
-  manager.updateStatuses([status])
+  const status = withStatus(a, {
+    ...running(a).vscode,
+    browserPath: `${running(a).vscode.browserPath}-new`,
+  })
+  manager.updateWorktrees([status])
   await manager.open(a)
   assert.equal(page.disposed, true)
-  assert.equal(host.pages[1].urls[0], `http://localhost${status.browserPath}`)
+  assert.equal(
+    host.pages[1].urls[0],
+    `http://localhost${status.vscode.browserPath}`,
+  )
   await manager.close()
 })
 
@@ -312,7 +322,7 @@ test('shutdown waits for an in-progress replacement save without starting the se
     'ws://localhost/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   const page = host.pages[0]
   page.loading.resolve()
   await setImmediate()
@@ -322,7 +332,7 @@ test('shutdown waits for an in-progress replacement save without starting the se
     saves++
     return save.promise
   }
-  manager.updateStatuses([])
+  manager.updateWorktrees([a])
   const opening = manager.open(a)
   const rejected = assert.rejects(opening, /closed/)
   const closing = manager.close()
@@ -344,7 +354,7 @@ test('shutdown ignores late acknowledgments and page loads', async () => {
     'ws://remote.example/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([running(a)])
+  manager.updateWorktrees([running(a)])
   await manager.close()
   host.pages[0].loading.resolve()
   await setImmediate()
@@ -378,13 +388,15 @@ test('malformed and off-server browser routes fail without navigating', async ()
     'ws://remote.example/rpc',
   )
   await manager.open(a)
-  manager.updateStatuses([{ ...running(a), browserPath: 'http://[' }])
+  manager.updateWorktrees([
+    withStatus(a, { ...running(a).vscode, browserPath: 'http://[' }),
+  ])
   assert.match(host.state.error!, /Invalid VS Code browser route/)
-  manager.updateStatuses([
-    {
-      ...running(a),
+  manager.updateWorktrees([
+    withStatus(a, {
+      ...running(a).vscode,
       browserPath: `https://elsewhere.example/vscode/${'a'.repeat(64)}/`,
-    },
+    }),
   ])
   await manager.retry()
   assert.match(host.state.error!, /Invalid VS Code browser route/)
@@ -401,7 +413,7 @@ test('quitting saves pages concurrently, waits before disposal, and tolerates a 
   )
   await manager.open(a)
   await manager.open(b)
-  manager.updateStatuses([running(a), running(b)])
+  manager.updateWorktrees([running(a), running(b)])
   const saves = [deferred<void>(), deferred<void>()]
   const started: number[] = []
   host.pages.forEach((page, index) => {
@@ -423,4 +435,144 @@ test('quitting saves pages concurrently, waits before disposal, and tolerates a 
   await closing
   assert.ok(host.pages.every((page) => page.disposed))
   assert.ok(host.closed)
+})
+
+test('every client persists independently after a stopped broadcast and disposes only once', async () => {
+  const clients = await Promise.all(
+    [0, 1].map(async () => {
+      const host = new Host()
+      const manager = new EditorWindowManager(
+        host,
+        { ensure: async () => {} },
+        'ws://localhost/rpc',
+      )
+      await manager.open(a)
+      manager.updateWorktrees([running(a)])
+      const page = host.pages[0]
+      page.loading.resolve()
+      await setImmediate()
+      const saved = deferred<void>()
+      let saves = 0
+      page.prepareForDisconnect = () => {
+        saves++
+        return saved.promise
+      }
+      return { host, manager, page, saved, saves: () => saves }
+    }),
+  )
+  for (const { manager, page, saves } of clients) {
+    manager.updateWorktrees([withStatus(a, { state: 'stopping' })])
+    assert.equal(page.disposed, false)
+    assert.equal(saves(), 0)
+    await assert.rejects(manager.open(a), /stopping/)
+    manager.updateWorktrees([a])
+    manager.updateWorktrees([a])
+    assert.equal(saves(), 1)
+    assert.equal(page.disposed, false)
+  }
+  clients[1].saved.resolve()
+  await setImmediate()
+  assert.equal(clients[1].page.disposed, true)
+  assert.equal(clients[0].page.disposed, false)
+  clients[0].saved.resolve()
+  await Promise.all(clients.map(({ manager }) => manager.close()))
+  assert.ok(clients.every(({ page, saves }) => page.disposed && saves() === 1))
+})
+
+test('removal during a pending save prevents reopening', async () => {
+  const host = new Host()
+  let starts = 0
+  const manager = new EditorWindowManager(
+    host,
+    {
+      ensure: async () => {
+        starts++
+      },
+    },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  manager.updateWorktrees([running(a)])
+  const page = host.pages[0]
+  const saved = deferred<void>()
+  let saves = 0
+  page.prepareForDisconnect = () => {
+    saves++
+    return saved.promise
+  }
+  manager.updateWorktrees([a])
+  const opening = manager.open(a)
+  const rejected = assert.rejects(opening, /Unknown worktree/)
+  manager.updateWorktrees([])
+  await manager.retry()
+  await assert.rejects(manager.open(a), /Unknown worktree/)
+  assert.equal(host.state.canRetry, false)
+  assert.match(host.state.error!, /removed/)
+  assert.equal(page.disposed, false)
+  saved.resolve()
+  await rejected
+  assert.equal(starts, 1)
+  assert.equal(saves, 1)
+  assert.match(host.state.error!, /removed/)
+  await manager.close()
+  assert.equal(page.disposed, true)
+})
+
+test('removal while startup is pending ignores late readiness and shutdown waits for local persistence', async () => {
+  const host = new Host()
+  const ack = deferred<void>()
+  const manager = new EditorWindowManager(
+    host,
+    { ensure: () => ack.promise },
+    'ws://localhost/rpc',
+  )
+  const opening = manager.open(a)
+  await setImmediate()
+  manager.updateWorktrees([])
+  ack.resolve()
+  await opening
+  manager.updateWorktrees([running(a)])
+  assert.equal(host.pages.length, 0)
+  await manager.open(a)
+  const page = host.pages[0]
+  const saved = deferred<void>()
+  page.prepareForDisconnect = () => saved.promise
+  manager.updateWorktrees([])
+  const closing = manager.close()
+  assert.equal(host.closed, false)
+  assert.equal(page.disposed, false)
+  saved.resolve()
+  await closing
+  assert.equal(page.disposed, true)
+  assert.equal(host.closed, true)
+})
+
+test('a stopped server remains unavailable while its worktree is being deleted', async () => {
+  const host = new Host()
+  let starts = 0
+  const manager = new EditorWindowManager(
+    host,
+    {
+      ensure: async () => {
+        starts++
+      },
+    },
+    'ws://localhost/rpc',
+  )
+  await manager.open(a)
+  manager.updateWorktrees([running(a)])
+  manager.updateWorktrees([{ ...a, deleting: true }])
+  await setImmediate()
+  assert.equal(host.pages[0].disposed, true)
+  assert.equal(host.state.canRetry, false)
+  await manager.retry()
+  await assert.rejects(manager.open(a), /being deleted/)
+  assert.equal(starts, 1)
+  manager.updateWorktrees([
+    { ...a, error: { id: '1', message: 'dirty worktree' } },
+  ])
+  assert.equal(host.state.canRetry, true)
+  await manager.retry()
+  assert.equal(starts, 2)
+  await manager.close()
 })

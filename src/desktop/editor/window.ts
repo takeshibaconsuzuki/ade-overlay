@@ -10,7 +10,7 @@ export class ElectronEditorWindow implements EditorHost {
   private window: BrowserWindow | undefined
   private readonly pages = new Set<ElectronEditorPage>()
   private current: ElectronEditorPage | undefined
-  private state: EditorState = { title: 'VS Code' }
+  private state: EditorState = { title: 'VS Code', canRetry: false }
   private vscodeSettingsContent: string | null = null
 
   constructor(private readonly vscodeSettingsServer: VscodeSettingsServer) {}

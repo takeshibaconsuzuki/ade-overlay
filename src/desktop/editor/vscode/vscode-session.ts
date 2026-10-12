@@ -16,6 +16,7 @@ export declare namespace SessionServices {
   }
 }
 
+// Flushes browser-local view state and working-copy backups; the server may already be stopped.
 // Serialized into the VS Code page by Electron. Keep this function self-contained: imports
 // and closures from the main process are unavailable in the page's JavaScript context.
 export async function persistVscodeSession(): Promise<void> {

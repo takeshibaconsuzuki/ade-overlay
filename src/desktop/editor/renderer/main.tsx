@@ -6,6 +6,7 @@ import '../../shared/style.css'
 function EditorShell(): React.JSX.Element {
   const [state, setState] = useState<EditorState>({
     title: 'VS Code',
+    canRetry: false,
   })
   useEffect(() => {
     window.editor.setOnEditorStateChangedListener(setState)
@@ -16,12 +17,14 @@ function EditorShell(): React.JSX.Element {
     <main className="editor-error">
       <h1>{state.title}</h1>
       <p role="alert">{state.error}</p>
-      <button
-        type="button"
-        onClick={() => void window.editor.retryEditor().catch(() => {})}
-      >
-        Retry
-      </button>
+      {state.canRetry && (
+        <button
+          type="button"
+          onClick={() => void window.editor.retryEditor().catch(() => {})}
+        >
+          Retry
+        </button>
+      )}
     </main>
   ) : (
     <div

@@ -1,3 +1,8 @@
+import childProcess, {
+  type ChildProcess,
+  type SpawnOptions,
+} from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -97,5 +102,62 @@ test(
     const rejected = assert.rejects(f.child.ready)
     f.controller.abort(new Error('shutdown'))
     await Promise.all([rejected, f.child.stop()])
+  },
+)
+
+test(
+  'production termination retries after failure and shares concurrent requests',
+  { timeout: 10000 },
+  async (t) => {
+    const spawn = childProcess.spawn
+    let spawned: ChildProcess | undefined
+    t.mock.method(
+      childProcess,
+      'spawn',
+      (command: string, args: string[], options: SpawnOptions) => {
+        spawned = spawn(command, args, options)
+        return spawned
+      },
+    )
+    syncBuiltinESMExports()
+    try {
+      const f = await fixture(
+        t,
+        `
+      const server = require('node:http').createServer((_request, response) => response.end('ready'));
+      server.listen(0, '127.0.0.1', () => console.log('Extension host agent listening on ' + server.address().port));
+    `,
+      )
+      await f.child.ready
+      const child = spawned!
+      const pid = child.pid!
+      // Make the real tree-kill boundary reject without killing the actual child.
+      // Restoring its PID must allow the production stop implementation to retry.
+      Object.defineProperty(child, 'pid', {
+        value: 'invalid-pid',
+        configurable: true,
+      })
+      try {
+        const failed = f.child.stop()
+        assert.equal(f.child.stop(), failed)
+        await assert.rejects(failed, /pid must be a number/)
+        assert.doesNotThrow(() => process.kill(pid, 0))
+      } finally {
+        Object.defineProperty(child, 'pid', { value: pid, configurable: true })
+      }
+      const retried = f.child.stop()
+      assert.equal(f.child.stop(), retried)
+      await retried
+      await f.child.exited
+      assert.throws(() => process.kill(pid, 0))
+      assert.equal(
+        f.child.stop(),
+        retried,
+        'successful termination remains idempotent',
+      )
+    } finally {
+      t.mock.restoreAll()
+      syncBuiltinESMExports()
+    }
   },
 )

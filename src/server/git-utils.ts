@@ -1,12 +1,11 @@
+import { realpath } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { simpleGit } from 'simple-git'
-import type { Worktree } from '../shared/api'
-import { logger } from '../shared/logger'
+import type { WorktreeInfo } from '../shared/api'
 import type { Project } from './options'
+import { pathKey } from './path-key'
 
-const log = logger.child({ component: 'worktrees' })
-
-export function parseWorktrees(output: string): Worktree[] {
+export function parseWorktrees(output: string): WorktreeInfo[] {
   return output
     .split('\0\0')
     .filter(Boolean)
@@ -29,35 +28,94 @@ export function parseWorktrees(output: string): Worktree[] {
     })
 }
 
+export interface DiscoveredWorktree extends WorktreeInfo {
+  // Configured path, retained separately from Git's canonical main root for project removal.
+  projectPath: string
+  mainWorktreePath: string
+}
+
+export interface WorktreeDiscovery {
+  scan(projects: Project[], signal: AbortSignal): Promise<DiscoveredWorktree[]>
+  remove(
+    mainWorktreePath: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<void>
+}
+
+export class GitWorktreeDiscovery implements WorktreeDiscovery {
+  scan(
+    projects: Project[],
+    signal: AbortSignal,
+  ): Promise<DiscoveredWorktree[]> {
+    return listWorktrees(projects, signal)
+  }
+
+  async remove(
+    mainWorktreePath: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted()
+    await simpleGit({ baseDir: mainWorktreePath, abort: signal }).raw([
+      'worktree',
+      'remove',
+      '--',
+      path,
+    ])
+  }
+}
+
 export async function listWorktrees(
   projects: Project[],
   signal?: AbortSignal,
-): Promise<Worktree[]> {
+): Promise<DiscoveredWorktree[]> {
   signal?.throwIfAborted()
-  const results = await Promise.all(
+  // Settle every command before rejecting, so shutdown also waits for Git cleanup.
+  const results = await Promise.allSettled(
     projects.map(async ({ mainWorktreePath }) => {
-      try {
-        const output = await simpleGit({
-          baseDir: resolve(mainWorktreePath),
-          abort: signal,
-          timeout: { block: 10_000 },
-        }).raw(['worktree', 'list', '--porcelain', '-z'])
-        return parseWorktrees(output)
-      } catch (error) {
-        // Let every project settle before reporting cancellation to the store.
-        if (signal?.aborted) return []
-        log.error(
-          { err: error, mainWorktreePath },
-          'Failed to list project worktrees',
+      const configured = resolve(mainWorktreePath)
+      const output = await simpleGit({
+        baseDir: configured,
+        abort: signal,
+        timeout: { block: 10_000 },
+      }).raw(['worktree', 'list', '--porcelain', '-z'])
+      signal?.throwIfAborted()
+      const first = output.split('\0\0')[0].split('\0')
+      const main = first
+        .find((field) => field.startsWith('worktree '))
+        ?.slice(9)
+      if (
+        !main ||
+        first.includes('bare') ||
+        pathKey(await realpath(configured)) !== pathKey(main)
+      ) {
+        throw new Error(
+          `Configured mainWorktreePath is not the main worktree root: ${mainWorktreePath}`,
         )
-        return []
+      }
+      return {
+        identity: pathKey(main),
+        worktrees: parseWorktrees(output).map((worktree) => ({
+          ...worktree,
+          path: resolve(worktree.path),
+          mainWorktreePath: resolve(main),
+          projectPath: configured,
+        })),
       }
     }),
   )
   signal?.throwIfAborted()
-  return [
-    ...new Map(
-      results.flat().map((worktree) => [worktree.path, worktree]),
-    ).values(),
-  ]
+  const identities = new Set<string>()
+  const worktrees: DiscoveredWorktree[] = []
+  for (const result of results) {
+    if (result.status === 'rejected') throw result.reason
+    if (identities.has(result.value.identity))
+      throw new Error(
+        `Duplicate project for main worktree: ${result.value.identity}`,
+      )
+    identities.add(result.value.identity)
+    worktrees.push(...result.value.worktrees)
+  }
+  return worktrees
 }
