@@ -66,6 +66,7 @@ test('Codex metadata matches resume names and previews, including saved renames'
       hook_event_name: 'SessionStart',
       cwd: directory,
       pid: 123,
+      terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
     })
     return result.chat.title
   }
@@ -99,6 +100,7 @@ test('Codex provider reads the saved title and derives other metadata from the h
     hook_event_name: 'SessionStart',
     cwd: directory,
     pid: 123,
+    terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
   }
   for (const [event, source, status] of [
     ['SessionStart', 'startup', 'idle'],
@@ -121,6 +123,7 @@ test('Codex provider reads the saved title and derives other metadata from the h
     const { chat } = result
     assert.equal(chat.providerId, 'codex')
     assert.equal(chat.sessionId, 'session')
+    assert.equal(chat.terminalId, report.terminalId)
     assert.equal(chat.status, status)
     assert.equal(chat.title, 'Saved name')
     assert.equal(

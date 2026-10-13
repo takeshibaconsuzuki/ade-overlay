@@ -85,7 +85,11 @@ async function main() {
   await fetch(`${address}/chats/report/${encodeURIComponent(provider)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, pid }),
+    body: JSON.stringify({
+      ...payload,
+      pid,
+      terminalId: process.env.ADE_TERMINAL_ID || undefined,
+    }),
     signal: AbortSignal.timeout(1000),
   })
 }

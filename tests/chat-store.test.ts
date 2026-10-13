@@ -239,6 +239,7 @@ for (const nextTime of [100, 101]) {
       sessionId: 'session',
       status: 'idle',
       mtime: nextTime,
+      terminalId: undefined,
     })
   })
 }

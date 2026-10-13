@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Box, Button } from '@radix-ui/themes'
 import type { Chat } from '../../src/shared/api'
 import type { ChatsMessage, SidebarMessage } from '../shared/api'
 import { ChatList } from './ChatList'
@@ -20,9 +21,16 @@ export function App() {
     return () => window.removeEventListener('message', receive)
   }, [])
   return (
-    <ChatList
-      chats={chats}
-      onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
-    />
+    <>
+      <Box px="4" py="3">
+        <Button onClick={() => vscode.postMessage({ type: 'startCodex' })}>
+          Codex
+        </Button>
+      </Box>
+      <ChatList
+        chats={chats}
+        onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
+      />
+    </>
   )
 }

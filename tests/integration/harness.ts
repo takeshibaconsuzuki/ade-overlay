@@ -12,11 +12,13 @@ import { ProcessVscodeServerFactory } from '../../src/server/vscode-server'
 import { NodeVscodeLauncher } from '../../src/server/vscode-process'
 import { DownloadedVscodeRuntime } from '../../src/server/vscode-runtime'
 import { FetchHttpClient } from '../../src/shared/http-client'
+import type { ChatProvider } from '../../src/server/chat-provider'
 
 // Every case uses the pinned runtime with isolated host files and server state.
 export async function startIntegrationServer(
   directory: string,
   repos: string[],
+  providers: ChatProvider[] = [],
 ) {
   const profileDatabase = join(directory, 'state.vscdb')
   const database = new DatabaseSync(profileDatabase)
@@ -46,7 +48,7 @@ export async function startIntegrationServer(
       }),
       new NodeVscodeLauncher(),
     ),
-    [],
+    providers,
   )
 }
 

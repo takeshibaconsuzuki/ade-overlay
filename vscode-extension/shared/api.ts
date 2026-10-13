@@ -1,7 +1,7 @@
 import type { Chat } from '../../src/shared/api'
 
 export type SidebarMessage =
-  { type: 'ready' } | { type: 'openChat'; id: string }
+  { type: 'ready' } | { type: 'startCodex' } | { type: 'openChat'; id: string }
 
 export interface ChatsMessage {
   type: 'chats'

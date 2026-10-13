@@ -59,7 +59,7 @@ export function ChatList({
                   className="chat-open"
                   disabled={!chat}
                   onClick={() => onOpenChat(id)}
-                  title={chat && `Switch to ${chat.worktreePath}`}
+                  title={chat && `Open chat in ${chat.worktreePath}`}
                 >
                   <Field name="title" value={chat?.title} />
                   <Field

@@ -82,6 +82,8 @@ export class ChatStore {
           Object.entries(incoming).filter(([, value]) => value !== undefined),
         ),
       })
+      // Terminal ownership follows the reporting process, including external resumes.
+      chat.terminalId = incoming.terminalId
       this.chats.set(id, chat)
       log.info(
         {

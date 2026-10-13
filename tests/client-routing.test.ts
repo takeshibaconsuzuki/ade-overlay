@@ -103,15 +103,68 @@ async function fixture(t: TestContext) {
 
 const desktopMethods: DesktopClientMethods = {
   getClientInfo: () => ({ kind: 'desktop', name: 'test', version: '1' }),
+  openChatTerminal: async () => {},
+  focusChatTerminal: async () => false,
   openWorktree: async () => {},
   settingsChanged: () => {},
   worktreesChanged: () => {},
 }
 
+test('launch requests validate the worktree and reach the single desktop', async (t) => {
+  const f = await fixture(t)
+  const requester = await f.connect({
+    getClientInfo: () => ({
+      kind: 'extension',
+      name: 'test',
+      version: '1',
+    }),
+    chatsChanged: () => {},
+  })
+  const options = {
+    worktreePath: f.directory,
+    terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
+    shellPath: '/bin/sh',
+    shellArgs: ['-c', 'exec codex'],
+  }
+  await assert.rejects(
+    requester.rpc.openChatTerminal(options),
+    /one ADE desktop/,
+  )
+  const received: unknown[] = []
+  const desktop = await f.connect({
+    ...desktopMethods,
+    openChatTerminal: async (value: unknown) => {
+      received.push(value)
+    },
+  })
+  await waitFor(() => desktop.requests.includes('worktreesChanged'))
+  await requester.rpc.openChatTerminal(options)
+  assert.deepEqual(received, [options])
+  assert.ok(!requester.requests.includes('openChatTerminal'))
+  await assert.rejects(
+    requester.rpc.openChatTerminal({
+      ...options,
+      worktreePath: join(f.directory, 'missing'),
+    }),
+    /Unknown worktree/,
+  )
+  const second = await f.connect(desktopMethods)
+  await waitFor(() => second.requests.includes('worktreesChanged'))
+  await assert.rejects(
+    requester.rpc.openChatTerminal(options),
+    /one ADE desktop/,
+  )
+  assert.equal(received.length, 1)
+})
+
 test('opening a chat routes its current worktree to the desktop and awaits acceptance', async (t) => {
   const f = await fixture(t)
   const extension = await f.connect({
-    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    getClientInfo: () => ({
+      kind: 'extension',
+      name: 'test',
+      version: '1',
+    }),
     chatsChanged: () => {},
   })
   await f.report('First')
@@ -157,11 +210,129 @@ test('opening a chat routes its current worktree to the desktop and awaits accep
   assert.ok(!extension.requests.includes('openWorktree'))
 })
 
+test('chat focus targets the owning desktop after acceptance regardless of extension connections', async (t) => {
+  const f = await fixture(t)
+  const events: string[] = []
+  const terminalId = 'bcf08308-3214-4d40-8a47-ea183fa95752'
+  const accepted = deferred<void>()
+  const desktop = await f.connect({
+    ...desktopMethods,
+    openWorktree: async () => {
+      events.push('open')
+      await accepted.promise
+    },
+    focusChatTerminal: async (path: string, id: string) => {
+      assert.equal(path, f.directory)
+      events.push(id)
+      return true
+    },
+  })
+  const methods: ExtensionClientMethods = {
+    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    chatsChanged: () => {},
+  }
+  const first = await f.connect(methods)
+  const newer = await f.connect(methods)
+  await waitFor(
+    () =>
+      desktop.requests.includes('worktreesChanged') &&
+      newer.requests.includes('chatsChanged'),
+  )
+  await f.report('Launched', { terminalId })
+  const opening = first.rpc.openChat('test:one')
+  await waitFor(() => events.length === 1)
+  assert.deepEqual(events, ['open'])
+  accepted.resolve()
+  await opening
+  await waitFor(() => events.length === 2)
+  assert.deepEqual(events, ['open', terminalId])
+  assert.ok(desktop.requests.includes('focusChatTerminal'))
+  for (const extension of [first, newer]) {
+    assert.ok(!extension.requests.includes('focusTerminal'))
+    assert.ok(!extension.requests.includes('focusChatTerminal'))
+  }
+  await f.report('External')
+  await first.rpc.openChat('test:one')
+  assert.deepEqual(events, ['open', terminalId, 'open'])
+})
+
+test('chat focus retries editor and extension startup until the owning desktop acknowledges focus', async (t) => {
+  const f = await fixture(t)
+  let attempts = 0
+  let ready = false
+  let focused: string | undefined
+  const desktop = await f.connect({
+    ...desktopMethods,
+    focusChatTerminal: async (path: string, id: string) => {
+      assert.equal(path, f.directory)
+      attempts++
+      if (attempts === 1)
+        throw new Error('Extension command is not registered yet')
+      if (ready) focused = id
+      return ready
+    },
+  })
+  await waitFor(() => desktop.requests.includes('worktreesChanged'))
+  const terminalId = 'bcf08308-3214-4d40-8a47-ea183fa95752'
+  await f.report('Restoring', { terminalId })
+  await desktop.rpc.openChat('test:one')
+  await waitFor(() => attempts >= 2)
+  assert.equal(focused, undefined)
+  ready = true
+  await waitFor(() => focused === terminalId)
+  const acknowledgedAttempts = attempts
+  await delay(300)
+  assert.equal(attempts, acknowledgedAttempts)
+})
+
+for (const cancellation of [
+  'new selection',
+  'ownership change',
+  'desktop disconnect',
+]) {
+  test(`pending chat focus is cancelled by ${cancellation}`, async (t) => {
+    const f = await fixture(t)
+    let ready = false
+    const focused: string[] = []
+    const desktop = await f.connect({
+      ...desktopMethods,
+      focusChatTerminal: async (_path: string, id: string) => {
+        if (ready) focused.push(id)
+        return ready
+      },
+    })
+    await waitFor(() => desktop.requests.includes('worktreesChanged'))
+    const first = 'bcf08308-3214-4d40-8a47-ea183fa95752'
+    const second = '9be6082f-6f46-48d6-9062-c56f31320289'
+    await f.report('First', { terminalId: first })
+    await desktop.rpc.openChat('test:one')
+    if (cancellation === 'new selection') {
+      await f.report('Second', { sessionId: 'two', terminalId: second })
+      await desktop.rpc.openChat('test:two')
+    } else if (cancellation === 'ownership change') {
+      await f.report('External resume')
+    } else {
+      const closed = once(desktop.socket, 'close')
+      desktop.socket.terminate()
+      await closed
+    }
+    ready = true
+    if (cancellation === 'new selection')
+      await waitFor(() => focused.length > 0)
+    else await delay(300)
+    assert.deepEqual(focused, cancellation === 'new selection' ? [second] : [])
+  })
+}
+
 test('large descriptions are previewed without disconnecting extensions or truncating stored reports', async (t) => {
   const f = await fixture(t)
   const snapshots: Record<string, Chat>[] = []
   const methods: ExtensionClientMethods = {
-    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    getClientInfo: () => ({
+      kind: 'extension',
+      name: 'test',
+      version: '1',
+    }),
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
@@ -209,7 +380,11 @@ test('snapshots are routed exclusively to the identified client kind, including 
   const f = await fixture(t)
   const snapshots: Record<string, Chat>[] = []
   const extensionMethods: ExtensionClientMethods = {
-    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    getClientInfo: () => ({
+      kind: 'extension',
+      name: 'test',
+      version: '1',
+    }),
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
@@ -282,7 +457,11 @@ test('identification gates snapshots and the first snapshot includes intervening
   await extension.rpc.refreshWorktrees()
   await extension.rpc.getServerInfo()
   assert.deepEqual(extension.requests, ['getClientInfo'])
-  identified.resolve({ kind: 'extension', name: 'test', version: '1' })
+  identified.resolve({
+    kind: 'extension',
+    name: 'test',
+    version: '1',
+  })
   await waitFor(() => snapshots.length === 1)
   assert.equal(snapshots[0]['test:one'].title, 'During identification')
   await f.report('After identification')
@@ -337,7 +516,11 @@ test('disconnecting during identification does not register a client later', asy
   const closed = once(client.socket, 'close')
   client.socket.terminate()
   await closed
-  identified.resolve({ kind: 'extension', name: 'test', version: '1' })
+  identified.resolve({
+    kind: 'extension',
+    name: 'test',
+    version: '1',
+  })
   await f.report('After disconnect')
   assert.deepEqual(client.requests, ['getClientInfo'])
 })
