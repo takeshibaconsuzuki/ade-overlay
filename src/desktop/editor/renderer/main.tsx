@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Button, Container, Flex, Heading } from '@radix-ui/themes'
 import type { EditorState } from '../api'
-import '../../shared/style.css'
+import { AppTheme } from '../../../ui/AppTheme'
+import { ErrorMessage, LoadingScreen } from '../../../ui/Feedback'
 
 function EditorShell(): React.JSX.Element {
   const [state, setState] = useState<EditorState>({
@@ -14,27 +16,31 @@ function EditorShell(): React.JSX.Element {
     return () => window.editor.setOnEditorStateChangedListener(undefined)
   }, [])
   return state.error ? (
-    <main className="editor-error">
-      <h1>{state.title}</h1>
-      <p role="alert">{state.error}</p>
-      {state.canRetry && (
-        <button
-          type="button"
-          onClick={() => void window.editor.retryEditor().catch(() => {})}
-        >
-          Retry
-        </button>
-      )}
-    </main>
+    <Container size="3" p={{ initial: '4', sm: '6' }} asChild>
+      <main>
+        <Flex direction="column" align="start" gap="4">
+          <Heading as="h1" size="7">
+            {state.title}
+          </Heading>
+          <ErrorMessage>{state.error}</ErrorMessage>
+          {state.canRetry && (
+            <Button
+              type="button"
+              onClick={() => void window.editor.retryEditor().catch(() => {})}
+            >
+              Retry
+            </Button>
+          )}
+        </Flex>
+      </main>
+    </Container>
   ) : (
-    <div
-      className="connection-screen"
-      role="status"
-      aria-label={`Loading ${state.title}`}
-    >
-      <span className="connection-spinner" aria-hidden="true" />
-    </div>
+    <LoadingScreen label={`Loading ${state.title}`} />
   )
 }
 
-createRoot(document.getElementById('root')!).render(<EditorShell />)
+createRoot(document.getElementById('root')!).render(
+  <AppTheme>
+    <EditorShell />
+  </AppTheme>,
+)

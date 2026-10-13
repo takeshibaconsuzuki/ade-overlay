@@ -1,139 +1,69 @@
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 32px;
-}
-
-.app-name {
-  margin: 0 0 4px;
-  color: #a1a1aa;
-  font-size: 13px;
-}
-
-ul {
+.worktrees {
   padding: 0;
   margin: 0;
   list-style: none;
-  display: grid;
-  gap: 12px;
 }
 
-.worktree-row {
-  position: relative;
+.worktree-row + .worktree-row {
+  border-top: 1px solid var(--gray-a5);
+}
+
+/* Hover anywhere outside the actions section highlights the whole row. */
+.worktree-row:has(.worktree-open:not(:disabled)):hover:not(
+    :has(.worktree-actions:hover)
+  ),
+.worktree-row:has(.worktree-open:focus-visible) {
+  background-color: var(--gray-a3);
+}
+
+/* Reserve the same space for every status, including errors. */
+.worktree-status {
   display: flex;
+  flex: none;
   align-items: center;
-  border: 1px solid #3f3f46;
-  border-radius: 10px;
-  background: #27272a;
-  overflow-wrap: anywhere;
+  justify-content: center;
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+.worktree-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background-color: currentColor;
 }
 
 .worktree-open {
-  display: grid;
   flex: 1;
   min-width: 0;
-  gap: 6px;
-  padding: 16px 20px;
-  border: 0;
-  border-radius: 10px;
+  height: auto;
+  justify-content: start;
+  padding: var(--space-2);
   text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.server-status {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  margin: 0 24px;
-  border-radius: 50%;
-}
-
-.server-status-stopped {
-  background: #71717a;
-}
-
-.server-status-running {
-  background: #4ade80;
-}
-
-.server-status-deleting,
-.server-status-starting,
-.server-status-stopping {
-  border: 2px solid #52525b;
-  border-top-color: #f4f4f5;
-  animation: spin 0.8s linear infinite;
-}
-
-.worktree-error {
-  display: flex;
-  margin: 0 12px;
-}
-
-.status-error {
-  display: grid;
-  place-items: center;
-  padding: 8px;
-  border: 0;
-  color: #fda4af;
-}
-
-.status-error svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-}
-
-.error-tooltip {
-  display: none;
-  position: absolute;
-  z-index: 1;
-  right: 12px;
-  top: calc(100% - 4px);
-  max-width: min(420px, calc(100% - 24px));
-  padding: 10px 12px;
-  border: 1px solid #71717a;
-  border-radius: 6px;
-  background: #18181b;
-  color: #fda4af;
-  font-size: 13px;
-  white-space: pre-wrap;
-  box-shadow: 0 4px 12px #0006;
-}
-
-.worktree-error:hover .error-tooltip,
-.worktree-error:focus-within .error-tooltip {
-  display: block;
-}
-
-.worktree-name {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.worktree-branch,
-.empty {
-  color: #a1a1aa;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .server-status-deleting,
-  .server-status-starting,
-  .server-status-stopping {
-    animation: none;
-  }
+.worktree-open:hover {
+  background-color: transparent;
 }
 
 .worktree-actions {
-  display: flex;
-  gap: 8px;
-  margin-right: 12px;
+  flex: none;
+  align-self: stretch;
+  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3))
+    calc(-1 * var(--space-3)) 0;
 }
 
-.worktree-actions button {
-  padding: 6px 10px;
-  font-size: 12px;
+.worktree-status-tooltip {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.worktree-picker {
+  box-sizing: border-box;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px;
+  min-height: 100vh;
 }

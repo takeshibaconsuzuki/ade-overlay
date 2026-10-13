@@ -1,0 +1,19 @@
+body {
+  margin: 0;
+}
+
+.ade-theme {
+  min-height: 100vh;
+  --cursor-button: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ade-theme .rt-SpinnerLeaf {
+    animation: none;
+  }
+
+  .ade-theme .rt-Skeleton {
+    animation: none !important;
+    background-color: var(--gray-a3);
+  }
+}

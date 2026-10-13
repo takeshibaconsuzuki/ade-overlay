@@ -1,19 +1,39 @@
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import {
+  DotsHorizontalIcon,
+  ExclamationTriangleIcon,
+  ReloadIcon,
+} from '@radix-ui/react-icons'
+import {
+  Box,
+  Button,
+  DropdownMenu,
+  Flex,
+  Heading,
+  IconButton,
+  Spinner,
+  Text,
+  Tooltip,
+} from '@radix-ui/themes'
 import { APP_DISPLAY_NAME } from '../../../shared/constants'
 import type { ConnectionState, Worktree } from '../../../shared/api'
-import '../../shared/style.css'
+import { AppTheme } from '../../../ui/AppTheme'
+import { ErrorMessage, LoadingScreen } from '../../../ui/Feedback'
 import './style.css'
 
 function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
   const status = worktree.vscode
   const [pending, setPending] = useState(false)
   const [requestError, setRequestError] = useState<string | null>(null)
-  const tooltipId = useId()
   const state = status.state
   const error = worktree.error
   const message = requestError ?? error?.message
   const unavailable = pending || worktree.deleting || state === 'stopping'
+  const busy = worktree.deleting || state === 'starting' || state === 'stopping'
+  const statusLabel = worktree.deleting
+    ? 'Deleting worktree'
+    : `VS Code Server ${state}`
   const start = async () => {
     setRequestError(null)
     try {
@@ -51,81 +71,119 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
     }
   }
   return (
-    <li className="worktree-row">
-      <button
-        className="worktree-open"
-        disabled={unavailable}
-        type="button"
-        title={worktree.path}
-        onClick={() => void start()}
-      >
-        <span className="worktree-name">{worktree.basename}</span>
-        <span className="worktree-branch">
-          {worktree.branchName ?? 'Detached HEAD'}
-        </span>
-      </button>
-      {message ? (
-        <span className="worktree-error">
-          <button
-            className="status-error"
-            type="button"
-            aria-label={`Dismiss error for ${worktree.basename}`}
-            aria-describedby={tooltipId}
-            onClick={() => void clear()}
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <circle cx="10" cy="10" r="8" />
-              <path d="M10 5v6m0 3v1" />
-            </svg>
-          </button>
-          <span className="error-tooltip" id={tooltipId} role="tooltip">
-            {message}
-          </span>
-        </span>
-      ) : (
-        <span
-          className={`server-status server-status-${worktree.deleting ? 'deleting' : state}`}
-          aria-busy={
-            worktree.deleting || state === 'starting' || state === 'stopping'
-          }
-          role="status"
-          aria-label={
-            worktree.deleting ? 'Deleting worktree' : `VS Code Server ${state}`
-          }
-          title={
-            worktree.deleting ? 'Deleting worktree' : `VS Code Server ${state}`
-          }
-        />
-      )}
-      <div className="worktree-actions">
-        <button
-          type="button"
-          // Only a worktree error enables another Stop request while stopping.
-          disabled={
-            pending ||
-            worktree.deleting ||
-            state === 'stopped' ||
-            (state === 'stopping' && !error)
-          }
-          onClick={() =>
-            void perform(() => window.picker.stopVscodeServer(worktree.path))
-          }
+    <Flex asChild align="center" gap="3" px="3" py="3">
+      <li className="worktree-row">
+        <Tooltip
+          content={message ?? statusLabel}
+          className="worktree-status-tooltip"
         >
-          Stop
-        </button>
-        {worktree.path !== worktree.mainWorktreePath && (
-          <button
-            type="button"
-            disabled={unavailable}
-            onClick={() =>
-              void perform(() => window.picker.deleteWorktree(worktree.path))
+          <Text
+            asChild
+            color={
+              message
+                ? 'red'
+                : state === 'running' && !worktree.deleting
+                  ? 'green'
+                  : 'gray'
             }
           >
-            {worktree.deleting ? 'Deleting...' : 'Delete'}
-          </button>
-        )}
-      </div>
-    </li>
+            <span
+              className="worktree-status"
+              role="status"
+              aria-label={
+                message ? `Error for ${worktree.basename}` : statusLabel
+              }
+              aria-busy={!message && busy}
+              tabIndex={message ? 0 : undefined}
+            >
+              {message ? (
+                <ExclamationTriangleIcon
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                />
+              ) : busy ? (
+                <Spinner size="1" aria-hidden="true" />
+              ) : (
+                <span className="worktree-dot" aria-hidden="true" />
+              )}
+            </span>
+          </Text>
+        </Tooltip>
+        <Button
+          className="worktree-open"
+          variant="ghost"
+          color="gray"
+          disabled={unavailable}
+          type="button"
+          title={worktree.path}
+          onClick={() => void start()}
+        >
+          <Flex asChild direction="column" align="start" gap="1">
+            <span>
+              <Text size="3" weight="medium">
+                {worktree.basename}
+              </Text>
+              <Text size="2" color="gray">
+                {worktree.branchName ?? 'Detached HEAD'}
+              </Text>
+            </span>
+          </Flex>
+        </Button>
+        <Flex className="worktree-actions" align="center">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <IconButton
+                variant="ghost"
+                color="gray"
+                type="button"
+                aria-label={`Actions for ${worktree.basename}`}
+              >
+                <DotsHorizontalIcon />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end">
+              <DropdownMenu.Item
+                // Only a worktree error enables another Stop request while stopping.
+                disabled={
+                  pending ||
+                  worktree.deleting ||
+                  state === 'stopped' ||
+                  (state === 'stopping' && !error)
+                }
+                onSelect={() =>
+                  void perform(() =>
+                    window.picker.stopVscodeServer(worktree.path),
+                  )
+                }
+              >
+                Stop
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={!message}
+                onSelect={() => void clear()}
+              >
+                Dismiss error
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item
+                color="red"
+                disabled={
+                  unavailable || worktree.path === worktree.mainWorktreePath
+                }
+                onSelect={() =>
+                  void perform(() =>
+                    window.picker.deleteWorktree(worktree.path),
+                  )
+                }
+              >
+                Delete
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </Flex>
+      </li>
+    </Flex>
   )
 }
 
@@ -164,45 +222,59 @@ function WorktreePicker(): React.JSX.Element {
   }
 
   if (connectionState !== 'connected') {
-    return (
-      <div
-        className="connection-screen"
-        role="status"
-        aria-label="Connecting to server"
-      >
-        <span className="connection-spinner" aria-hidden="true" />
-      </div>
-    )
+    return <LoadingScreen label="Connecting to server" />
   }
 
   return (
-    <main>
-      <header>
-        <div>
-          <p className="app-name">{APP_DISPLAY_NAME}</p>
-          <h1>Worktrees</h1>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={refreshing}
-          aria-busy={refreshing}
-        >
-          Refresh
-        </button>
-      </header>
-      {error && <p role="alert">{error}</p>}
-      {worktrees.length === 0 ? (
-        <p className="empty">No worktrees found.</p>
-      ) : (
-        <ul aria-label="Worktrees" aria-busy={refreshing}>
-          {worktrees.map((worktree) => (
-            <WorktreeRow key={worktree.path} worktree={worktree} />
-          ))}
-        </ul>
-      )}
+    <main className="worktree-picker">
+      <Flex asChild align="center" justify="between" gap="4" mb="6">
+        <header>
+          <Box>
+            <Text as="p" size="2" color="gray" mb="1">
+              {APP_DISPLAY_NAME}
+            </Text>
+            <Heading as="h1" size="7">
+              Worktrees
+            </Heading>
+          </Box>
+          <Button
+            type="button"
+            variant="soft"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            aria-busy={refreshing}
+          >
+            {refreshing ? <Spinner aria-hidden="true" /> : <ReloadIcon />}
+            Refresh
+          </Button>
+        </header>
+      </Flex>
+      <Flex direction="column" gap="4">
+        {error && <ErrorMessage>{error}</ErrorMessage>}
+        {worktrees.length === 0 ? (
+          <Text as="p" size="2" color="gray">
+            No worktrees found.
+          </Text>
+        ) : (
+          <Flex asChild direction="column">
+            <ul
+              className="worktrees"
+              aria-label="Worktrees"
+              aria-busy={refreshing}
+            >
+              {worktrees.map((worktree) => (
+                <WorktreeRow key={worktree.path} worktree={worktree} />
+              ))}
+            </ul>
+          </Flex>
+        )}
+      </Flex>
     </main>
   )
 }
 
-createRoot(document.getElementById('root')!).render(<WorktreePicker />)
+createRoot(document.getElementById('root')!).render(
+  <AppTheme>
+    <WorktreePicker />
+  </AppTheme>,
+)
