@@ -9,7 +9,10 @@ projects: []
 
 # Uses the server host's standard VS Code extensions and default user settings.
 # Extensions are shared; settings sync as whole documents, with the host winning on reconnect.
+# Global extension enablement is imported at editor startup; workspace overrides stay local.
+# The host profile database must be readable for an editor to start.
 # Override paths for a custom installation or profile. Path changes require a server restart.
 # vscode:
 #   extensionsDirectory: /path/to/extensions
 #   settingsFile: /path/to/User/settings.json
+#   profileDatabase: /path/to/User/globalStorage/state.vscdb

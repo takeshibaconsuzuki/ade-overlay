@@ -2,6 +2,7 @@ import { WebContentsView } from 'electron'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { EditorPage } from '../manager'
+import type { ExtensionIdentifier } from '../../../shared/api'
 import { persistVscodeSession } from './vscode-session'
 import { applyVscodeSettings } from './vscode-settings'
 import {
@@ -16,8 +17,9 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
 
   constructor(
     key: string,
-    onCrash: () => void,
+    onFailure: (message: string) => void,
     vscodeSettingsServer: VscodeSettingsServer,
+    readDisabledExtensions: () => Promise<ExtensionIdentifier[]>,
   ) {
     this.vscodeSettingsSync = new VscodeSettingsSync(this, vscodeSettingsServer)
     this.view = new WebContentsView({
@@ -35,7 +37,7 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
     this.view.setVisible(false)
     this.view.webContents.on('render-process-gone', () => {
       this.vscodeSettingsSync.stop()
-      onCrash()
+      onFailure('The VS Code page closed unexpectedly. Retry to reopen it.')
     })
     this.view.webContents.on(
       'did-start-navigation',
@@ -47,6 +49,18 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
       this.vscodeSettingsSync.start(),
     )
     this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    this.view.webContents.ipc.handle('ade:disabled-extensions', (event) => {
+      if (event.senderFrame !== this.view.webContents.mainFrame)
+        throw new Error('Extension enablement is only available to the editor')
+      return readDisabledExtensions()
+    })
+    this.view.webContents.ipc.on('ade:startup-failed', (event) => {
+      if (event.senderFrame !== this.view.webContents.mainFrame) return
+      this.vscodeSettingsSync.stop()
+      onFailure(
+        'Unable to load host extension enablement. Restore access to the host profile and retry.',
+      )
+    })
     this.view.webContents.ipc.on(
       'ade:settings-changed',
       (event, generation: unknown, content: unknown) => {

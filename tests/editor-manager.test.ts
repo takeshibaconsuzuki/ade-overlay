@@ -23,7 +23,10 @@ class Page implements EditorPage {
   readonly loading = deferred<void>()
   urls: string[] = []
   disposed = false
-  constructor(readonly crash: () => void) {}
+  constructor(readonly fail: (message: string) => void) {}
+  crash(): void {
+    this.fail('The VS Code page closed unexpectedly. Retry to reopen it.')
+  }
   load(url: string): Promise<void> {
     this.urls.push(url)
     return this.loading.promise
@@ -43,8 +46,8 @@ class Host implements EditorHost {
   showAndFocusWindow(): void {
     this.shown++
   }
-  createPage(_key: string, crash: () => void): Page {
-    const page = new Page(crash)
+  createPage(_key: string, onFailure: (message: string) => void): Page {
+    const page = new Page(onFailure)
     this.pages.push(page)
     return page
   }
@@ -185,6 +188,50 @@ test('startup and initial navigation failures need explicit retry', async () => 
   assert.match(host.state.error!, /closed unexpectedly/)
   await manager.close()
 })
+
+for (const loaded of [false, true]) {
+  test(`page initialization failure ${loaded ? 'after' : 'before'} navigation uses the existing retry flow`, async () => {
+    const host = new Host()
+    let ensures = 0
+    const manager = new EditorWindowManager(
+      host,
+      {
+        ensure: async () => {
+          ensures++
+        },
+      },
+      'ws://localhost/rpc',
+    )
+    manager.updateWorktrees([running(a)])
+    await manager.open(a)
+    const failedPage = host.pages[0]
+    if (loaded) {
+      failedPage.loading.resolve()
+      await setImmediate()
+    }
+    const message = 'Unable to load host extension enablement.'
+    failedPage.fail(message)
+    failedPage.loading.resolve()
+    await setImmediate()
+    manager.updateWorktrees([running(a)])
+    assert.equal(host.current, undefined)
+    assert.equal(host.state.error, message)
+    assert.equal(host.state.canRetry, true)
+    assert.equal(host.pages.length, 1, 'failure waits for an explicit retry')
+
+    await manager.retry()
+    assert.equal(ensures, 2)
+    assert.equal(failedPage.disposed, true)
+    const replacement = host.pages[1]
+    assert.equal(replacement.urls[0], failedPage.urls[0])
+    replacement.loading.resolve()
+    await setImmediate()
+    failedPage.fail('stale failure')
+    assert.equal(host.current, replacement)
+    assert.equal(host.state.error, undefined)
+    await manager.close()
+  })
+}
 
 for (const loaded of [false, true]) {
   for (const change of ['stopped', 'starting', 'route'] as const) {

@@ -1,30 +1,29 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type {
-  AdeHandle,
-  AdeWorkbenchGlobal,
+import { attachExtensionEnablement } from './vscode-extension-enablement'
+import {
+  installAdeHandle,
+  type AdeHandle,
+  type AdeWorkbenchGlobal,
 } from '../../../shared/vscode-ade-handle'
 
-// Attach the narrow notification callback to the workbench's handle without creating another global. The callback is proxied across context isolation; services remain in the workbench.
-void contextBridge
-  .executeInMainWorld({
-    func: async (
-      changed: NonNullable<AdeHandle['vscodeSettings']>['changed'],
-    ) => {
-      const scope = globalThis as unknown as AdeWorkbenchGlobal
-      const deadline = Date.now() + 20_000
-      while (typeof scope.getAdeHandle !== 'function') {
-        if (Date.now() >= deadline)
-          throw new Error('VS Code handle did not become ready')
-        await new Promise<void>((resolve) => setTimeout(resolve, 25))
-      }
-      scope.getAdeHandle().vscodeSettings = { changed }
+contextBridge.executeInMainWorld({ func: installAdeHandle })
+contextBridge.executeInMainWorld({
+  func: attachExtensionEnablement,
+  args: [
+    () => ipcRenderer.invoke('ade:disabled-extensions'),
+    () => ipcRenderer.send('ade:startup-failed'),
+  ],
+})
+
+// Callbacks cross context isolation; the handle and VS Code services stay in the page.
+contextBridge.executeInMainWorld({
+  func: (changed: NonNullable<AdeHandle['vscodeSettings']>['changed']) => {
+    const scope = globalThis as unknown as AdeWorkbenchGlobal
+    scope.adeHandle.vscodeSettings = { changed }
+  },
+  args: [
+    (generation: number, content: string) => {
+      ipcRenderer.send('ade:settings-changed', generation, content)
     },
-    args: [
-      (generation: number, content: string) => {
-        ipcRenderer.send('ade:settings-changed', generation, content)
-      },
-    ],
-  })
-  .catch((error: unknown) =>
-    console.error('Unable to attach ADE settings notifications', error),
-  )
+  ],
+})

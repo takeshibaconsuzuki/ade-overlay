@@ -17,6 +17,7 @@ import type { VscodeServerFactory } from './vscode-server'
 import { VscodeProxy } from './vscode-proxy'
 import { VscodeSettingsStore, type SettingsStore } from './settings-store'
 import { ChatStore } from './chat-store'
+import { readDisabledExtensions } from './extension-enablement'
 import { NodeProcessProbe } from './process-probe'
 import type { ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
@@ -136,6 +137,8 @@ export async function startServer(
       {
         getChats: () => chats.snapshot,
         getServerInfo: () => ({ name: APP_NAME }),
+        getDisabledExtensions: async () =>
+          readDisabledExtensions(options.vscode.profileDatabase),
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
         ensureVscodeServer: (path) => {

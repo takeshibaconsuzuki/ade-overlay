@@ -56,9 +56,10 @@ app.whenReady().then(() => {
     globalShortcut.unregister(pickerShortcut)
   })
   let worktrees: Worktree[] = []
-  const editorHost = new ElectronEditorWindow({
-    writeSettings: (content) => server.rpc.writeSettings(content),
-  })
+  const editorHost = new ElectronEditorWindow(
+    { writeSettings: (content) => server.rpc.writeSettings(content) },
+    () => server.rpc.getDisabledExtensions(),
+  )
   const serverUrl = process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL
   const editor = new EditorWindowManager(
     editorHost,

@@ -55,7 +55,9 @@ void app.whenReady().then(async () => {
       await wait(
         async () =>
           !page.isLoading() &&
-          (await page.executeJavaScript('typeof getAdeHandle === "function"')),
+          (await page.executeJavaScript(
+            'globalThis.adeHandle?.workbenchReady',
+          )),
         'workbench ready',
       )
       return page
@@ -67,7 +69,7 @@ void app.whenReady().then(async () => {
     )
     const command = (page, id, ...args) =>
       page.executeJavaScript(
-        `getAdeHandle().get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
+        `adeHandle.get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
       )
     const marker = 'UNSAVED-LIFECYCLE-'
     const restored = (page) =>

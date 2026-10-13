@@ -56,6 +56,7 @@ test('configured paths resolve relative to the config file and preserve absolute
       vscode: {
         extensionsDirectory: './extensions',
         settingsFile: '../profile/settings.json',
+        profileDatabase: '../profile/globalStorage/state.vscdb',
       },
     }),
   )
@@ -67,6 +68,10 @@ test('configured paths resolve relative to the config file and preserve absolute
     vscode: {
       extensionsDirectory: join(dirname(path), 'extensions'),
       settingsFile: join(dirname(path), '../profile/settings.json'),
+      profileDatabase: join(
+        dirname(path),
+        '../profile/globalStorage/state.vscdb',
+      ),
     },
   }
   const defaults = serverOptionsSchema.parse({})
@@ -102,6 +107,7 @@ test('schema rejects invalid values and unknown config keys', () => {
     { vscode: null },
     { vscode: { extensionsDirectory: ' ' } },
     { vscode: { settingsFile: '' } },
+    { vscode: { profileDatabase: ' ' } },
     { vscode: { profile: 'unknown' } },
   ]) {
     assert.throws(

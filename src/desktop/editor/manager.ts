@@ -16,8 +16,8 @@ export interface EditorPage {
 export interface EditorHost {
   // Creates or restores the native window, updates its title, and brings it to the foreground.
   showAndFocusWindow(title: string): void
-  // Creates a hidden page retained until explicitly disposed. Reports renderer crashes to its owner.
-  createPage(key: string, onCrash: () => void): EditorPage
+  // Creates a hidden page retained until explicitly disposed. Reports page failures to its owner.
+  createPage(key: string, onFailure: (message: string) => void): EditorPage
   // Selects a page, or the loading/error UI when absent. Does not reveal or raise a hidden window.
   setContent(page: EditorPage | undefined, state: EditorState): void
   // Disposes the window and its retained content.
@@ -214,12 +214,9 @@ export class EditorWindowManager {
       entry.state = 'loadingPage'
       const page = this.host.createPage(
         `${this.origin.origin}:${entry.worktree.path}`,
-        () => {
+        (message) => {
           if (entry.page !== page) return
-          this.fail(
-            entry,
-            'The VS Code page closed unexpectedly. Retry to reopen it.',
-          )
+          this.fail(entry, message)
         },
       )
       entry.page = page

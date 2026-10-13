@@ -98,7 +98,7 @@ test('installation is verified and shared, and a new runtime uses the cache offl
   const browserDirectory = join(a.entrypoint, '..', 'vs/code/browser/workbench')
   assert.match(
     await readFile(join(browserDirectory, 'workbench.js'), 'utf8'),
-    /globalThis.getAdeHandle/,
+    /globalThis.adeHandle/,
   )
   assert.match(
     await readFile(join(browserDirectory, 'workbench.html'), 'utf8'),
