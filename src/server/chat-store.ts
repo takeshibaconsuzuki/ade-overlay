@@ -54,13 +54,25 @@ export class ChatStore {
       if (result.status === 'rejected') throw result.reason
       const incoming = chatSchema.parse(result.value)
       const id = `${incoming.providerId}:${incoming.sessionId}`
+      const previous = this.chats.get(id)
       const chat = chatSchema.parse({
-        ...this.chats.get(id),
+        ...previous,
         ...Object.fromEntries(
           Object.entries(incoming).filter(([, value]) => value !== undefined),
         ),
       })
       this.chats.set(id, chat)
+      log.info(
+        {
+          providerId: chat.providerId,
+          sessionId: chat.sessionId,
+          ownerPid: chat.pid,
+          worktreePath: chat.worktreePath,
+          status: chat.status,
+          previousStatus: previous?.status,
+        },
+        previous ? 'Chat updated' : 'Chat registered',
+      )
       this.onChanged?.(this.snapshot)
     })
     // A failed report rejects its caller without blocking later reports.
@@ -77,6 +89,15 @@ export class ChatStore {
         alive.set(chat.pid, this.processes.isAlive(chat.pid))
       if (!alive.get(chat.pid)) {
         this.chats.delete(id)
+        log.info(
+          {
+            providerId: chat.providerId,
+            sessionId: chat.sessionId,
+            ownerPid: chat.pid,
+            worktreePath: chat.worktreePath,
+          },
+          'Chat purged after owner process exited',
+        )
         changed = true
       }
     }
@@ -84,6 +105,8 @@ export class ChatStore {
   }
 
   close(): void {
+    if (!this.closed)
+      log.info({ chatCount: this.chats.size }, 'Chat store closing')
     this.closed = true
     this.onChanged = undefined
     clearInterval(this.timer)

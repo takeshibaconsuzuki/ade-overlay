@@ -191,6 +191,10 @@ export async function startServer(
       },
     )
     for (const provider of providers) await provider.install()
+    log.info(
+      { providerIds: providers.map((provider) => provider.id) },
+      'Chat hooks installed',
+    )
   } catch (error) {
     await close()
     throw error
