@@ -2,6 +2,13 @@
 export const workbenchFixture = `
 var cK={serviceIds:new Map([['storageService',Symbol('storageService')]])};
 var storage={},tracker={},invocations=0;
+var me=cK.serviceIds.get('storageService');
+var TLo=async()=>{},ke=()=>{};
+globalThis.browserMain={
+ initServices:async()=>({serviceCollection:{get:()=>storage},logService:{}}),
+ createWorkbench(){return {startup(){globalThis.started=true;globalThis.start()}}},
+ async open(){let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);t.startup()}
+};
 var g={invokeFunction(callback){
   invocations++;
   let valid=true;

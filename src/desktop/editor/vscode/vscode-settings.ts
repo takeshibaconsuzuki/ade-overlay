@@ -30,12 +30,12 @@ export async function applyVscodeSettings(
 ): Promise<void> {
   const scope = globalThis as unknown as AdeWorkbenchGlobal
   const deadline = Date.now() + 20_000
-  while (!scope.getAdeHandle?.().vscodeSettings) {
+  while (!scope.adeHandle?.workbenchReady || !scope.adeHandle.vscodeSettings) {
     if (Date.now() >= deadline)
       throw new Error('VS Code settings services did not become ready')
     await new Promise<void>((resolve) => setTimeout(resolve, 25))
   }
-  const handle = scope.getAdeHandle()
+  const handle = scope.adeHandle
   const settings = handle.vscodeSettings!
   if (!settings.apply) {
     const profiles = handle.get(

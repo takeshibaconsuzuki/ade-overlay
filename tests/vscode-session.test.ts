@@ -46,6 +46,7 @@ class Session {
     } satisfies SessionServices.WorkingCopyBackupTracker,
   }
   readonly handle: AdeHandle = {
+    workbenchReady: true,
     get: (id) => this.services[id as keyof typeof this.services],
   }
   // Drive the page's polling timer explicitly; native operations retain ownership of the map.
@@ -53,7 +54,7 @@ class Session {
   settled = false
   start(): Promise<AggregateError | undefined> {
     return runInNewContext(`(${persistVscodeSession.toString()})()`, {
-      getAdeHandle: () => this.handle,
+      adeHandle: this.handle,
       setTimeout: (callback: () => void) => {
         this.tick = callback
       },

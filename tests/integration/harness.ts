@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { copyFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import electron from 'electron'
 import treeKill from 'tree-kill'
 import { stringify } from 'yaml'
@@ -17,6 +18,12 @@ export async function startIntegrationServer(
   directory: string,
   repos: string[],
 ) {
+  const profileDatabase = join(directory, 'state.vscdb')
+  const database = new DatabaseSync(profileDatabase)
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)',
+  )
+  database.close()
   const config = join(directory, 'server.yaml')
   await writeFile(
     config,
@@ -25,6 +32,7 @@ export async function startIntegrationServer(
       port: 0,
       projects: repos.map((mainWorktreePath) => ({ mainWorktreePath })),
       vscode: {
+        profileDatabase,
         settingsFile: join(directory, 'settings.json'),
         extensionsDirectory: join(directory, 'extensions'),
       },

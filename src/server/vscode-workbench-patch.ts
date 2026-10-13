@@ -2,34 +2,45 @@ import { readFile, rename, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
-// Keep this patch limited to exposing references. Desktop code owns the behavior built on them.
+// Expose references and an awaited startup hook. Desktop code owns their behavior.
 // Minified identifiers are specific to the pinned distribution and must be checked on upgrades.
 const anchor =
   'let C;return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}'
 const bridge = `let C;
-class AdeHandle {
-  get(id) {
-    const serviceId = cK.serviceIds.get(id);
-    if (serviceId) return g.invokeFunction(accessor => accessor.get(serviceId));
-    return RIe.INSTANCE.getWorkbenchContribution(id);
-  }
-}
-const adeHandle = new AdeHandle();
-globalThis.getAdeHandle = () => adeHandle;
+const adeHandle = globalThis.adeHandle;
+adeHandle.get = (id) => {
+  const serviceId = cK.serviceIds.get(id);
+  if (serviceId) return g.invokeFunction(accessor => accessor.get(serviceId));
+  return RIe.INSTANCE.getWorkbenchContribution(id);
+};
+adeHandle.workbenchReady = true;
 return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}`
+const startupAnchor =
+  ']),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
+const startupBridge =
+  ']);await globalThis.adeHandle.initializeExtensions(e.serviceCollection.get(me));let t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
 const marker = '/* ADE workbench handle */'
 
 // Accepts either the pinned original or our complete patch; partial/unknown patches fail closed.
 export function patchVscodeWorkbench(source: string): string {
   if (source.endsWith(marker)) {
-    if (source.split(bridge).length === 2) return source
+    if (
+      source.split(bridge).length === 2 &&
+      source.split(startupBridge).length === 2
+    )
+      return source
     throw new Error('The cached ADE workbench patch is incomplete')
   }
-  if (source.split(anchor).length !== 2)
+  if (
+    source.split(anchor).length !== 2 ||
+    source.split(startupAnchor).length !== 2
+  )
     throw new Error(
       'VS Code workbench does not match the ADE patch; check the pinned distribution',
     )
-  source = source.replace(anchor, () => bridge)
+  source = source
+    .replace(anchor, () => bridge)
+    .replace(startupAnchor, () => startupBridge)
   return `${source}\n${marker}`
 }
 
@@ -45,7 +56,10 @@ export async function prepareVscodeWorkbench(directory: string): Promise<void> {
   const htmlPath = join(root, 'workbench.html')
   const html = await readFile(htmlPath, 'utf8')
   const scriptUrl = '/out/vs/code/browser/workbench/workbench.js'
-  const version = createHash('sha256').update(bridge).digest('hex').slice(0, 16)
+  const version = createHash('sha256')
+    .update(bridge + startupBridge)
+    .digest('hex')
+    .slice(0, 16)
   const versionedUrl = `${scriptUrl}?ade=${version}`
   if (html.split(`${versionedUrl}"`).length === 2) return
   if (html.split(`${scriptUrl}"`).length !== 2)

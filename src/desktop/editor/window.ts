@@ -2,6 +2,7 @@ import { BrowserWindow, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { EDITOR_STATE_CHANGED, type EditorState } from './api'
 import type { EditorHost, EditorPage } from './manager'
+import type { ExtensionIdentifier } from '../../shared/api'
 import { ElectronEditorPage } from './vscode/page'
 import type { VscodeSettingsServer } from './vscode/vscode-settings-sync'
 import { isVscodeSettingsDocument } from '../../shared/vscode-utils'
@@ -13,7 +14,12 @@ export class ElectronEditorWindow implements EditorHost {
   private state: EditorState = { title: 'VS Code', canRetry: false }
   private vscodeSettingsContent: string | null = null
 
-  constructor(private readonly vscodeSettingsServer: VscodeSettingsServer) {}
+  constructor(
+    private readonly vscodeSettingsServer: VscodeSettingsServer,
+    private readonly readDisabledExtensions: () => Promise<
+      ExtensionIdentifier[]
+    >,
+  ) {}
 
   receiveVscodeSettings(content: string | null): void {
     if (content !== null && !isVscodeSettingsDocument(content)) return
@@ -66,8 +72,13 @@ export class ElectronEditorWindow implements EditorHost {
     this.current?.view.webContents.focus()
   }
 
-  createPage(key: string, onCrash: () => void): EditorPage {
-    const page = new ElectronEditorPage(key, onCrash, this.vscodeSettingsServer)
+  createPage(key: string, onFailure: (message: string) => void): EditorPage {
+    const page = new ElectronEditorPage(
+      key,
+      onFailure,
+      this.vscodeSettingsServer,
+      this.readDisabledExtensions,
+    )
     page.vscodeSettingsSync.receive(this.vscodeSettingsContent)
     this.pages.add(page)
     this.window!.contentView.addChildView(page.view)

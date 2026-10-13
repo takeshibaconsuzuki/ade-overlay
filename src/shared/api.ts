@@ -44,6 +44,11 @@ export interface VscodeServerStatus {
   browserPath?: string
 }
 
+export interface ExtensionIdentifier {
+  id: string
+  uuid?: string
+}
+
 export interface ServerMethods {
   // Keys are provider ID + ":" + session ID; sessions can share worktrees and processes.
   getChats(): Record<string, Chat>
@@ -57,6 +62,8 @@ export interface ServerMethods {
   stopVscodeServer(path: string): void
   deleteWorktree(path: string): void
   clearWorktreeError(path: string, errorId: string): void
+  // Fresh host profile snapshot for each editor startup. Rejects when unavailable.
+  getDisabledExtensions(): Promise<ExtensionIdentifier[]>
   writeSettings(content: string): Promise<void>
 }
 

@@ -36,20 +36,18 @@ void app.whenReady().then(async () => {
     await wait(
       async () =>
         !page.isLoading() &&
-        (await page.executeJavaScript(
-          'typeof globalThis.getAdeHandle === "function"',
-        )),
+        (await page.executeJavaScript('globalThis.adeHandle?.workbenchReady')),
       'workbench API',
     )
     // Only the disposable fixture workspace is trusted; no user profile is used.
     await page.executeJavaScript(
-      'getAdeHandle().get("workspaceTrustManagementService").setWorkspaceTrust(true)',
+      'adeHandle.get("workspaceTrustManagementService").setWorkspaceTrust(true)',
     )
     const command = async (id, ...args) => {
       console.log('COMMAND', id)
       return Promise.race([
         page.executeJavaScript(
-          `globalThis.getAdeHandle().get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
+          `globalThis.adeHandle.get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
         ),
         delay(12000).then(() => {
           throw new Error(`command timed out ${id}`)

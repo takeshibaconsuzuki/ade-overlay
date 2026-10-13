@@ -20,6 +20,11 @@ export const vscodeOptionsSchema = z.strictObject({
     .trim()
     .min(1)
     .default(join(home, '.vscode', 'extensions')),
+  profileDatabase: z
+    .string()
+    .trim()
+    .min(1)
+    .default(join(configHome, 'Code', 'User', 'globalStorage', 'state.vscdb')),
   settingsFile: z
     .string()
     .trim()
@@ -57,6 +62,10 @@ export async function optionsFromFile(path: string): Promise<ServerOptions> {
     options.vscode.extensionsDirectory = resolve(
       directory,
       options.vscode.extensionsDirectory,
+    )
+    options.vscode.profileDatabase = resolve(
+      directory,
+      options.vscode.profileDatabase,
     )
     options.vscode.settingsFile = resolve(
       directory,

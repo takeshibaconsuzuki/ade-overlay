@@ -20,7 +20,7 @@ export declare namespace SessionServices {
 // Serialized into the VS Code page by Electron. Keep this function self-contained: imports
 // and closures from the main process are unavailable in the page's JavaScript context.
 export async function persistVscodeSession(): Promise<void> {
-  const handle = (globalThis as unknown as AdeWorkbenchGlobal).getAdeHandle()
+  const handle = (globalThis as unknown as AdeWorkbenchGlobal).adeHandle
   const storage = handle.get('storageService') as SessionServices.StorageService
   const backups = handle.get(
     'workingCopyBackupService',
