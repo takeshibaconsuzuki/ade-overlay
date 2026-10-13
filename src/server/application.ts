@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import type { BirpcReturn } from 'birpc'
 import type {
   Chat,
@@ -21,7 +22,6 @@ import { readDisabledExtensions } from './extension-enablement'
 import { NodeProcessProbe } from './process-probe'
 import type { ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
-import { MAX_CHAT_DESCRIPTION_LENGTH } from './constants'
 import { pathKey } from './path-key'
 
 const log = logger.child({ component: 'server' })
@@ -53,31 +53,30 @@ export async function startServer(
     client: BirpcReturn<ExtensionClientMethods, ServerMethods>,
     snapshot: Record<string, Chat>,
   ) => {
-    // Sidebar descriptions are previews; keep full reports in the registry.
     // Accepted limitation: the aggregate snapshot can still exceed MAX_RPC_PAYLOAD_BYTES,
     // causing extension reconnect loops until the registry shrinks. We do not expect
     // enough simultaneous chats with large descriptions to reach that limit; aggregate
     // budgeting and chunking are intentionally out of scope.
-    const preview = Object.fromEntries(
-      Object.entries(snapshot).map(([id, chat]) => [
-        id,
-        {
-          ...chat,
-          description:
-            chat.description === undefined
-              ? undefined
-              : Array.from(chat.description)
-                  .slice(0, MAX_CHAT_DESCRIPTION_LENGTH)
-                  .join(''),
-        },
-      ]),
-    )
-    void client.chatsChanged.asEvent(preview).catch((error: unknown) => {
+    void client.chatsChanged.asEvent(snapshot).catch((error: unknown) => {
       if (!closing) log.warn({ err: error }, 'Failed to send chats to client')
     })
   }
   chats.setOnChangedListener((snapshot) => {
     for (const client of extensions) sendChats(client, snapshot)
+  })
+  chats.setOnTurnFinishedListener((chat) => {
+    for (const client of desktops) {
+      void client.chatTurnFinished
+        .asEvent(
+          chat.title,
+          basename(chat.worktreePath),
+          chat.description ?? '',
+        )
+        .catch((error: unknown) => {
+          if (!closing)
+            log.warn({ err: error }, 'Failed to send chat turn notification')
+        })
+    }
   })
 
   const sendSettings = (

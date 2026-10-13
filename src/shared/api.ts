@@ -86,6 +86,12 @@ export interface ClientMethods {
 
 export interface DesktopClientMethods extends ClientMethods {
   getClientInfo(): ClientInfo & { kind: 'desktop' }
+  // A chat changed from working to idle.
+  chatTurnFinished(
+    title: string,
+    worktreeBasename: string,
+    description: string,
+  ): void
   // Selects the worktree and acknowledges startup; page loading completes asynchronously.
   openWorktree(path: string): Promise<void>
   // Complete authoritative snapshot, also sent on connection. May precede command acknowledgment.
