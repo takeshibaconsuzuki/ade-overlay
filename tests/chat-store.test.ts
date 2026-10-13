@@ -160,7 +160,7 @@ async function upsert(
   })
 }
 
-test('provider namespaces isolate identical session IDs and only purge removes chats', async (t) => {
+test('provider namespaces isolate identical session IDs', async (t) => {
   const processes = new Processes()
   const store = new ChatStore(processes, [
     new TestChatProvider('first'),
@@ -252,10 +252,10 @@ test('failed reports do not bypass preceding reads or block subsequent merges', 
   const readReport = provider.readReport.bind(provider)
   t.mock.method(provider, 'readReport', async (value: unknown) => {
     const incoming = await readReport(value)
-    if (incoming.description === 'Delayed prompt') await gate.promise
-    if (incoming.description === 'Failure')
+    if (incoming.chat.description === 'Delayed prompt') await gate.promise
+    if (incoming.chat.description === 'Failure')
       throw new Error('Metadata unavailable')
-    if (incoming.status === 'idle') readCompleted.resolve()
+    if (incoming.chat.status === 'idle') readCompleted.resolve()
     return incoming
   })
   const first = upsert(store, 'session', {
