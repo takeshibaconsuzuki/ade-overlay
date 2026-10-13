@@ -11,6 +11,8 @@ export interface WorktreeInfo {
 export const chatSchema = z.strictObject({
   providerId: z.string().trim().min(1),
   sessionId: z.string().trim().min(1),
+  // Present for chats launched in an ADE terminal; inherited across session changes.
+  terminalId: z.uuid().optional(),
   worktreePath: z.string().min(1),
   title: z.string(),
   description: z.string().optional(),
@@ -25,6 +27,15 @@ export const chatSchema = z.strictObject({
 })
 
 export type Chat = z.infer<typeof chatSchema>
+
+export const chatTerminalLaunchSchema = z.strictObject({
+  worktreePath: z.string().min(1),
+  terminalId: z.uuid(),
+  shellPath: z.string().min(1),
+  shellArgs: z.array(z.string()),
+})
+
+export type ChatTerminalLaunch = z.infer<typeof chatTerminalLaunchSchema>
 
 export interface Worktree extends WorktreeInfo {
   mainWorktreePath: string
@@ -52,9 +63,11 @@ export interface ExtensionIdentifier {
 export interface ServerMethods {
   // Keys are provider ID + ":" + session ID; sessions can share worktrees and processes.
   getChats(): Record<string, Chat>
-  // Opens a live chat's worktree in the connected desktop. Rejects if no desktop
-  // is connected or the destination is ambiguous because several are connected.
+  // Opens a live chat's worktree and focuses its ADE terminal when available. Rejects if no desktop
+  // is connected or the destination is ambiguous because several are connected. Acknowledges
+  // startup; terminal focus is retried until ready, superseded, or expired.
   openChat(id: string): Promise<void>
+  openChatTerminal(options: ChatTerminalLaunch): Promise<void>
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   // Lifecycle commands acknowledge acceptance, not completion. Validation errors
@@ -94,6 +107,10 @@ export interface DesktopClientMethods extends ClientMethods {
   ): void
   // Selects the worktree and acknowledges startup; page loading completes asynchronously.
   openWorktree(path: string): Promise<void>
+  // Launches in an already open worktree's shared, locked chat group.
+  openChatTerminal(options: ChatTerminalLaunch): Promise<void>
+  // Targets the worktree's selected editor. False allows retries during startup and restoration.
+  focusChatTerminal(worktreePath: string, terminalId: string): Promise<boolean>
   // Complete authoritative snapshot, also sent on connection. May precede command acknowledgment.
   worktreesChanged(worktrees: Worktree[]): void
   // A complete host document is sent on every connection and change. null suspends sync.

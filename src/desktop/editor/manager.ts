@@ -1,10 +1,12 @@
-import type { Worktree } from '../../shared/api'
+import type { ChatTerminalLaunch, Worktree } from '../../shared/api'
 import type { EditorState } from './api'
 import { logger } from '../../shared/logger'
 
 const log = logger.child({ component: 'editor-manager' })
 
 export interface EditorPage {
+  openChatTerminal(options: ChatTerminalLaunch): Promise<void>
+  focusChatTerminal(id: string): Promise<boolean>
   // Resolves when initial navigation completes; VS Code owns the subsequent connection lifecycle.
   load(url: string): Promise<void>
   // Persists the session before disposal. Must reject within a bounded time if the page cannot respond.
@@ -103,6 +105,25 @@ export class EditorWindowManager {
     if (!this.selected || !this.canRetry(this.selected))
       return Promise.resolve()
     return this.open(this.selected.worktree)
+  }
+
+  async openChatTerminal(options: ChatTerminalLaunch): Promise<void> {
+    const entry = this.entries.get(options.worktreePath)
+    if (entry?.state !== 'loaded' || !entry.page)
+      throw new Error('The chat worktree is not open')
+    await entry.page.openChatTerminal(options)
+  }
+
+  async focusChatTerminal(path: string, id: string): Promise<boolean> {
+    const entry = this.entries.get(path)
+    if (
+      this.closed ||
+      entry !== this.selected ||
+      entry?.state !== 'loaded' ||
+      !entry.page
+    )
+      return false
+    return entry.page.focusChatTerminal(id)
   }
 
   // Authoritative snapshots stop or remove pages in every client. Persistence is local

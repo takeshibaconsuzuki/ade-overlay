@@ -2,7 +2,15 @@ import { WebContentsView } from 'electron'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { EditorPage } from '../manager'
-import type { ExtensionIdentifier } from '../../../shared/api'
+import { FOCUS_CHAT_TERMINAL_COMMAND } from '../../../shared/constants'
+import type {
+  ChatTerminalLaunch,
+  ExtensionIdentifier,
+} from '../../../shared/api'
+import {
+  initializeChatTerminals,
+  openChatTerminal,
+} from './vscode-chat-terminals'
 import { persistVscodeSession } from './vscode-session'
 import { applyVscodeSettings } from './vscode-settings'
 import {
@@ -14,6 +22,7 @@ import {
 export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
   readonly view: WebContentsView
   readonly vscodeSettingsSync: VscodeSettingsSync
+  private chatTerminalsReady: Promise<void> | undefined
 
   constructor(
     key: string,
@@ -37,17 +46,31 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
     this.view.setVisible(false)
     this.view.webContents.on('render-process-gone', () => {
       this.vscodeSettingsSync.stop()
+      this.chatTerminalsReady = undefined
       onFailure('The VS Code page closed unexpectedly. Retry to reopen it.')
     })
     this.view.webContents.on(
       'did-start-navigation',
       (_event, _url, isInPlace, isMainFrame) => {
-        if (isMainFrame && !isInPlace) this.vscodeSettingsSync.stop()
+        if (isMainFrame && !isInPlace) {
+          this.vscodeSettingsSync.stop()
+          this.chatTerminalsReady = undefined
+        }
       },
     )
-    this.view.webContents.on('did-finish-load', () =>
-      this.vscodeSettingsSync.start(),
-    )
+    this.view.webContents.on('did-finish-load', () => {
+      this.vscodeSettingsSync.start()
+      const ready = this.view.webContents.executeJavaScript(
+        `(${initializeChatTerminals.toString()})()`,
+      ) as Promise<void>
+      this.chatTerminalsReady = ready
+      void ready.catch(() => {
+        if (this.chatTerminalsReady === ready)
+          onFailure(
+            'Unable to initialize chat terminals. Retry to reopen the worktree.',
+          )
+      })
+    })
     this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     this.view.webContents.ipc.handle('ade:disabled-extensions', (event) => {
       if (event.senderFrame !== this.view.webContents.mainFrame)
@@ -57,6 +80,7 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
     this.view.webContents.ipc.on('ade:startup-failed', (event) => {
       if (event.senderFrame !== this.view.webContents.mainFrame) return
       this.vscodeSettingsSync.stop()
+      this.chatTerminalsReady = undefined
       onFailure(
         'Unable to load host extension enablement. Restore access to the host profile and retry.',
       )
@@ -94,7 +118,22 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
     }
   }
 
+  async openChatTerminal(options: ChatTerminalLaunch): Promise<void> {
+    if (!this.chatTerminalsReady) throw new Error('The workbench is not ready')
+    await this.chatTerminalsReady
+    await this.view.webContents.executeJavaScript(
+      `(${openChatTerminal.toString()})(${JSON.stringify(options)})`,
+    )
+  }
+
+  async focusChatTerminal(id: string): Promise<boolean> {
+    return this.view.webContents.executeJavaScript(
+      `globalThis.adeHandle?.workbenchReady ? adeHandle.get('commandService').executeCommand(${JSON.stringify(FOCUS_CHAT_TERMINAL_COMMAND)}, ${JSON.stringify(id)}) : false`,
+    )
+  }
+
   dispose(): void {
+    this.chatTerminalsReady = undefined
     this.vscodeSettingsSync.dispose()
     if (!this.view.webContents.isDestroyed())
       this.view.webContents.close({ waitForBeforeUnload: false })

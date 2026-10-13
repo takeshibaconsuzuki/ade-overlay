@@ -69,7 +69,11 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   const socket = new WebSocket(url)
   const snapshots: Record<string, Chat>[] = []
   const rpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(socket, {
-    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    getClientInfo: () => ({
+      kind: 'extension',
+      name: 'test',
+      version: '1',
+    }),
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
@@ -101,7 +105,11 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   const secondRpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(
     secondSocket,
     {
-      getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+      getClientInfo: () => ({
+        kind: 'extension',
+        name: 'test',
+        version: '1',
+      }),
       chatsChanged: (snapshot) => {
         secondSnapshots.push(snapshot)
       },

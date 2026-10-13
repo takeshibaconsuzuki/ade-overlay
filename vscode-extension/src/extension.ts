@@ -5,16 +5,31 @@ import type {
   ExtensionClientMethods,
   ServerMethods,
 } from '../../src/shared/api'
-import { DEFAULT_SERVER_URL } from '../../src/shared/constants'
+import {
+  DEFAULT_SERVER_URL,
+  FOCUS_CHAT_TERMINAL_COMMAND,
+} from '../../src/shared/constants'
 import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
 import type { ChatsMessage } from '../shared/api'
+import { ChatTerminals } from './chat-terminals'
+import { CodexTerminalProvider } from './providers/codex'
 
 let client: RpcClient<ServerMethods, ExtensionClientMethods> | undefined
 
 export function activate(context: vscode.ExtensionContext) {
-  const sidebar = new SidebarViewProvider(context.extensionUri)
+  const terminals = new ChatTerminals(context.workspaceState, {
+    openChatTerminal: async (options) => {
+      if (!client) throw new Error('ADE is not connected')
+      await client.rpc.openChatTerminal(options)
+    },
+  })
+  const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
+    terminals,
+    vscode.commands.registerCommand(FOCUS_CHAT_TERMINAL_COMMAND, (id: string) =>
+      terminals.focus(id),
+    ),
   )
   client = connectRpc<ServerMethods, ExtensionClientMethods>(
     process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL,
@@ -38,7 +53,10 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined
   private chats: Record<string, Chat> | undefined
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly terminals: ChatTerminals,
+  ) {}
 
   setChats(chats: Record<string, Chat> | undefined): void {
     this.chats = chats
@@ -55,6 +73,7 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Webview scripts restart after being hidden; each ready message gets the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'ready') this.sendSnapshot()
+      if (message?.type === 'startCodex') void this.startCodex()
       if (message?.type === 'openChat' && typeof message.id === 'string')
         void this.openChat(message.id)
     })
@@ -93,13 +112,23 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
 </html>`
   }
 
+  private async startCodex(): Promise<void> {
+    try {
+      await this.terminals.start(new CodexTerminalProvider())
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Unable to start Codex: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
   private async openChat(id: string): Promise<void> {
     try {
       if (!client) throw new Error('ADE is not connected')
       await client.rpc.openChat(id)
     } catch (error) {
       void vscode.window.showErrorMessage(
-        `Unable to switch worktrees: ${error instanceof Error ? error.message : String(error)}`,
+        `Unable to open chat: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

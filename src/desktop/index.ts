@@ -89,6 +89,10 @@ app.whenReady().then(() => {
         }).show()
       },
       openWorktree,
+      openChatTerminal: (options): Promise<void> =>
+        editor.openChatTerminal(options),
+      focusChatTerminal: (path, id): Promise<boolean> =>
+        editor.focusChatTerminal(path, id),
       worktreesChanged: (next) => {
         worktrees = next
         editor.updateWorktrees(next)

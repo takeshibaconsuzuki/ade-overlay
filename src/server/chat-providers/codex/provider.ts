@@ -126,6 +126,7 @@ export class CodexChatProvider implements ChatProvider {
       chat: {
         providerId: this.id,
         sessionId: report.session_id,
+        terminalId: report.terminalId,
         mtime,
         title,
         description:

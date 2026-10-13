@@ -7,7 +7,11 @@ import {
   type EditorPage,
 } from '../src/desktop/editor/manager'
 import type { EditorState } from '../src/desktop/editor/api'
-import type { VscodeServerStatus, Worktree } from '../src/shared/api'
+import type {
+  ChatTerminalLaunch,
+  VscodeServerStatus,
+  Worktree,
+} from '../src/shared/api'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -20,6 +24,15 @@ function deferred<T>() {
 }
 
 class Page implements EditorPage {
+  launches: ChatTerminalLaunch[] = []
+  focused: string[] = []
+  async focusChatTerminal(id: string): Promise<boolean> {
+    this.focused.push(id)
+    return true
+  }
+  async openChatTerminal(options: ChatTerminalLaunch): Promise<void> {
+    this.launches.push(options)
+  }
   readonly loading = deferred<void>()
   urls: string[] = []
   disposed = false
@@ -622,4 +635,62 @@ test('a stopped server remains unavailable while its worktree is being deleted',
   await manager.retry()
   assert.equal(starts, 2)
   await manager.close()
+})
+
+test('chat launches target the requested loaded page without changing worktree focus', async () => {
+  const host = new Host()
+  const manager = new EditorWindowManager(
+    host,
+    { ensure: async () => {} },
+    'ws://remote.example/rpc',
+  )
+  const launch: ChatTerminalLaunch = {
+    worktreePath: a.path,
+    terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
+    shellPath: 'codex',
+    shellArgs: [],
+  }
+  await assert.rejects(manager.openChatTerminal(launch), /not open/)
+  manager.updateWorktrees([running(a), running(b)])
+  await manager.open(a)
+  await assert.rejects(manager.openChatTerminal(launch), /not open/)
+  host.pages[0].loading.resolve()
+  await setImmediate()
+  await manager.open(b)
+  host.pages[1].loading.resolve()
+  await setImmediate()
+  await manager.openChatTerminal(launch)
+  assert.deepEqual(host.pages[0].launches, [launch])
+  assert.deepEqual(host.pages[1].launches, [])
+  assert.equal(host.current, host.pages[1])
+  await manager.close()
+  await assert.rejects(manager.openChatTerminal(launch), /not open/)
+})
+
+test('chat focus reaches only the selected ready worktree page', async () => {
+  const host = new Host()
+  const manager = new EditorWindowManager(
+    host,
+    { ensure: async () => {} },
+    'ws://remote.example/rpc',
+  )
+  assert.equal(await manager.focusChatTerminal(a.path, 'chat'), false)
+  manager.updateWorktrees([running(a), running(b)])
+  await manager.open(a)
+  assert.equal(await manager.focusChatTerminal(a.path, 'chat'), false)
+  host.pages[0].loading.resolve()
+  await setImmediate()
+  assert.equal(await manager.focusChatTerminal(a.path, 'chat-a'), true)
+  await manager.open(b)
+  assert.equal(await manager.focusChatTerminal(a.path, 'stale'), false)
+  assert.equal(await manager.focusChatTerminal(b.path, 'loading'), false)
+  host.pages[1].loading.resolve()
+  await setImmediate()
+  assert.equal(await manager.focusChatTerminal(b.path, 'chat-b'), true)
+  assert.deepEqual(host.pages[0].focused, ['chat-a'])
+  assert.deepEqual(host.pages[1].focused, ['chat-b'])
+  host.pages[1].crash()
+  assert.equal(await manager.focusChatTerminal(b.path, 'failed'), false)
+  await manager.close()
+  assert.equal(await manager.focusChatTerminal(b.path, 'closed'), false)
 })

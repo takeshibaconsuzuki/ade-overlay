@@ -1,9 +1,12 @@
+import type { ChatTerminalLaunch } from './api'
+
 // References remain in the workbench's JavaScript context; they cannot cross Electron IPC.
 export interface AdeHandle {
   // False until startup has installed the service lookup. Remains false if initialization fails.
   workbenchReady: boolean
   // Resolves a service or contribution. Throws before the workbench is ready or for unknown IDs.
   get(id: string): unknown
+  chatTerminals?: { open(options: ChatTerminalLaunch): Promise<void> }
   // Installed by the preload and awaited before workbench creation, then removed.
   initializeExtensions?(storage: {
     store(key: string, value: string, scope: 0, target: 1): void

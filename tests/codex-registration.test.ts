@@ -171,7 +171,10 @@ for (const { architecture, provider, executable } of scenarios) {
       : spawn('/bin/sh', ['-c', command], { stdio: 'inherit' });
     child.on('exit', code => { process.exitCode = code; });
   `
-      const env = { ...process.env }
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        ADE_TERMINAL_ID: 'bcf08308-3214-4d40-8a47-ea183fa95752',
+      }
       if (architecture !== process.arch) {
         // Exercise architecture selection on x64 CI; this does not emulate ARM hardware.
         const preload = join(directory, 'architecture.cjs')
@@ -203,6 +206,7 @@ for (const { architecture, provider, executable } of scenarios) {
         prompt: 'Unicode preserved: caf\u00e9 \u{1f680}',
         custom: { nested: [1, true, null] },
         pid: 1,
+        terminalId: 'payload-cannot-override-terminal',
       }
       owner.stdin.end(JSON.stringify(payload))
       const [code] = await once(owner, 'exit')
@@ -212,7 +216,9 @@ for (const { architecture, provider, executable } of scenarios) {
       assert.equal(code, 0, stderr)
       assert.equal(stdout, '')
       assert.equal(stderr, '')
-      assert.deepEqual(received, [{ ...payload, pid: owner.pid }])
+      assert.deepEqual(received, [
+        { ...payload, pid: owner.pid, terminalId: env.ADE_TERMINAL_ID },
+      ])
     },
   )
 }
