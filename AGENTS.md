@@ -32,7 +32,10 @@ eval "$(python scripts/bootstrap.py)"
 
 - `npm run dev`: start the development app.
 - `npm run dev:server`: start the development server.
+- `npm run package`: build a desktop installer for the current platform in `out/packages`.
 - `npm run lint:fix`: run lint with auto-fixes.
 - `npm run format`: format files.
 
 See `package.json` for other commands.
+
+Desktop packages connect to a separately running ADE server, using `ADE_SERVER_URL` when set. Packaging does not publish artifacts.

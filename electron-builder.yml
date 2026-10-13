@@ -1,0 +1,21 @@
+appId: dev.ade.overlay
+directories:
+  output: out/packages
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+win:
+  target: nsis
+mac:
+  target: dmg
+  category: public.app-category.developer-tools
+  identity: '-'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+linux:
+  target: AppImage
+  category: Development
