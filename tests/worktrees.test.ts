@@ -143,6 +143,7 @@ test(
             version: '1',
           }),
           openWorktree: async () => {},
+          chatTurnFinished: () => {},
           settingsChanged: () => {},
           worktreesChanged: (worktrees) => {
             updates.push(worktrees)

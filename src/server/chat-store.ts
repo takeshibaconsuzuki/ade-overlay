@@ -6,6 +6,7 @@ import {
   type ChatProvider,
 } from './chat-provider'
 import type { ProcessProbe } from './process-probe'
+import { MAX_CHAT_DESCRIPTION_LENGTH } from './constants'
 
 const log = logger.child({ component: 'chat-store' })
 // This is a live registry; a restarted server is repopulated by subsequent hooks.
@@ -15,6 +16,7 @@ export class ChatStore {
   private readonly timer: NodeJS.Timeout
   private closed = false
   private onChanged: ((snapshot: Record<string, Chat>) => void) | undefined
+  private onTurnFinished: ((chat: Chat) => void) | undefined
 
   constructor(
     private readonly processes: ProcessProbe,
@@ -41,6 +43,12 @@ export class ChatStore {
     listener: ((snapshot: Record<string, Chat>) => void) | undefined,
   ): void {
     this.onChanged = listener
+  }
+
+  setOnTurnFinishedListener(
+    listener: ((chat: Chat) => void) | undefined,
+  ): void {
+    this.onTurnFinished = listener
   }
 
   async report(providerId: string, value: unknown): Promise<void> {
@@ -76,6 +84,12 @@ export class ChatStore {
         }
         return
       }
+      // Store description previews so every consumer sees the same bounded text.
+      // Titles are expected to be short and intentionally remain untruncated.
+      if (incoming.description !== undefined)
+        incoming.description = Array.from(incoming.description)
+          .slice(0, MAX_CHAT_DESCRIPTION_LENGTH)
+          .join('')
       const chat = chatSchema.parse({
         ...previous,
         ...Object.fromEntries(
@@ -95,6 +109,8 @@ export class ChatStore {
         previous ? 'Chat updated' : 'Chat registered',
       )
       this.onChanged?.(this.snapshot)
+      if (previous?.status === 'working' && chat.status === 'idle')
+        this.onTurnFinished?.({ ...chat })
     })
     // A failed report rejects its caller without blocking later reports.
     this.pending = pending.catch(() => {})
@@ -130,6 +146,7 @@ export class ChatStore {
       log.info({ chatCount: this.chats.size }, 'Chat store closing')
     this.closed = true
     this.onChanged = undefined
+    this.onTurnFinished = undefined
     clearInterval(this.timer)
   }
 }

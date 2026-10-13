@@ -4,6 +4,7 @@ import {
   globalShortcut,
   ipcMain,
   dialog,
+  Notification,
 } from 'electron'
 import type {
   DesktopClientMethods,
@@ -33,6 +34,7 @@ const log = logger.child({ component: 'desktop' })
 let worktreePickerWindow: BrowserWindow | undefined
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') app.setAppUserModelId(APP_NAME)
   const pickerShortcut = 'CommandOrControl+Shift+Space'
   if (
     !globalShortcut.register(pickerShortcut, () => {
@@ -80,6 +82,12 @@ app.whenReady().then(() => {
         version: app.getVersion(),
       }),
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
+      chatTurnFinished: (title, worktreeBasename, description) => {
+        new Notification({
+          title,
+          body: `${worktreeBasename}\n${description.slice(0, 8_000)}`,
+        }).show()
+      },
       openWorktree,
       worktreesChanged: (next) => {
         worktrees = next

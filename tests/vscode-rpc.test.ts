@@ -114,6 +114,7 @@ test(
             version: '1',
           }),
           openWorktree: async () => {},
+          chatTurnFinished: () => {},
           settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next
