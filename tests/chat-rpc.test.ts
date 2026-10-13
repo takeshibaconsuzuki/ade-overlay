@@ -10,7 +10,7 @@ import WebSocket from 'ws'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
-import type { ChatProvider } from '../src/server/chat-provider'
+import type { ChatProvider, ChatReport } from '../src/server/chat-provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
 import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import type {
@@ -183,16 +183,29 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   )
   await post({ ...event, hook_event_name: 'SessionEnd', prompt: undefined })
   chats = await rpc.getChats()
-  assert.deepEqual(Object.keys(chats), ['codex:first', 'codex:second'])
-  assert.equal(chats['codex:first'].status, 'idle')
-  assert.equal(chats['codex:first'].description, 'Updated answer')
+  assert.deepEqual(Object.keys(chats), ['codex:second'])
+  assert.deepEqual(snapshots.at(-1), chats)
+  await secondRpc.getChats()
+  assert.deepEqual(secondSnapshots.at(-1), chats)
+  const notifications = snapshots.length
+  await post({ ...event, session_id: 'unseen', hook_event_name: 'SessionEnd' })
+  assert.deepEqual(await rpc.getChats(), chats)
+  assert.equal(snapshots.length, notifications)
+  // A missed resume hook does not prevent the next prompt from restoring the chat.
+  await post(event)
+  chats = await rpc.getChats()
+  assert.equal(chats['codex:first'].status, 'working')
+  assert.equal(chats['codex:first'].description, event.prompt)
+  assert.deepEqual(snapshots.at(-1), chats)
+  await secondRpc.getChats()
+  assert.deepEqual(secondSnapshots.at(-1), chats)
   await server.close()
   await assert.rejects(post(event))
 })
 
 class FailingProvider implements ChatProvider {
   readonly id = 'failing'
-  async readReport(): Promise<Chat> {
+  async readReport(): Promise<ChatReport> {
     throw new Error('Unexpected report')
   }
   async install(): Promise<void> {

@@ -60,15 +60,15 @@ test('Codex metadata matches resume names and previews, including saved renames'
       .join('\n') + '\n{unfinished',
   )
   const provider = new CodexChatProvider('unused', directory)
-  const title = async (session_id: string) =>
-    (
-      await provider.readReport({
-        session_id,
-        hook_event_name: 'SessionStart',
-        cwd: directory,
-        pid: 123,
-      })
-    ).title
+  const title = async (session_id: string) => {
+    const result = await provider.readReport({
+      session_id,
+      hook_event_name: 'SessionStart',
+      cwd: directory,
+      pid: 123,
+    })
+    return result.chat.title
+  }
   assert.equal(await title('saved'), 'Saved Codex title')
   assert.equal(await title('unnamed'), 'Initial request')
   assert.equal(await title('indexed'), 'Renamed session')
@@ -102,19 +102,23 @@ test('Codex provider reads the saved title and derives other metadata from the h
   }
   for (const [event, source, status] of [
     ['SessionStart', 'startup', 'idle'],
+    ['SessionStart', 'resume', 'idle'],
+    ['SessionStart', 'clear', 'idle'],
     ['UserPromptSubmit', undefined, 'working'],
     ['SessionStart', 'compact', 'working'],
     ['Stop', undefined, 'idle'],
     ['Interrupt', undefined, 'idle'],
     ['SessionEnd', undefined, 'idle'],
   ]) {
-    const chat = await provider.readReport({
+    const result = await provider.readReport({
       ...report,
       hook_event_name: event,
       source,
       prompt: event === 'UserPromptSubmit' ? 'Current prompt' : undefined,
       last_assistant_message: event === 'Stop' ? 'Latest answer' : undefined,
     })
+    assert.equal(result.shouldPurge, event === 'SessionEnd')
+    const { chat } = result
     assert.equal(chat.providerId, 'codex')
     assert.equal(chat.sessionId, 'session')
     assert.equal(chat.status, status)
@@ -132,7 +136,8 @@ test('Codex provider reads the saved title and derives other metadata from the h
   t.mock.method(Date, 'now', () => now)
   const pending = provider.readReport({ ...report, mtime: 1 })
   now = 200
-  assert.equal((await pending).mtime, 100)
+  const result = await pending
+  assert.equal(result.chat.mtime, 100)
   await assert.rejects(provider.readReport({ ...report, pid: -1 }))
   await assert.rejects(
     provider.readReport({ ...report, hook_event_name: 'Unknown' }),

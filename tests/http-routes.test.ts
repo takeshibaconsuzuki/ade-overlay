@@ -5,7 +5,7 @@ import { startRpcServer } from '../src/server/server'
 import { chatRoutes } from '../src/server/chat-routes'
 import { ChatStore } from '../src/server/chat-store'
 import { NodeProcessProbe } from '../src/server/process-probe'
-import type { Chat } from '../src/shared/api'
+import type { ChatReport } from '../src/server/chat-provider'
 import { TestChatProvider } from './fixtures/chat-provider'
 
 test('unrelated HTTP plugins use framework routing, parsing, validation and error handling', async (t) => {
@@ -65,7 +65,7 @@ test('unrelated HTTP plugins use framework routing, parsing, validation and erro
 })
 
 class FailingReportProvider extends TestChatProvider {
-  override async readReport(): Promise<Chat> {
+  override async readReport(): Promise<ChatReport> {
     throw new Error('Metadata unavailable')
   }
 }

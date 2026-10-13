@@ -9,9 +9,8 @@ import lockfile from 'proper-lockfile'
 import { simpleGit } from 'simple-git'
 import writeFileAtomic from 'write-file-atomic'
 import { z } from 'zod'
-import type { Chat } from '../../../shared/api'
 import { quotePosixArgument } from '../../../shared/shell'
-import type { ChatProvider } from '../../chat-provider'
+import type { ChatProvider, ChatReport } from '../../chat-provider'
 import { CODEX_CHAT_EVENTS, codexReportSchema } from './report'
 
 const marker = ' --ade-overlay'
@@ -95,9 +94,8 @@ export class CodexChatProvider implements ChatProvider {
           : {}),
         timeout: 3,
       }
-      // Accepted tradeoff: asynchronous reporting keeps Codex responsive, but reports
-      // can arrive out of source-event order and leave status stale until another report.
-      // The server applies receipt order; reporter timestamps cannot guarantee source order.
+      // Accepted tradeoff: asynchronous reports can arrive out of source-event order.
+      // Late reports can restore ended chats until another end report or owner exit.
       for (const event of CODEX_CHAT_EVENTS) {
         // Codex requires SessionEnd hooks to finish before closing the session.
         ;(hooks[event] ??= []).push({
@@ -112,7 +110,7 @@ export class CodexChatProvider implements ChatProvider {
     }
   }
 
-  async readReport(value: unknown): Promise<Chat> {
+  async readReport(value: unknown): Promise<ChatReport> {
     const mtime = Date.now()
     const report = codexReportSchema.parse(value)
     const [title, worktreePath] = await Promise.all([
@@ -124,19 +122,23 @@ export class CodexChatProvider implements ChatProvider {
         .catch(() => resolve(report.cwd)),
     ])
     return {
-      providerId: this.id,
-      sessionId: report.session_id,
-      mtime,
-      title,
-      description: report.prompt ?? report.last_assistant_message ?? undefined,
-      worktreePath,
-      pid: report.pid,
-      status:
-        report.hook_event_name === 'UserPromptSubmit' ||
-        (report.hook_event_name === 'SessionStart' &&
-          report.source === 'compact')
-          ? 'working'
-          : 'idle',
+      shouldPurge: report.hook_event_name === 'SessionEnd',
+      chat: {
+        providerId: this.id,
+        sessionId: report.session_id,
+        mtime,
+        title,
+        description:
+          report.prompt ?? report.last_assistant_message ?? undefined,
+        worktreePath,
+        pid: report.pid,
+        status:
+          report.hook_event_name === 'UserPromptSubmit' ||
+          (report.hook_event_name === 'SessionStart' &&
+            report.source === 'compact')
+            ? 'working'
+            : 'idle',
+      },
     }
   }
 

@@ -1,6 +1,10 @@
 import { chatSchema, type Chat } from '../shared/api'
 import { logger } from '../shared/logger'
-import { UnknownChatProviderError, type ChatProvider } from './chat-provider'
+import {
+  chatReportSchema,
+  UnknownChatProviderError,
+  type ChatProvider,
+} from './chat-provider'
 import type { ProcessProbe } from './process-probe'
 
 const log = logger.child({ component: 'chat-store' })
@@ -52,9 +56,26 @@ export class ChatStore {
     ]).then(([, result]) => {
       if (this.closed) throw new Error('Chat store closed')
       if (result.status === 'rejected') throw result.reason
-      const incoming = chatSchema.parse(result.value)
+      const { shouldPurge, chat: incoming } = chatReportSchema.parse(
+        result.value,
+      )
       const id = `${incoming.providerId}:${incoming.sessionId}`
       const previous = this.chats.get(id)
+      if (shouldPurge) {
+        log.info(
+          {
+            providerId: incoming.providerId,
+            sessionId: incoming.sessionId,
+            ownerPid: incoming.pid,
+          },
+          'Chat session ended',
+        )
+        if (previous?.pid === incoming.pid) {
+          this.chats.delete(id)
+          this.onChanged?.(this.snapshot)
+        }
+        return
+      }
       const chat = chatSchema.parse({
         ...previous,
         ...Object.fromEntries(
