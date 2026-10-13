@@ -132,24 +132,39 @@ app.whenReady().then(() => {
       throw new Error('Invalid sender')
     return server.rpc.stopVscodeServer(path)
   })
-  ipcMain.handle(WORKTREE_DELETE, async (event, path: string) => {
-    if (event.sender !== worktreePickerWindow?.webContents)
-      throw new Error('Invalid sender')
-    const worktree = worktrees.find((worktree) => worktree.path === path)
-    if (!worktree) throw new Error('Unknown worktree')
-    const { response } = await dialog.showMessageBox({
-      type: 'warning',
-      message: `Delete worktree ${worktree.basename}?`,
-      detail:
-        'Its VS Code server will stop and its directory will be removed. Worktrees with uncommitted changes will not be deleted.',
-      buttons: ['Cancel', 'Delete worktree'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-    })
-    if (response !== 1) return
-    await server.rpc.deleteWorktree(path)
-  })
+  ipcMain.handle(
+    WORKTREE_DELETE,
+    async (event, path: string, branchName?: string) => {
+      if (event.sender !== worktreePickerWindow?.webContents)
+        throw new Error('Invalid sender')
+      const worktree = worktrees.find((worktree) => worktree.path === path)
+      if (!worktree) throw new Error('Unknown worktree')
+      if (branchName !== undefined && branchName !== worktree.branchName)
+        throw new Error('Worktree branch changed; refresh and try again')
+      const action =
+        branchName === undefined
+          ? 'Delete worktree'
+          : 'Delete worktree and branch'
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        message:
+          branchName === undefined
+            ? `Delete worktree ${worktree.basename}?`
+            : `Delete worktree ${worktree.basename} and branch ${branchName}?`,
+        detail:
+          'Its VS Code server will stop and its directory will be removed. Worktrees with uncommitted changes will not be deleted.' +
+          (branchName === undefined
+            ? ''
+            : ' Its local branch will then be deleted if Git considers it safely merged. If branch deletion fails, the worktree will still be removed and the error will appear on the main worktree.'),
+        buttons: ['Cancel', action],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      })
+      if (response !== 1) return
+      await server.rpc.deleteWorktree(path, branchName)
+    },
+  )
   let quitting: Promise<void> | undefined
   let readyToQuit = false
   app.on('before-quit', (event) => {

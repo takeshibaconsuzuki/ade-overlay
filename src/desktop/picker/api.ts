@@ -36,5 +36,5 @@ export interface PickerApi {
   openWorktree(path: string): Promise<void>
   clearWorktreeError(path: string, errorId: string): Promise<void>
   stopVscodeServer(path: string): Promise<void>
-  deleteWorktree(path: string): Promise<void>
+  deleteWorktree(path: string, branchName?: string): Promise<void>
 }

@@ -155,7 +155,8 @@ export async function startServer(
           )
         },
         stopVscodeServer: (path) => worktrees.stopVscodeServer(path),
-        deleteWorktree: (path) => worktrees.deleteWorktree(path),
+        deleteWorktree: (path, branchName) =>
+          worktrees.deleteWorktree(path, branchName),
         clearWorktreeError: (path, errorId) =>
           worktrees.clearWorktreeError(path, errorId),
       },

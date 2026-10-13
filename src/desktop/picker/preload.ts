@@ -42,7 +42,8 @@ const api: PickerApi = {
   clearWorktreeError: (path, errorId) =>
     ipcRenderer.invoke(WORKTREE_CLEAR_ERROR, path, errorId),
   stopVscodeServer: (path) => ipcRenderer.invoke(VSCODE_SERVER_STOP, path),
-  deleteWorktree: (path) => ipcRenderer.invoke(WORKTREE_DELETE, path),
+  deleteWorktree: (path, branchName) =>
+    ipcRenderer.invoke(WORKTREE_DELETE, path, branchName),
 }
 
 contextBridge.exposeInMainWorld('picker', api)

@@ -177,7 +177,25 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
                   )
                 }
               >
-                Delete
+                Delete worktree
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                color="red"
+                disabled={
+                  unavailable ||
+                  worktree.path === worktree.mainWorktreePath ||
+                  !worktree.branchName
+                }
+                onSelect={() =>
+                  void perform(() =>
+                    window.picker.deleteWorktree(
+                      worktree.path,
+                      worktree.branchName!,
+                    ),
+                  )
+                }
+              >
+                Delete worktree and branch
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>

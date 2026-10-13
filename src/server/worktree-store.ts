@@ -241,7 +241,7 @@ export class WorktreeStore implements VscodeProxyTargets {
 
   // Deletion is independent per worktree. Repeated requests are idempotent; starting
   // this worktree is rejected until deletion fails or removes it from the snapshot.
-  deleteWorktree(path: string): void {
+  deleteWorktree(path: string, branchName?: string): void {
     const entry = this.entry(path)
     if (
       pathKey(entry.metadata.path) === pathKey(entry.metadata.mainWorktreePath)
@@ -250,6 +250,11 @@ export class WorktreeStore implements VscodeProxyTargets {
         'The main worktree cannot be deleted; remove its project instead',
       )
     if (entry.deleting) return
+    if (
+      branchName !== undefined &&
+      (!branchName || branchName !== entry.metadata.branchName)
+    )
+      throw new Error('Worktree branch changed; refresh and try again')
     entry.deleting = Promise.resolve()
       .then(async () => {
         await entry.server?.stop()
@@ -258,7 +263,29 @@ export class WorktreeStore implements VscodeProxyTargets {
           entry.metadata.mainWorktreePath,
           entry.metadata.path,
           this.controller.signal,
+          branchName,
         )
+        if (branchName !== undefined) {
+          try {
+            await this.discovery.removeBranch(
+              entry.metadata.mainWorktreePath,
+              branchName,
+              this.controller.signal,
+            )
+          } catch (error) {
+            // The directory is gone. Keep the failure visible on its owning main worktree.
+            const main = this.entries.get(
+              vscodeBasePath(entry.metadata.mainWorktreePath),
+            )
+            this.recordError(
+              main ?? entry,
+              new Error(
+                `Worktree ${entry.metadata.basename} was removed, but branch ${branchName} could not be deleted: ${error instanceof Error ? error.message : String(error)}`,
+                { cause: error },
+              ),
+            )
+          }
+        }
         this.entries.delete(vscodeBasePath(entry.metadata.path))
       })
       .catch((error: unknown) => {

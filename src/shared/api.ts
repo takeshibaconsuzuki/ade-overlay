@@ -60,7 +60,9 @@ export interface ServerMethods {
   // starting a stopping server or a deleting worktree is rejected.
   ensureVscodeServer(path: string): void
   stopVscodeServer(path: string): void
-  deleteWorktree(path: string): void
+  // Supplying the expected branch also requests its safe local deletion. If only
+  // branch deletion fails, the worktree is removed and its main worktree reports the error.
+  deleteWorktree(path: string, branchName?: string): void
   clearWorktreeError(path: string, errorId: string): void
   // Fresh host profile snapshot for each editor startup. Rejects when unavailable.
   getDisabledExtensions(): Promise<ExtensionIdentifier[]>

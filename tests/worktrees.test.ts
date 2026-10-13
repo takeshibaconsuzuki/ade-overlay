@@ -8,7 +8,11 @@ import { simpleGit } from 'simple-git'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
 import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
-import { listWorktrees, parseWorktrees } from '../src/server/git-utils'
+import {
+  GitWorktreeDiscovery,
+  listWorktrees,
+  parseWorktrees,
+} from '../src/server/git-utils'
 import type {
   DesktopClientMethods,
   ServerMethods,
@@ -201,6 +205,13 @@ test(
     await b.client.rpc.refreshWorktrees()
     await waitFor(() => a.latest()?.length === 1 && b.latest()?.length === 1)
     assert.equal(a.latest()?.[0].basename, 'first')
+    assert.ok((await first.git.branchLocal()).all.includes('feature/new'))
+    await first.git.raw(['worktree', 'add', linked.path, 'feature/new'])
+    await a.client.rpc.refreshWorktrees()
+    await waitFor(() => a.latest()?.length === 2)
+    await a.client.rpc.deleteWorktree(linked.path, 'feature/new')
+    await waitFor(() => a.latest()?.length === 1 && b.latest()?.length === 1)
+    assert.ok(!(await first.git.branchLocal()).all.includes('feature/new'))
     await server.close()
     assert.equal(server.close(), server.close())
   },
@@ -274,4 +285,58 @@ test('failed deletion preserves a dirty worktree and external disappearance reje
   await repo.git.raw(['worktree', 'remove', '--force', linked])
   await assert.rejects(store.queueRefresh(), /disappeared outside ADE/)
   assert.deepEqual(store.snapshot, before)
+})
+
+test('combined Git deletion rejects stale branches and dirty worktrees without deleting either', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'feature/topic', linked])
+  const discovery = new GitWorktreeDiscovery()
+  const signal = new AbortController().signal
+  await assert.rejects(
+    discovery.remove(repo.path, linked, signal, 'stale'),
+    /branch changed/,
+  )
+  await writeFile(join(linked, 'untracked.txt'), 'keep me')
+  await assert.rejects(
+    discovery.remove(repo.path, linked, signal, 'feature/topic'),
+    /untracked|modified/,
+  )
+  assert.ok((await repo.git.branchLocal()).all.includes('feature/topic'))
+  assert.equal(
+    (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
+    2,
+  )
+})
+
+test('safe branch deletion preserves unmerged commits after worktree removal', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'feature/unmerged', linked])
+  await simpleGit(linked).raw([
+    '-c',
+    'user.name=ADE Test',
+    '-c',
+    'user.email=test@example.com',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--allow-empty',
+    '-m',
+    'Unmerged commit',
+  ])
+  const discovery = new GitWorktreeDiscovery()
+  const signal = new AbortController().signal
+  await discovery.remove(repo.path, linked, signal, 'feature/unmerged')
+  await assert.rejects(
+    discovery.removeBranch(repo.path, 'feature/unmerged', signal),
+    /not fully merged/,
+  )
+  assert.ok((await repo.git.branchLocal()).all.includes('feature/unmerged'))
+  assert.equal(
+    (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
+    1,
+  )
 })

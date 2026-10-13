@@ -40,6 +40,12 @@ export interface WorktreeDiscovery {
     mainWorktreePath: string,
     path: string,
     signal: AbortSignal,
+    branchName?: string,
+  ): Promise<void>
+  removeBranch(
+    mainWorktreePath: string,
+    branchName: string,
+    signal: AbortSignal,
   ): Promise<void>
 }
 
@@ -55,13 +61,35 @@ export class GitWorktreeDiscovery implements WorktreeDiscovery {
     mainWorktreePath: string,
     path: string,
     signal: AbortSignal,
+    branchName?: string,
+  ): Promise<void> {
+    signal.throwIfAborted()
+    const git = simpleGit({ baseDir: mainWorktreePath, abort: signal })
+    if (branchName !== undefined) {
+      const worktrees = parseWorktrees(
+        await git.raw(['worktree', 'list', '--porcelain', '-z']),
+      )
+      const worktree = worktrees.find(
+        (worktree) => pathKey(worktree.path) === pathKey(path),
+      )
+      if (!branchName || worktree?.branchName !== branchName)
+        throw new Error('Worktree branch changed; refresh and try again')
+    }
+    signal.throwIfAborted()
+    await git.raw(['worktree', 'remove', '--', path])
+  }
+
+  async removeBranch(
+    mainWorktreePath: string,
+    branchName: string,
+    signal: AbortSignal,
   ): Promise<void> {
     signal.throwIfAborted()
     await simpleGit({ baseDir: mainWorktreePath, abort: signal }).raw([
-      'worktree',
-      'remove',
+      'branch',
+      '-d',
       '--',
-      path,
+      branchName,
     ])
   }
 }

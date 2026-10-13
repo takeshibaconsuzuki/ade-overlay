@@ -95,6 +95,12 @@ class Discovery implements WorktreeDiscovery {
   found = [first, linked]
   scans: Project[][] = []
   failure: Error | undefined
+  removedBranches: string[] = []
+  branchRemovalError: Error | undefined
+  async removeBranch(_main: string, branchName: string): Promise<void> {
+    if (this.branchRemovalError) throw this.branchRemovalError
+    this.removedBranches.push(branchName)
+  }
   removed: string[] = []
   removing: string[] = []
   pendingRemovals = new Map<string, ReturnType<typeof deferred<void>>>()
@@ -675,4 +681,64 @@ test('one worktree error retains the latest server or deletion failure until exp
   assert.equal(store.snapshot[1].error, undefined)
   store.snapshot[1].error = serverError
   assert.equal(store.snapshot[1].error, undefined)
+})
+
+test('combined deletion removes the branch only after the worktree and preserves idempotence', async (t) => {
+  const { store, discovery } = fixture(t)
+  await store.queueRefresh()
+  const removing = deferred<void>()
+  discovery.pendingRemovals.set(linked.path, removing)
+  store.deleteWorktree(linked.path, linked.branchName!)
+  store.deleteWorktree(linked.path, linked.branchName!)
+  await waitFor(() => discovery.removing.length === 1)
+  assert.deepEqual(discovery.removedBranches, [])
+  removing.resolve()
+  await waitFor(() => store.snapshot.length === 1)
+  assert.deepEqual(discovery.removedBranches, [linked.branchName])
+})
+
+test('combined deletion keeps branch failures visible on the main worktree after removal', async (t) => {
+  const { store, discovery } = fixture(t)
+  await store.queueRefresh()
+  discovery.branchRemovalError = new Error('Branch is not fully merged')
+  store.deleteWorktree(linked.path, linked.branchName!)
+  await waitFor(() => store.snapshot.length === 1)
+  assert.match(
+    store.snapshot[0].error!.message,
+    /was removed, but branch main could not be deleted: Branch is not fully merged/,
+  )
+  await store.queueRefresh()
+  assert.equal(store.snapshot.length, 1)
+  store.clearWorktreeError(first.path, store.snapshot[0].error!.id)
+  assert.equal(store.snapshot[0].error, undefined)
+})
+
+test('failed worktree removal never deletes its branch', async (t) => {
+  const { store, discovery } = fixture(t)
+  await store.queueRefresh()
+  discovery.removalError = new Error('Dirty worktree')
+  store.deleteWorktree(linked.path, linked.branchName!)
+  await waitFor(() => !store.snapshot[1].deleting)
+  assert.deepEqual(discovery.removedBranches, [])
+  assert.match(store.snapshot[1].error!.message, /Dirty worktree/)
+})
+
+test('combined deletion rejects main worktrees, detached HEADs and changed branches', async (t) => {
+  const { store, discovery } = fixture(t)
+  await store.queueRefresh()
+  assert.throws(
+    () => store.deleteWorktree(first.path, first.branchName!),
+    /main worktree cannot be deleted/,
+  )
+  assert.throws(
+    () => store.deleteWorktree(linked.path, 'old-branch'),
+    /branch changed/,
+  )
+  discovery.found = [first, { ...linked, branchName: null }]
+  await store.queueRefresh()
+  assert.throws(
+    () => store.deleteWorktree(linked.path, linked.branchName!),
+    /branch changed/,
+  )
+  assert.deepEqual(discovery.removing, [])
 })
