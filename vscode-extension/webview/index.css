@@ -53,6 +53,28 @@ body {
   white-space: nowrap;
 }
 
+.chat-open {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.chat-open:enabled {
+  cursor: pointer;
+}
+
+.chat-open:enabled:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.chat-open:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
 .chat-skeleton {
   display: inline-block;
   width: 85%;

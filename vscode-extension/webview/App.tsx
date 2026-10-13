@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { Chat } from '../../src/shared/api'
-import type { ChatsMessage } from '../shared/api'
+import type { ChatsMessage, SidebarMessage } from '../shared/api'
 import { ChatList } from './ChatList'
 
 declare function acquireVsCodeApi(): {
-  postMessage(message: { type: 'ready' }): void
+  postMessage(message: SidebarMessage): void
 }
 
 const vscode = acquireVsCodeApi()
@@ -19,5 +19,10 @@ export function App() {
     vscode.postMessage({ type: 'ready' })
     return () => window.removeEventListener('message', receive)
   }, [])
-  return <ChatList chats={chats} />
+  return (
+    <ChatList
+      chats={chats}
+      onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
+    />
+  )
 }

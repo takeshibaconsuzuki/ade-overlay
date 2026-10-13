@@ -103,9 +103,59 @@ async function fixture(t: TestContext) {
 
 const desktopMethods: DesktopClientMethods = {
   getClientInfo: () => ({ kind: 'desktop', name: 'test', version: '1' }),
+  openWorktree: async () => {},
   settingsChanged: () => {},
   worktreesChanged: () => {},
 }
+
+test('opening a chat routes its current worktree to the desktop and awaits acceptance', async (t) => {
+  const f = await fixture(t)
+  const extension = await f.connect({
+    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    chatsChanged: () => {},
+  })
+  await f.report('First')
+  await assert.rejects(extension.rpc.openChat('missing'), /no longer available/)
+  await assert.rejects(extension.rpc.openChat('test:one'), /No ADE desktop/)
+
+  const paths: string[] = []
+  const accepted = deferred<void>()
+  let deleting = false
+  const desktop = await f.connect({
+    ...desktopMethods,
+    openWorktree: async (path: string) => {
+      paths.push(path)
+      if (deleting) throw new Error('Worktree is being deleted')
+      await accepted.promise
+    },
+  })
+  await waitFor(() => desktop.requests.includes('worktreesChanged'))
+  let completed = false
+  const opening = extension.rpc.openChat('test:one').then(() => {
+    completed = true
+  })
+  await waitFor(() => paths.length === 1)
+  assert.deepEqual(paths, [f.directory])
+  assert.equal(completed, false)
+  accepted.resolve()
+  await opening
+
+  deleting = true
+  await assert.rejects(extension.rpc.openChat('test:one'), /being deleted/)
+  await f.report('Moved', { worktreePath: join(f.directory, 'unknown') })
+  await assert.rejects(extension.rpc.openChat('test:one'), /Unknown worktree/)
+  assert.equal(paths.length, 2)
+
+  await f.report('Back')
+  const second = await f.connect(desktopMethods)
+  await waitFor(() => second.requests.includes('worktreesChanged'))
+  await assert.rejects(
+    extension.rpc.openChat('test:one'),
+    /Multiple ADE desktops/,
+  )
+  assert.equal(paths.length, 2)
+  assert.ok(!extension.requests.includes('openWorktree'))
+})
 
 test('large descriptions are previewed without disconnecting extensions or truncating stored reports', async (t) => {
   const f = await fixture(t)

@@ -52,6 +52,9 @@ export interface ExtensionIdentifier {
 export interface ServerMethods {
   // Keys are provider ID + ":" + session ID; sessions can share worktrees and processes.
   getChats(): Record<string, Chat>
+  // Opens a live chat's worktree in the connected desktop. Rejects if no desktop
+  // is connected or the destination is ambiguous because several are connected.
+  openChat(id: string): Promise<void>
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   // Lifecycle commands acknowledge acceptance, not completion. Validation errors
@@ -83,6 +86,8 @@ export interface ClientMethods {
 
 export interface DesktopClientMethods extends ClientMethods {
   getClientInfo(): ClientInfo & { kind: 'desktop' }
+  // Selects the worktree and acknowledges startup; page loading completes asynchronously.
+  openWorktree(path: string): Promise<void>
   // Complete authoritative snapshot, also sent on connection. May precede command acknowledgment.
   worktreesChanged(worktrees: Worktree[]): void
   // A complete host document is sent on every connection and change. null suspends sync.

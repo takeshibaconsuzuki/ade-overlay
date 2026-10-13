@@ -22,6 +22,7 @@ import { NodeProcessProbe } from './process-probe'
 import type { ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
 import { MAX_CHAT_DESCRIPTION_LENGTH } from './constants'
+import { pathKey } from './path-key'
 
 const log = logger.child({ component: 'server' })
 
@@ -136,6 +137,20 @@ export async function startServer(
     server = await startRpcServer<ClientMethods, ServerMethods>(
       {
         getChats: () => chats.snapshot,
+        openChat: async (id) => {
+          const chat = chats.snapshot[id]
+          if (!chat) throw new Error('Chat is no longer available')
+          const worktree = worktrees.snapshot.find(
+            (entry) => pathKey(entry.path) === pathKey(chat.worktreePath),
+          )
+          if (!worktree) throw new Error('Unknown worktree')
+          if (desktops.size === 0)
+            throw new Error('No ADE desktop is connected')
+          if (desktops.size > 1)
+            throw new Error('Multiple ADE desktops are connected')
+          const [desktop] = desktops
+          await desktop.openWorktree(worktree.path)
+        },
         getServerInfo: () => ({ name: APP_NAME }),
         getDisabledExtensions: async () =>
           readDisabledExtensions(options.vscode.profileDatabase),

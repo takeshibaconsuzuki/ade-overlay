@@ -55,6 +55,8 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Webview scripts restart after being hidden; each ready message gets the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'ready') this.sendSnapshot()
+      if (message?.type === 'openChat' && typeof message.id === 'string')
+        void this.openChat(message.id)
     })
     view.onDidDispose(() => {
       messages.dispose()
@@ -89,6 +91,17 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`
+  }
+
+  private async openChat(id: string): Promise<void> {
+    try {
+      if (!client) throw new Error('ADE is not connected')
+      await client.rpc.openChat(id)
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Unable to switch worktrees: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 }
 

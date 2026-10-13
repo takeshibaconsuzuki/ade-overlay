@@ -67,6 +67,7 @@ test('local and remote stops preserve the editor session before worktree deletio
         name: 'remote lifecycle client',
         version: '1',
       }),
+      openWorktree: async () => {},
       settingsChanged: () => {},
       worktreesChanged: () => {},
     },

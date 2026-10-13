@@ -113,6 +113,7 @@ test(
             name: 'test',
             version: '1',
           }),
+          openWorktree: async () => {},
           settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next

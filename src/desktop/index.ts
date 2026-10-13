@@ -66,6 +66,11 @@ app.whenReady().then(() => {
     { ensure: (path): Promise<void> => server.rpc.ensureVscodeServer(path) },
     serverUrl,
   )
+  const openWorktree = (path: string): Promise<void> => {
+    const worktree = worktrees.find((worktree) => worktree.path === path)
+    if (!worktree) throw new Error('Unknown worktree')
+    return editor.open(worktree)
+  }
   const server = connectRpc<ServerMethods, DesktopClientMethods>(
     serverUrl,
     {
@@ -75,6 +80,7 @@ app.whenReady().then(() => {
         version: app.getVersion(),
       }),
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
+      openWorktree,
       worktreesChanged: (next) => {
         worktrees = next
         editor.updateWorktrees(next)
@@ -111,9 +117,7 @@ app.whenReady().then(() => {
   ipcMain.handle(WORKTREE_OPEN, (event, path: string) => {
     if (event.sender !== worktreePickerWindow?.webContents)
       throw new Error('Invalid sender')
-    const worktree = worktrees.find((worktree) => worktree.path === path)
-    if (!worktree) throw new Error('Unknown worktree')
-    return editor.open(worktree)
+    return openWorktree(path)
   })
   ipcMain.handle(EDITOR_RETRY, (event) => {
     if (!editorHost.isAdeSender(event.sender)) throw new Error('Invalid sender')

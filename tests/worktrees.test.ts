@@ -142,6 +142,7 @@ test(
             name: 'test',
             version: '1',
           }),
+          openWorktree: async () => {},
           settingsChanged: () => {},
           worktreesChanged: (worktrees) => {
             updates.push(worktrees)

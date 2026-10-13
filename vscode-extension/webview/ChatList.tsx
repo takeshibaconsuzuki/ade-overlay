@@ -4,7 +4,7 @@ import type { Chat } from '../../src/shared/api'
 function Field({ value, name }: { value: string | undefined; name: string }) {
   return (
     <Text
-      as="div"
+      as="span"
       size="2"
       weight={name === 'title' ? 'medium' : 'regular'}
       color={name === 'title' ? undefined : 'gray'}
@@ -24,8 +24,10 @@ function Field({ value, name }: { value: string | undefined; name: string }) {
 
 export function ChatList({
   chats,
+  onOpenChat,
 }: {
   chats: Record<string, Chat> | undefined
+  onOpenChat: (id: string) => void
 }) {
   const entries =
     chats === undefined
@@ -50,19 +52,27 @@ export function ChatList({
               (_, index) => [String(index), undefined] as const,
             )
           ).map(([id, chat]) => (
-            <Flex asChild direction="column" gap="1" px="4" py="3" key={id}>
-              <li className="chat">
-                <Field name="title" value={chat?.title} />
-                <Field
-                  name="worktree"
-                  value={chat?.worktreePath
-                    .replace(/[\\/]+$/, '')
-                    .split(/[\\/]/)
-                    .pop()}
-                />
-                <Field name="description" value={chat?.description} />
-              </li>
-            </Flex>
+            <li className="chat" key={id}>
+              <Flex asChild direction="column" gap="1" px="4" py="3">
+                <button
+                  type="button"
+                  className="chat-open"
+                  disabled={!chat}
+                  onClick={() => onOpenChat(id)}
+                  title={chat && `Switch to ${chat.worktreePath}`}
+                >
+                  <Field name="title" value={chat?.title} />
+                  <Field
+                    name="worktree"
+                    value={chat?.worktreePath
+                      .replace(/[\\/]+$/, '')
+                      .split(/[\\/]/)
+                      .pop()}
+                  />
+                  <Field name="description" value={chat?.description} />
+                </button>
+              </Flex>
+            </li>
           ))}
         </ul>
       )}
