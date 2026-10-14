@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { APP_DISPLAY_NAME } from '../../shared/constants'
+import { WORKTREE_PICKER_VISIBILITY_CHANGED } from './api'
 
 export function createWorktreePickerWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -13,6 +14,12 @@ export function createWorktreePickerWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
     },
+  })
+  window.on('show', () => {
+    window.webContents.send(WORKTREE_PICKER_VISIBILITY_CHANGED, true)
+  })
+  window.on('hide', () => {
+    window.webContents.send(WORKTREE_PICKER_VISIBILITY_CHANGED, false)
   })
   window.on('blur', () => {
     window.hide()

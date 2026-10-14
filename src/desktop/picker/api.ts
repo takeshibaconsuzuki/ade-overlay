@@ -3,6 +3,10 @@ import type { ConnectionState, Worktree } from '../../shared/api'
 // Worktree-picker renderer → main: requests current connection state and worktrees after listeners are registered.
 export const WORKTREE_PICKER_INITIALIZE = 'worktreePicker:initialize'
 
+// Main → renderer: starts or ends a picker session when its window is shown or hidden.
+export const WORKTREE_PICKER_VISIBILITY_CHANGED =
+  'worktreePicker:visibilityChanged'
+
 // Main → renderer: delivers the latest worktrees after a server update or initialization.
 export const WORKTREES_CHANGED = 'worktrees:changed'
 
@@ -25,6 +29,9 @@ export const VSCODE_SERVER_STOP = 'vscode:stop'
 export const WORKTREE_DELETE = 'worktree:delete'
 
 export interface PickerApi {
+  setOnVisibilityChangedListener(
+    listener: ((visible: boolean) => void) | undefined,
+  ): void
   setOnConnectionStateChangedListener(
     listener: ((state: ConnectionState) => void) | undefined,
   ): void

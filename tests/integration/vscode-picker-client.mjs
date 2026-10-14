@@ -1,10 +1,17 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron'
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
+// Other desktop windows must not suspend renderer animations during this test.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 app.setPath('userData', join(process.env.ADE_PICKER_DATA, 'electron-data'))
+let togglePicker
+globalShortcut.register = (_shortcut, listener) => {
+  togglePicker = listener
+  return true
+}
 await import('./index.js')
 
 const wait = async (condition, label) => {
@@ -297,10 +304,16 @@ void app.whenReady().then(async () => {
       () => run('document.querySelectorAll(".worktree-row").length === 30'),
       'restore rows',
     )
+    picker.setFocusable(true)
+    picker.focus()
+    await wait(() => picker.isFocused(), 'picker has native focus')
     await run('document.querySelector(".worktree-actions button").focus()')
     await key('Enter')
     await wait(
-      () => run('!!document.querySelector("[role=menu]")'),
+      () =>
+        run(
+          'document.querySelector("[role=menu]")?.contains(document.activeElement)',
+        ),
       'actions menu',
     )
     await key('ArrowDown')
@@ -310,25 +323,67 @@ void app.whenReady().then(async () => {
       () => run('!document.querySelector("[role=menu]")'),
       'close menu',
     )
+    const clickActions = async () => {
+      const { x, y } = await run(`(() => {
+        const button = document.querySelector('.worktree-actions button');
+        button.scrollIntoView({ block: 'nearest' });
+        const rect = button.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      })()`)
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await picker.webContents.debugger.sendCommand(
+          'Input.dispatchMouseEvent',
+          {
+            type,
+            x,
+            y,
+            button: 'left',
+            clickCount: 1,
+          },
+        )
+      }
+      await wait(
+        () =>
+          run(
+            'document.querySelector("[role=menu][data-state=open]")?.contains(document.activeElement)',
+          ),
+        'mouse opens actions menu',
+      )
+    }
+    // Native show/hide must reset the session even if browser visibility events lag.
+    await run(`window.deferPickerVisibility = event => event.stopImmediatePropagation();
+      document.addEventListener('visibilitychange', window.deferPickerVisibility, true)`)
+    for (const hiddenDuration of [0, 25, 200]) {
+      await clickActions()
+      togglePicker()
+      if (hiddenDuration) {
+        await wait(() => run('document.hidden'), 'menu hidden with picker')
+        await delay(hiddenDuration)
+      }
+      togglePicker()
+      await wait(
+        () =>
+          run(
+            '!document.querySelector("[role=menu]") && document.activeElement === document.querySelector("input")',
+          ),
+        `hiding dismisses menu and restores search focus (${hiddenDuration}ms)`,
+      )
+      await delay(300)
+      assert.equal(
+        await run('document.activeElement === document.querySelector("input")'),
+        true,
+        'search keeps focus after native window activation and menu cleanup',
+      )
+    }
+    await run(`document.removeEventListener('visibilitychange', window.deferPickerVisibility, true);
+      delete window.deferPickerVisibility`)
     await run('document.querySelector(".worktree-actions button").focus()')
     await key('Enter')
-    await wait(
-      () => run('!!document.querySelector("[role=menu]")'),
-      'reopen actions menu',
-    )
-    picker.hide()
-    picker.show()
     await wait(
       () =>
         run(
-          '!document.querySelector("[role=menu]") && document.activeElement === document.querySelector("input")',
+          'document.querySelector("[role=menu]")?.contains(document.activeElement)',
         ),
-      'hiding dismisses menu and restores search focus',
-    )
-    await run('document.querySelector(".worktree-actions button").focus()')
-    await key('Enter')
-    await wait(
-      () => run('!!document.querySelector("[role=menu]")'),
       'menu opens again after hide',
     )
     await key('Escape')
@@ -339,6 +394,73 @@ void app.whenReady().then(async () => {
         ),
       'normal dismissal restores trigger focus after a previous hide',
     )
+    const assertRestoredRowsKeepSearchFocus = async (label) => {
+      await wait(
+        () => run('document.querySelectorAll(".worktree-row").length === 30'),
+        `${label}: rows return`,
+      )
+      await delay(200)
+      assert.equal(
+        await run('!!document.querySelector("[role=menu]")'),
+        false,
+        `${label}: restoring rows does not reopen a menu`,
+      )
+      assert.equal(
+        await run('document.activeElement === document.querySelector("input")'),
+        true,
+        `${label}: restoring rows preserves search focus`,
+      )
+    }
+    await clickActions()
+    publish(worktrees.slice(0, -1))
+    await wait(
+      () => run('document.querySelectorAll(".worktree-row").length === 29'),
+      'unrelated row removed',
+    )
+    assert.equal(
+      await run('!!document.querySelector("[role=menu][data-state=open]")'),
+      true,
+      'an available row keeps its menu open during worktree updates',
+    )
+    publish(worktrees.slice(1))
+    await wait(
+      () => run('!document.querySelector("[role=menu]")'),
+      'removing the menu row unmounts its menu',
+    )
+    await search('')
+    publish(worktrees)
+    await assertRestoredRowsKeepSearchFocus('removed worktree')
+
+    await clickActions()
+    picker.webContents.send('connection:stateChanged', 'connecting')
+    await wait(
+      () => run('document.querySelectorAll(".worktree-row").length === 0'),
+      'disconnect unmounts rows even before the empty worktree update',
+    )
+    await search('')
+    picker.webContents.send('connection:stateChanged', 'connected')
+    await assertRestoredRowsKeepSearchFocus('reconnection')
+
+    await clickActions()
+    publish([])
+    await wait(
+      () => run('document.querySelectorAll(".worktree-row").length === 0'),
+      'empty worktree update unmounts rows',
+    )
+    await search('')
+    publish(worktrees)
+    await assertRestoredRowsKeepSearchFocus('empty worktree update')
+
+    await clickActions()
+    await search('branch-21')
+    await selected(21)
+    await wait(
+      () => run('!document.querySelector("[role=menu]")'),
+      'filtering out the menu row unmounts its menu',
+    )
+    await search('')
+    await assertRestoredRowsKeepSearchFocus('filtered worktree')
+
     for (const index of [0, 17]) {
       await search('')
       await selected(0)

@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import {
   DotsHorizontalIcon,
   ExclamationTriangleIcon,
@@ -30,31 +31,20 @@ function WorktreeRow({
   worktree,
   highlighted,
   onHighlight,
+  menuOpen,
+  onMenuOpenChange,
+  onCloseAutoFocus,
 }: {
   worktree: Worktree
   highlighted: boolean
   onHighlight: () => void
+  menuOpen: boolean
+  onMenuOpenChange: (open: boolean) => void
+  onCloseAutoFocus: (event: Event) => void
 }): React.JSX.Element {
   const status = worktree.vscode
   const [pending, setPending] = useState(false)
   const [requestError, setRequestError] = useState<string | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuClosedOnHide = useRef(false)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    menuClosedOnHide.current = false
-    const onVisibilityChange = () => {
-      if (document.hidden) {
-        menuClosedOnHide.current = true
-        setMenuOpen(false)
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    return () =>
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [menuOpen])
-
   const state = status.state
   const error = worktree.error
   const message = requestError ?? error?.message
@@ -169,7 +159,7 @@ function WorktreeRow({
           </Flex>
         </Button>
         <Flex className="worktree-actions" align="center">
-          <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenu.Root open={menuOpen} onOpenChange={onMenuOpenChange}>
             <DropdownMenu.Trigger>
               <IconButton
                 variant="ghost"
@@ -182,10 +172,7 @@ function WorktreeRow({
             </DropdownMenu.Trigger>
             <DropdownMenu.Content
               align="end"
-              onCloseAutoFocus={(event) => {
-                // A hidden menu must not steal focus back from search on the next show.
-                if (menuClosedOnHide.current) event.preventDefault()
-              }}
+              onCloseAutoFocus={onCloseAutoFocus}
             >
               <DropdownMenu.Item
                 // Only a worktree error enables another Stop request while stopping.
@@ -257,6 +244,11 @@ function WorktreePicker(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{
+    path: string | null
+    closedByReset: boolean
+  }>({ path: null, closedByReset: false })
+  const pickerVisible = useRef(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
@@ -270,6 +262,14 @@ function WorktreePicker(): React.JSX.Element {
       worktree.path,
     ].some((value) => value.toLowerCase().includes(search)),
   )
+  // An open menu cannot outlive the row that owns its trigger.
+  if (
+    menu.path !== null &&
+    (connectionState !== 'connected' ||
+      !filteredWorktrees.some((worktree) => worktree.path === menu.path))
+  ) {
+    setMenu({ path: null, closedByReset: true })
+  }
   // Derive a valid selection in the same render as filtering or server updates.
   const selectedIndex = Math.max(
     0,
@@ -288,17 +288,19 @@ function WorktreePicker(): React.JSX.Element {
   }, [highlightedPath, query])
 
   useEffect(() => {
-    const onVisibilityChange = () => {
+    window.picker.setOnVisibilityChangedListener((visible) => {
+      pickerVisible.current = visible
       // Each picker session starts with an empty search and the first row at the top.
-      setQuery('')
-      setSelectedPath(null)
-      scrollToSelection.current = true
+      // Release menu focus synchronously so it cannot block search focus.
+      flushSync(() => {
+        setMenu({ path: null, closedByReset: true })
+        setQuery('')
+        setSelectedPath(null)
+        scrollToSelection.current = true
+      })
       if (resultsRef.current) resultsRef.current.scrollTop = 0
-      if (!document.hidden) {
-        searchRef.current?.focus({ preventScroll: true })
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
+      if (visible) searchRef.current?.focus({ preventScroll: true })
+    })
     window.picker.setOnConnectionStateChangedListener(setConnectionState)
     window.picker.setOnWorktreesChangedListener((worktrees) => {
       setWorktrees(worktrees)
@@ -311,7 +313,7 @@ function WorktreePicker(): React.JSX.Element {
     return () => {
       window.picker.setOnConnectionStateChangedListener(undefined)
       window.picker.setOnWorktreesChangedListener(undefined)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.picker.setOnVisibilityChangedListener(undefined)
     }
   }, [])
 
@@ -462,6 +464,21 @@ function WorktreePicker(): React.JSX.Element {
                     worktree={worktree}
                     highlighted={worktree.path === highlightedPath}
                     onHighlight={() => setSelectedPath(worktree.path)}
+                    menuOpen={menu.path === worktree.path}
+                    onMenuOpenChange={(open) =>
+                      setMenu({
+                        path: open ? worktree.path : null,
+                        closedByReset: false,
+                      })
+                    }
+                    onCloseAutoFocus={(event) => {
+                      // Session resets return focus to search after the menu releases it.
+                      if (menu.closedByReset) {
+                        event.preventDefault()
+                        if (pickerVisible.current)
+                          searchRef.current?.focus({ preventScroll: true })
+                      }
+                    }}
                   />
                 ))}
               </ul>

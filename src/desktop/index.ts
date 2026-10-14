@@ -14,6 +14,7 @@ import type {
 import {
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
+  WORKTREE_PICKER_VISIBILITY_CHANGED,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVER_STOP,
@@ -125,6 +126,10 @@ app.whenReady().then(() => {
     if (event.sender !== worktreePickerWindow?.webContents) return
     event.sender.send(CONNECTION_STATE_CHANGED, server.state)
     event.sender.send(WORKTREES_CHANGED, worktrees)
+    event.sender.send(
+      WORKTREE_PICKER_VISIBILITY_CHANGED,
+      worktreePickerWindow.isVisible(),
+    )
   })
   ipcMain.handle(WORKTREES_REFRESH, (event) => {
     if (event.sender !== worktreePickerWindow?.webContents)

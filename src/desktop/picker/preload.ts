@@ -4,6 +4,7 @@ import {
   type PickerApi,
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
+  WORKTREE_PICKER_VISIBILITY_CHANGED,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVER_STOP,
@@ -29,7 +30,18 @@ ipcRenderer.on(
   },
 )
 
+let onVisibilityChangedListener: ((visible: boolean) => void) | undefined
+ipcRenderer.on(
+  WORKTREE_PICKER_VISIBILITY_CHANGED,
+  (_event: IpcRendererEvent, visible: boolean) => {
+    onVisibilityChangedListener?.(visible)
+  },
+)
+
 const api: PickerApi = {
+  setOnVisibilityChangedListener(listener) {
+    onVisibilityChangedListener = listener
+  },
   initializeWorktreePicker: () => ipcRenderer.send(WORKTREE_PICKER_INITIALIZE),
   setOnConnectionStateChangedListener(listener) {
     onConnectionStateChangedListener = listener
