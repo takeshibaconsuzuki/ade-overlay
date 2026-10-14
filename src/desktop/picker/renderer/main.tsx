@@ -1,31 +1,59 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   DotsHorizontalIcon,
   ExclamationTriangleIcon,
   ReloadIcon,
+  MagnifyingGlassIcon,
 } from '@radix-ui/react-icons'
 import {
-  Box,
   Button,
   DropdownMenu,
   Flex,
-  Heading,
   IconButton,
   Spinner,
   Text,
+  TextField,
   Tooltip,
 } from '@radix-ui/themes'
-import { APP_DISPLAY_NAME } from '../../../shared/constants'
 import type { ConnectionState, Worktree } from '../../../shared/api'
 import { AppTheme } from '../../../ui/AppTheme'
-import { ErrorMessage, LoadingScreen } from '../../../ui/Feedback'
+import { ErrorMessage } from '../../../ui/Feedback'
 import './style.css'
 
-function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
+function worktreeRowId(path: string): string {
+  return `worktree-${encodeURIComponent(path)}`
+}
+
+function WorktreeRow({
+  worktree,
+  highlighted,
+  onHighlight,
+}: {
+  worktree: Worktree
+  highlighted: boolean
+  onHighlight: () => void
+}): React.JSX.Element {
   const status = worktree.vscode
   const [pending, setPending] = useState(false)
   const [requestError, setRequestError] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuClosedOnHide = useRef(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    menuClosedOnHide.current = false
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        menuClosedOnHide.current = true
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () =>
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [menuOpen])
+
   const state = status.state
   const error = worktree.error
   const message = requestError ?? error?.message
@@ -71,8 +99,17 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
     }
   }
   return (
-    <Flex asChild align="center" gap="3" px="3" py="3">
-      <li className="worktree-row">
+    <li
+      id={worktreeRowId(worktree.path)}
+      role="row"
+      className="worktree-row"
+      data-path={worktree.path}
+      data-highlighted={highlighted}
+      aria-selected={highlighted}
+      aria-label={`${worktree.basename}, ${worktree.branchName ?? 'Detached HEAD'}`}
+      onFocus={onHighlight}
+    >
+      <Flex role="gridcell" align="center" gap="3" px="3" py="3">
         <Tooltip
           content={message ?? statusLabel}
           className="worktree-status-tooltip"
@@ -131,7 +168,7 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
           </Flex>
         </Button>
         <Flex className="worktree-actions" align="center">
-          <DropdownMenu.Root>
+          <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger>
               <IconButton
                 variant="ghost"
@@ -142,7 +179,13 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
                 <DotsHorizontalIcon />
               </IconButton>
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end">
+            <DropdownMenu.Content
+              align="end"
+              onCloseAutoFocus={(event) => {
+                // A hidden menu must not steal focus back from search on the next show.
+                if (menuClosedOnHide.current) event.preventDefault()
+              }}
+            >
               <DropdownMenu.Item
                 // Only a worktree error enables another Stop request while stopping.
                 disabled={
@@ -200,8 +243,8 @@ function WorktreeRow({ worktree }: { worktree: Worktree }): React.JSX.Element {
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </Flex>
-      </li>
-    </Flex>
+      </Flex>
+    </li>
   )
 }
 
@@ -211,19 +254,114 @@ function WorktreePicker(): React.JSX.Element {
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const resultsRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const pointerPosition = useRef<{ x: number; y: number } | null>(null)
+  const scrollToSelection = useRef(true)
+  const search = query.trim().toLowerCase()
+  const filteredWorktrees = worktrees.filter((worktree) =>
+    [
+      worktree.basename,
+      worktree.branchName ?? 'Detached HEAD',
+      worktree.path,
+    ].some((value) => value.toLowerCase().includes(search)),
+  )
+  // Derive a valid selection in the same render as filtering or server updates.
+  const selectedIndex = Math.max(
+    0,
+    filteredWorktrees.findIndex((worktree) => worktree.path === selectedPath),
+  )
+  const highlightedPath = filteredWorktrees[selectedIndex]?.path
+  const hasResults =
+    connectionState === 'connected' && filteredWorktrees.length > 0
+
+  useLayoutEffect(() => {
+    if (scrollToSelection.current) {
+      listRef.current
+        ?.querySelector('[data-highlighted="true"]')
+        ?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [highlightedPath, query])
 
   useEffect(() => {
+    const onVisibilityChange = () => {
+      // Each picker session starts with an empty search and the first row at the top.
+      setQuery('')
+      setSelectedPath(null)
+      scrollToSelection.current = true
+      if (resultsRef.current) resultsRef.current.scrollTop = 0
+      if (!document.hidden) {
+        searchRef.current?.focus({ preventScroll: true })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     window.picker.setOnConnectionStateChangedListener(setConnectionState)
     window.picker.setOnWorktreesChangedListener((worktrees) => {
       setWorktrees(worktrees)
+      setSelectedPath((path) =>
+        worktrees.some((worktree) => worktree.path === path) ? path : null,
+      )
       setError(null)
     })
     window.picker.initializeWorktreePicker()
     return () => {
       window.picker.setOnConnectionStateChangedListener(undefined)
       window.picker.setOnWorktreesChangedListener(undefined)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
+
+  const navigate = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      (event.target as HTMLElement).closest('[role="menu"]')
+    )
+      return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (!filteredWorktrees.length) return
+      const direction = event.key === 'ArrowDown' ? 1 : -1
+      const index =
+        (selectedIndex + direction + filteredWorktrees.length) %
+        filteredWorktrees.length
+      scrollToSelection.current = true
+      setSelectedPath(filteredWorktrees[index].path)
+      searchRef.current?.focus({ preventScroll: true })
+      listRef.current?.children[index]?.scrollIntoView({ block: 'nearest' })
+    } else if (
+      event.key === 'Enter' &&
+      (event.target === searchRef.current ||
+        (event.target as HTMLElement).closest('.worktree-open'))
+    ) {
+      event.preventDefault()
+      listRef.current
+        ?.querySelector<HTMLButtonElement>(
+          '[data-highlighted="true"] .worktree-open',
+        )
+        ?.click()
+    }
+  }
+
+  const highlightUnderPointer = (event: React.PointerEvent<HTMLElement>) => {
+    const previous = pointerPosition.current
+    pointerPosition.current = { x: event.clientX, y: event.clientY }
+    // Scrolling a keyboard selection beneath a stationary pointer must not select it.
+    if (previous?.x === event.clientX && previous.y === event.clientY) return
+    const row = (event.target as HTMLElement).closest<HTMLElement>(
+      '.worktree-row',
+    )
+    if (row?.dataset.path) {
+      scrollToSelection.current = false
+      setSelectedPath(row.dataset.path)
+    }
+  }
 
   const refresh = async () => {
     setRefreshing(true)
@@ -239,27 +377,45 @@ function WorktreePicker(): React.JSX.Element {
     }
   }
 
-  if (connectionState !== 'connected') {
-    return <LoadingScreen label="Connecting to server" />
-  }
-
   return (
-    <main className="worktree-picker">
-      <Flex asChild align="center" justify="between" gap="4" mb="6">
-        <header>
-          <Box>
-            <Text as="p" size="2" color="gray" mb="1">
-              {APP_DISPLAY_NAME}
-            </Text>
-            <Heading as="h1" size="7">
-              Worktrees
-            </Heading>
-          </Box>
+    <main
+      className="worktree-picker"
+      onKeyDown={navigate}
+      onPointerMove={highlightUnderPointer}
+    >
+      <Flex asChild align="center" gap="3">
+        <header className="picker-toolbar">
+          <TextField.Root
+            ref={searchRef}
+            className="worktree-search"
+            type="search"
+            role="combobox"
+            aria-label="Search worktrees"
+            aria-autocomplete="list"
+            aria-haspopup="grid"
+            aria-expanded={hasResults}
+            aria-controls={hasResults ? 'worktree-list' : undefined}
+            aria-activedescendant={
+              hasResults ? worktreeRowId(highlightedPath!) : undefined
+            }
+            placeholder="Search worktrees…"
+            autoFocus
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setSelectedPath(null)
+              scrollToSelection.current = true
+            }}
+          >
+            <TextField.Slot>
+              <MagnifyingGlassIcon />
+            </TextField.Slot>
+          </TextField.Root>
           <Button
             type="button"
             variant="soft"
             onClick={() => void refresh()}
-            disabled={refreshing}
+            disabled={refreshing || connectionState !== 'connected'}
             aria-busy={refreshing}
           >
             {refreshing ? <Spinner aria-hidden="true" /> : <ReloadIcon />}
@@ -267,21 +423,43 @@ function WorktreePicker(): React.JSX.Element {
           </Button>
         </header>
       </Flex>
-      <Flex direction="column" gap="4">
+      <Flex
+        ref={resultsRef}
+        className="picker-results"
+        direction="column"
+        gap="4"
+      >
         {error && <ErrorMessage>{error}</ErrorMessage>}
-        {worktrees.length === 0 ? (
+        {connectionState !== 'connected' ? (
+          <Flex align="center" justify="center" gap="3" py="6" role="status">
+            <Spinner aria-hidden="true" />
+            <Text size="2" color="gray">
+              Connecting to server
+            </Text>
+          </Flex>
+        ) : filteredWorktrees.length === 0 ? (
           <Text as="p" size="2" color="gray">
-            No worktrees found.
+            {worktrees.length === 0
+              ? 'No worktrees found.'
+              : 'No matching worktrees.'}
           </Text>
         ) : (
           <Flex asChild direction="column">
             <ul
               className="worktrees"
+              id="worktree-list"
+              role="grid"
+              ref={listRef}
               aria-label="Worktrees"
               aria-busy={refreshing}
             >
-              {worktrees.map((worktree) => (
-                <WorktreeRow key={worktree.path} worktree={worktree} />
+              {filteredWorktrees.map((worktree) => (
+                <WorktreeRow
+                  key={worktree.path}
+                  worktree={worktree}
+                  highlighted={worktree.path === highlightedPath}
+                  onHighlight={() => setSelectedPath(worktree.path)}
+                />
               ))}
             </ul>
           </Flex>
