@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { EDITOR_STATE_CHANGED, type EditorState } from './api'
 import type { EditorHost, EditorPage } from './manager'
 import type { ExtensionIdentifier } from '../../shared/api'
+import type { DesktopExtensionMethods } from '../../shared/editor-rpc'
 import { ElectronEditorPage } from './vscode/page'
 import type { VscodeSettingsServer } from './vscode/vscode-settings-sync'
 import { isVscodeSettingsDocument } from '../../shared/vscode-utils'
@@ -19,6 +20,7 @@ export class ElectronEditorWindow implements EditorHost {
     private readonly readDisabledExtensions: () => Promise<
       ExtensionIdentifier[]
     >,
+    private readonly desktop: DesktopExtensionMethods,
   ) {}
 
   receiveVscodeSettings(content: string | null): void {
@@ -78,6 +80,7 @@ export class ElectronEditorWindow implements EditorHost {
       onFailure,
       this.vscodeSettingsServer,
       this.readDisabledExtensions,
+      this.desktop,
     )
     page.vscodeSettingsSync.receive(this.vscodeSettingsContent)
     this.pages.add(page)

@@ -20,5 +20,6 @@ var RIe={INSTANCE:{getWorkbenchContribution(id){
   return tracker;
 }}};
 var r={executeCommand(){}};
+var Ge={registerCommand(id, handler){globalThis.command=handler;return {dispose(){}}}};
 globalThis.start=()=>{let C;return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}}};
 `

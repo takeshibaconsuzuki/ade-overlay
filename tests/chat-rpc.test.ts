@@ -129,6 +129,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
     status: 'working',
     mtime: chats['codex:first'].mtime,
     pid: process.pid,
+    terminalId: undefined,
   })
   assert.ok(chats['codex:first'].mtime >= receivedAfter)
   assert.equal(

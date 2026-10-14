@@ -1,29 +1,25 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { attachExtensionEnablement } from './vscode-extension-enablement'
 import {
-  installAdeHandle,
-  type AdeHandle,
-  type AdeWorkbenchGlobal,
-} from '../../../shared/vscode-ade-handle'
+  EDITOR_RPC_CONNECT,
+  EDITOR_RPC_MESSAGE,
+  isEditorMessage,
+  type DesktopBridge,
+  type EditorMessage,
+} from '../../../shared/editor-rpc'
 
-contextBridge.executeInMainWorld({ func: installAdeHandle })
-contextBridge.executeInMainWorld({
-  func: attachExtensionEnablement,
-  args: [
-    () => ipcRenderer.invoke('ade:disabled-extensions'),
-    () => ipcRenderer.send('ade:startup-failed'),
-  ],
+const session = crypto.randomUUID()
+let receive: ((call: EditorMessage) => void) | undefined
+ipcRenderer.on(EDITOR_RPC_MESSAGE, (_event, id: unknown, call: unknown) => {
+  if (id === session && isEditorMessage(call)) receive?.(call)
 })
-
-// Callbacks cross context isolation; the handle and VS Code services stay in the page.
-contextBridge.executeInMainWorld({
-  func: (changed: NonNullable<AdeHandle['vscodeSettings']>['changed']) => {
-    const scope = globalThis as unknown as AdeWorkbenchGlobal
-    scope.adeHandle.vscodeSettings = { changed }
+const bridge: DesktopBridge = {
+  async setHandleCall(callback) {
+    if (receive) throw new Error('Workbench RPC is already connected')
+    receive = callback
+    await ipcRenderer.invoke(EDITOR_RPC_CONNECT, session)
   },
-  args: [
-    (generation: number, content: string) => {
-      ipcRenderer.send('ade:settings-changed', generation, content)
-    },
-  ],
-})
+  async post(call) {
+    await ipcRenderer.invoke(EDITOR_RPC_MESSAGE, session, call)
+  },
+}
+contextBridge.exposeInMainWorld('adeDesktop', bridge)

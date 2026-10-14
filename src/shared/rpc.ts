@@ -1,68 +1,33 @@
-import { createBirpc, type BirpcReturn } from 'birpc'
-import { deserializeError, serializeError } from 'serialize-error'
+import type { BirpcReturn } from 'birpc'
+import { createMessageRpc } from './message-rpc'
 import WebSocket, { type RawData } from 'ws'
-import { HEARTBEAT_INTERVAL_MS, RPC_TIMEOUT_MS } from './constants'
-
-function serialize(message: Record<string, unknown>): string {
-  if (message.t === 's' && Object.hasOwn(message, 'e')) {
-    return JSON.stringify({ ...message, e: serializeError(message.e) })
-  }
-  return JSON.stringify(message)
-}
-
-function deserialize(data: string): Record<string, unknown> {
-  const message = JSON.parse(data) as Record<string, unknown> | null
-  if (
-    !message ||
-    typeof message !== 'object' ||
-    (message.t !== 'q' && message.t !== 's') ||
-    (message.t === 'q' &&
-      (typeof message.m !== 'string' || !Array.isArray(message.a))) ||
-    (message.t === 's' && typeof message.i !== 'string') ||
-    (message.i !== undefined && typeof message.i !== 'string')
-  ) {
-    throw new Error('Invalid RPC message')
-  }
-  if (message.t === 's' && Object.hasOwn(message, 'e')) {
-    message.e = deserializeError(message.e)
-  }
-  return message
-}
+import { HEARTBEAT_INTERVAL_MS } from './constants'
 
 export function createRpcPeer<Remote extends object, Local extends object>(
   socket: WebSocket,
   methods: Local,
 ): BirpcReturn<Remote, Local> {
   let receive: (data: string) => void = () => {}
-  const rpc = createBirpc<Remote, Local>(methods, {
-    timeout: RPC_TIMEOUT_MS,
-    serialize,
-    deserialize,
-    post: (data: string) =>
-      new Promise<void>((resolve, reject) => {
-        if (socket.readyState !== WebSocket.OPEN) {
-          reject(new Error('RPC connection is not open'))
-          return
-        }
-        socket.send(data, (error) => (error ? reject(error) : resolve()))
-      }),
-    on: (handler) => {
-      receive = handler
+  const rpc = createMessageRpc<Remote, Local>(
+    {
+      post: (data) =>
+        new Promise<void>((resolve, reject) => {
+          if (socket.readyState !== WebSocket.OPEN) {
+            reject(new Error('RPC connection is not open'))
+            return
+          }
+          socket.send(data, (error) => (error ? reject(error) : resolve()))
+        }),
+      on: (handler) => {
+        receive = handler
+      },
+      off: () => {
+        receive = () => {}
+      },
+      onError: () => socket.terminate(),
     },
-    resolver: (name, handler) => {
-      if (!Object.hasOwn(methods, name) || typeof handler !== 'function') {
-        return undefined
-      }
-      return async (...args: unknown[]) => {
-        try {
-          return await handler.apply(methods, args)
-        } catch (error) {
-          // Normalize even non-Error throws before birpc tests for failure.
-          throw deserializeError(error)
-        }
-      }
-    },
-  })
+    methods,
+  )
 
   const onMessage = (data: RawData) => {
     // EventEmitter does not observe rejected async message handlers.

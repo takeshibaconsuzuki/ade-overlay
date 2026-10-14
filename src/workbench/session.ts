@@ -1,4 +1,4 @@
-import type { AdeWorkbenchGlobal } from '../../../shared/vscode-ade-handle'
+import type { WorkbenchServices } from './services'
 
 // Only the internal contracts used by persistence are described here. VS Code owns the objects.
 // eslint-disable-next-line @typescript-eslint/no-namespace -- Groups type-only contracts without emitting a runtime namespace.
@@ -17,10 +17,9 @@ export declare namespace SessionServices {
 }
 
 // Flushes browser-local view state and working-copy backups; the server may already be stopped.
-// Serialized into the VS Code page by Electron. Keep this function self-contained: imports
-// and closures from the main process are unavailable in the page's JavaScript context.
-export async function persistVscodeSession(): Promise<void> {
-  const handle = (globalThis as unknown as AdeWorkbenchGlobal).adeHandle
+export async function persistVscodeSession(
+  handle: WorkbenchServices,
+): Promise<void> {
   const storage = handle.get('storageService') as SessionServices.StorageService
   const backups = handle.get(
     'workingCopyBackupService',

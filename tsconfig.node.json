@@ -9,7 +9,8 @@
     "src/desktop/**/*.ts",
     "src/shared/**/*.ts",
     "src/server/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "src/workbench/**/*.ts"
   ],
   "exclude": ["src/desktop/**/renderer/**"]
 }

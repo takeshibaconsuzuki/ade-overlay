@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { runInNewContext } from 'node:vm'
-import { setImmediate } from 'node:timers/promises'
+import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import {
   persistVscodeSession,
   type SessionServices,
-} from '../src/desktop/editor/vscode/vscode-session'
-import type { AdeHandle } from '../src/shared/vscode-ade-handle'
+} from '../src/workbench/session'
+import type { WorkbenchServices } from '../src/workbench/services'
 
 function deferred() {
   let resolve!: () => void
@@ -45,22 +44,17 @@ class Session {
       pendingBackupOperations: this.pending,
     } satisfies SessionServices.WorkingCopyBackupTracker,
   }
-  readonly handle: AdeHandle = {
-    workbenchReady: true,
+  readonly handle: WorkbenchServices = {
+    executeCommand: async () => {},
+    registerCommand: () => ({ dispose() {} }),
     get: (id) => this.services[id as keyof typeof this.services],
   }
-  // Drive the page's polling timer explicitly; native operations retain ownership of the map.
-  private tick: (() => void) | undefined
   settled = false
   start(): Promise<AggregateError | undefined> {
-    return runInNewContext(`(${persistVscodeSession.toString()})()`, {
-      adeHandle: this.handle,
-      setTimeout: (callback: () => void) => {
-        this.tick = callback
-      },
-    }).then(
+    return persistVscodeSession(this.handle).then(
       () => {
         this.settled = true
+        return undefined
       },
       (error: AggregateError) => {
         this.settled = true
@@ -69,10 +63,7 @@ class Session {
     )
   }
   async poll(): Promise<void> {
-    const tick = this.tick
-    this.tick = undefined
-    tick?.()
-    await setImmediate()
+    await delay(30)
   }
 }
 

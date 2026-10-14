@@ -3,13 +3,25 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { patchVscodeWorkbench } from '../src/server/vscode-workbench-patch'
 import { workbenchFixture } from './fixtures/vscode-workbench'
-import {
-  installAdeHandle,
-  type AdeWorkbenchGlobal,
-} from '../src/shared/vscode-ade-handle'
+import type {
+  WorkbenchServices,
+  ProfileStorage,
+} from '../src/workbench/services'
 
 function fixture() {
-  const context = {} as AdeWorkbenchGlobal & {
+  const context = {
+    hooks: {
+      initializeExtensions: async () => {},
+      attachWorkbench: (services: WorkbenchServices) => {
+        context.services = services
+      },
+    },
+  } as unknown as {
+    hooks: {
+      initializeExtensions(storage: ProfileStorage): Promise<void>
+      attachWorkbench(services: WorkbenchServices): void
+    }
+    services?: WorkbenchServices
     start(): void
     browserMain: { open(): Promise<void> }
     storage: object
@@ -17,27 +29,39 @@ function fixture() {
     invocations: number
     started?: boolean
   }
-  runInNewContext(`(${installAdeHandle.toString()})()`, context)
-  runInNewContext(patchVscodeWorkbench(workbenchFixture), context)
+  runInNewContext(
+    patchVscodeWorkbench(workbenchFixture).replace(
+      /^import .*;\n/,
+      'const adeWorkbench = globalThis.hooks;\n',
+    ),
+    context,
+  )
   return context
 }
 
-test('the same handle exposes readiness and resolves services after startup', () => {
+test('the module receives private service access and command registration at startup', () => {
   const context = fixture()
-  const handle = context.adeHandle
-  assert.equal(handle.workbenchReady, false)
-  assert.throws(() => handle.get('storageService'), /workbench is not ready/)
+  assert.equal(context.services, undefined)
   context.start()
-  assert.equal(context.adeHandle, handle)
-  assert.equal(handle.workbenchReady, true)
-  assert.equal(handle.get('storageService'), context.storage)
-  assert.equal(handle.get('storageService'), context.storage)
+  const services = context.services!
+  assert.equal(services.get('storageService'), context.storage)
+  assert.equal(services.get('storageService'), context.storage)
   assert.equal(context.invocations, 2)
   assert.equal(
-    handle.get('workbench.contrib.browserWorkingCopyBackupTracker'),
+    services.get('workbench.contrib.browserWorkingCopyBackupTracker'),
     context.tracker,
   )
-  assert.throws(() => handle.get('unknown'), /Unknown contribution/)
+  assert.throws(() => services.get('unknown'), /Unknown contribution/)
+  const registration = services.registerCommand('test', (...args) => args)
+  assert.deepEqual(
+    Array.from(
+      (
+        context as unknown as { command(...args: unknown[]): unknown[] }
+      ).command({}, 1, 'two'),
+    ),
+    [1, 'two'],
+  )
+  registration.dispose()
 })
 
 test('patching is idempotent and rejects incompatible or partial bundles', () => {
@@ -55,32 +79,30 @@ test('patching is idempotent and rejects incompatible or partial bundles', () =>
   )
 })
 
-test('the handle stays unready until initialization succeeds', async () => {
+test('the module attaches only after initialization succeeds', async () => {
   let resolve!: () => void
   const pending = new Promise<void>((done) => {
     resolve = done
   })
   const context = fixture()
-  const handle = context.adeHandle
-  handle.initializeExtensions = async (storage) => {
+  context.hooks.initializeExtensions = async (storage) => {
     assert.equal(storage, context.storage)
     await pending
   }
   const opening = context.browserMain.open()
   await new Promise<void>((done) => setImmediate(done))
   assert.equal(context.started, undefined)
-  assert.equal(handle.workbenchReady, false)
+  assert.equal(context.services, undefined)
   resolve()
   await opening
   assert.equal(context.started, true)
-  assert.equal(handle.workbenchReady, true)
-  assert.equal(context.adeHandle, handle)
+  assert.ok(context.services)
 
   const failed = fixture()
-  failed.adeHandle.initializeExtensions = async () => {
+  failed.hooks.initializeExtensions = async () => {
     throw new Error('Host unavailable')
   }
   await assert.rejects(failed.browserMain.open(), /Host unavailable/)
   assert.equal(failed.started, undefined)
-  assert.equal(failed.adeHandle.workbenchReady, false)
+  assert.equal(failed.services, undefined)
 })

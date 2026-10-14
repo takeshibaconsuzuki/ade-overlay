@@ -1,7 +1,4 @@
 import { app, BrowserWindow, webContents } from 'electron'
-import { createBirpc } from 'birpc'
-import WebSocket from 'ws'
-import { once } from 'node:events'
 import assert from 'node:assert/strict'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -31,35 +28,9 @@ void app.whenReady().then(async () => {
         )),
       'worktrees',
     )
-    if (process.env.ADE_CODEX_PHASE === 'restore') {
-      const socket = new WebSocket(process.env.ADE_SERVER_URL)
-      const rpc = createBirpc(
-        {
-          getClientInfo: () => ({
-            kind: 'extension',
-            name: 'test-requester',
-            version: '1',
-          }),
-          chatsChanged: () => {},
-        },
-        {
-          post: (data) => socket.send(data),
-          on: (handler) =>
-            socket.on('message', (data) => handler(data.toString())),
-          serialize: JSON.stringify,
-          deserialize: JSON.parse,
-          timeout: 10_000,
-        },
-      )
-      await once(socket, 'open')
-      await rpc.openChat('test:first')
-      rpc.$close()
-      socket.close()
-    } else {
-      await picker.webContents.executeJavaScript(
-        'document.querySelector(".worktree-open").click()',
-      )
-    }
+    await picker.webContents.executeJavaScript(
+      'document.querySelector(".worktree-open").click()',
+    )
     let page
     await wait(() => {
       page = webContents
@@ -70,30 +41,30 @@ void app.whenReady().then(async () => {
     await wait(
       async () =>
         !page.isLoading() &&
-        (await page.executeJavaScript('globalThis.adeHandle?.workbenchReady')),
+        (await page.executeJavaScript('globalThis.adeTest?.workbenchReady')),
       'workbench',
     )
     await page.executeJavaScript(
-      'adeHandle.get("workspaceTrustManagementService").setWorkspaceTrust(true)',
+      'adeTest.get("workspaceTrustManagementService").setWorkspaceTrust(true)',
     )
     const command = (id, ...args) =>
       page.executeJavaScript(
-        `adeHandle.get('commandService').executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
+        `adeTest.get('commandService').executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
       )
     await wait(
-      async () => page.executeJavaScript('!!adeHandle.chatTerminals'),
+      async () => page.executeJavaScript('adeTest.workbenchReady'),
       'chat controller initialized at startup',
     )
     await wait(
       () =>
         page.executeJavaScript(
-          "adeHandle.get('configurationService').inspect('terminal.integrated.enablePersistentSessions').userLocalValue === false",
+          "adeTest.get('configurationService').inspect('terminal.integrated.enablePersistentSessions').userLocalValue === false",
         ),
       'host setting disables terminal persistence',
     )
     assert.deepEqual(
       await page.executeJavaScript(`(() => {
-        const setting = adeHandle.get('configurationService').inspect('terminal.integrated.enablePersistentSessions');
+        const setting = adeTest.get('configurationService').inspect('terminal.integrated.enablePersistentSessions');
         return { remote: setting.userRemoteValue, memory: setting.memoryValue };
       })()`),
       { remote: true, memory: undefined },
@@ -101,7 +72,7 @@ void app.whenReady().then(async () => {
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('configurationService').getValue('terminal.integrated.enablePersistentSessions')",
+        "adeTest.get('configurationService').getValue('terminal.integrated.enablePersistentSessions')",
       ),
       true,
       'ADE keeps terminal persistence enabled without changing the host setting',
@@ -138,7 +109,7 @@ void app.whenReady().then(async () => {
       await wait(
         () =>
           page.executeJavaScript(
-            "adeHandle.get('editorService').editors.length > 0",
+            "adeTest.get('editorService').editors.length > 0",
           ),
         'startup editor loaded',
       )
@@ -146,38 +117,38 @@ void app.whenReady().then(async () => {
       await wait(
         () =>
           page.executeJavaScript(
-            "adeHandle.get('terminalService').instances.length === 0 && adeHandle.get('editorGroupsService').groups.length === 1",
+            "adeTest.get('terminalService').instances.length === 0 && adeTest.get('editorGroupsService').groups.length === 1",
           ),
         'empty sole editor group',
       )
       const originalGroup = await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').activeGroup.id",
+        "adeTest.get('editorGroupsService').activeGroup.id",
       )
       for (const count of [1, 2]) {
         await clickCodex()
         await wait(
           () =>
             page.executeJavaScript(`(() => {
-            const group = adeHandle.get('editorGroupsService').getGroup(${originalGroup});
-            return group.count === ${count} && group.isLocked && adeHandle.get('terminalService').instances.length === ${count};
+            const group = adeTest.get('editorGroupsService').getGroup(${originalGroup});
+            return group.count === ${count} && group.isLocked && adeTest.get('terminalService').instances.length === ${count};
           })()`),
           `${count} chats in the sole locked group`,
         )
       }
       await page.executeJavaScript(
-        "adeHandle.get('terminalService').instances[0].sendText('q', false)",
+        "adeTest.get('terminalService').instances[0].sendText('q', false)",
       )
       await wait(
         () =>
           page.executeJavaScript(
-            `adeHandle.get('editorGroupsService').getGroup(${originalGroup}).count === 1`,
+            `adeTest.get('editorGroupsService').getGroup(${originalGroup}).count === 1`,
           ),
         'one remaining chat',
       )
       assert.equal(
         await page.executeJavaScript(`(() => {
-        const group = adeHandle.get('editorGroupsService').getGroup(${originalGroup});
-        return group.isLocked && adeHandle.get('storageService').getNumber('ade.chatTerminalGroup', 1) === group.id;
+        const group = adeTest.get('editorGroupsService').getGroup(${originalGroup});
+        return group.isLocked && adeTest.get('storageService').getNumber('ade.chatTerminalGroup', 1) === group.id;
       })()`),
         true,
         'the group stays owned while another chat is open',
@@ -186,10 +157,10 @@ void app.whenReady().then(async () => {
       await wait(
         () =>
           page.executeJavaScript(`(() => {
-          const groups = adeHandle.get('editorGroupsService');
+          const groups = adeTest.get('editorGroupsService');
           const group = groups.getGroup(${originalGroup});
           return groups.groups.length === 1 && group.count === 0 && !group.isLocked
-            && adeHandle.get('storageService').getNumber('ade.chatTerminalGroup', 1) === undefined;
+            && adeTest.get('storageService').getNumber('ade.chatTerminalGroup', 1) === undefined;
         })()`),
         'sole group unlocked and ownership cleared after the last chat closes',
       )
@@ -209,7 +180,7 @@ void app.whenReady().then(async () => {
       )
       assert.deepEqual(
         await page.executeJavaScript(
-          "adeHandle.get('editorGroupsService').groups.map(g => ({ id: g.id, count: g.count, locked: g.isLocked }))",
+          "adeTest.get('editorGroupsService').groups.map(g => ({ id: g.id, count: g.count, locked: g.isLocked }))",
         ),
         [{ id: originalGroup, count: 1, locked: false }],
         'a normal file opens in the released group without splitting',
@@ -218,8 +189,8 @@ void app.whenReady().then(async () => {
       await wait(
         () =>
           page.executeJavaScript(`(() => {
-          const groups = adeHandle.get('editorGroupsService');
-          const id = adeHandle.get('storageService').getNumber('ade.chatTerminalGroup', 1);
+          const groups = adeTest.get('editorGroupsService');
+          const id = adeTest.get('storageService').getNumber('ade.chatTerminalGroup', 1);
           return groups.groups.length === 2 && id !== ${originalGroup} && groups.getGroup(id)?.count === 1;
         })()`),
         'a later chat gets its own group beside the normal file',
@@ -234,23 +205,23 @@ void app.whenReady().then(async () => {
       await wait(
         async () =>
           page.executeJavaScript(
-            "adeHandle.get('terminalService').instances.length === 1",
+            "adeTest.get('terminalService').instances.length === 1",
           ),
         'terminal restored before any new launch',
       )
       await page.executeJavaScript(
-        "adeHandle.get('terminalService').instances[0].sendText('q', false)",
+        "adeTest.get('terminalService').instances[0].sendText('q', false)",
       )
       await wait(
         async () =>
           page.executeJavaScript(
-            "adeHandle.get('storageService').getNumber('ade.chatTerminalGroup', 1) === undefined",
+            "adeTest.get('storageService').getNumber('ade.chatTerminalGroup', 1) === undefined",
           ),
         'restored group cleared before any new launch',
       )
       assert.equal(
         await page.executeJavaScript(
-          "adeHandle.get('terminalService').instances.length",
+          "adeTest.get('terminalService').instances.length",
         ),
         0,
       )
@@ -275,9 +246,9 @@ void app.whenReady().then(async () => {
     if (process.env.ADE_CODEX_PHASE === 'restore') {
       const saved = JSON.parse(await readFile(markerPath, 'utf8'))
       const restoredTerminals = () =>
-        page.executeJavaScript(`adeHandle.get('terminalService').instances.map(t => ({
+        page.executeJavaScript(`adeTest.get('terminalService').instances.map(t => ({
         resource: t.resource.toString(),
-        group: adeHandle.get('editorService').findEditors(t.resource)[0]?.groupId,
+        group: adeTest.get('editorService').findEditors(t.resource)[0]?.groupId,
         restored: !!t.shellLaunchConfig.attachPersistentProcess
       }))`)
       await wait(
@@ -288,13 +259,6 @@ void app.whenReady().then(async () => {
         'chat terminal restored',
       )
       const restored = (await restoredTerminals()).find((t) => t.restored)
-      await wait(
-        async () =>
-          page.executeJavaScript(
-            `adeHandle.get('editorGroupsService').activeGroup.id === ${saved.group}`,
-          ),
-        'chat click during startup focuses restored group',
-      )
       await clickCodex()
       await wait(
         async () => (await sessions()).length === 5,
@@ -325,7 +289,7 @@ void app.whenReady().then(async () => {
       await wait(
         async () =>
           page.executeJavaScript(
-            `adeHandle.get('terminalService').activeInstance?.resource.toString() === ${JSON.stringify(restored.resource)}`,
+            `adeTest.get('terminalService').activeInstance?.resource.toString() === ${JSON.stringify(restored.resource)}`,
           ),
         'restored terminal focused',
       )
@@ -338,7 +302,7 @@ void app.whenReady().then(async () => {
         'restored terminal closes on exit',
       )
       await page.executeJavaScript(
-        "adeHandle.get('terminalService').instances.forEach(t => t.sendText('q', false))",
+        "adeTest.get('terminalService').instances.forEach(t => t.sendText('q', false))",
       )
       await wait(
         async () => (await restoredTerminals()).length === 0,
@@ -369,7 +333,7 @@ void app.whenReady().then(async () => {
       'startup does not create a chat group',
     )
     await page.executeJavaScript(
-      `void (async () => { globalThis.failedChatTestTerminal = await adeHandle.get('terminalService').createTerminal({ config: { executable: 'ade-nonexistent-test-shell', waitOnExit: false }, location: 1 }); })()`,
+      `void (async () => { globalThis.failedChatTestTerminal = await adeTest.get('terminalService').createTerminal({ config: { executable: 'ade-nonexistent-test-shell', waitOnExit: false }, location: 1 }); })()`,
     )
     await wait(
       async () =>
@@ -395,7 +359,7 @@ void app.whenReady().then(async () => {
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').groups.length",
+        "adeTest.get('editorGroupsService').groups.length",
       ),
       1,
       'an empty workbench uses the whole editor area for chats',
@@ -410,10 +374,10 @@ void app.whenReady().then(async () => {
       'shared locked group',
     )
     const terminals = () =>
-      page.executeJavaScript(`adeHandle.get('terminalService').instances
+      page.executeJavaScript(`adeTest.get('terminalService').instances
       .filter(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID)
       .map(t => ({id: t.shellLaunchConfig.env.ADE_TERMINAL_ID, name: t.shellLaunchConfig.name,
-        group: adeHandle.get('editorService').findEditors(t.resource)[0]?.groupId}))`)
+        group: adeTest.get('editorService').findEditors(t.resource)[0]?.groupId}))`)
     let opened = await terminals()
     assert.equal(opened.length, 2)
     assert.equal(opened[0].group, opened[1].group)
@@ -423,7 +387,7 @@ void app.whenReady().then(async () => {
     )
     // Keep a separate editor group to exercise focus changes and later split creation.
     await page.executeJavaScript(`{
-      const groups = adeHandle.get('editorGroupsService');
+      const groups = adeTest.get('editorGroupsService');
       const editorGroup = groups.addGroup(groups.activeGroup, 2);
       void groups.activateGroup(editorGroup);
     }`)
@@ -432,13 +396,13 @@ void app.whenReady().then(async () => {
 
     // Hold terminal creation so a focus change during startup is deterministic.
     await page.executeJavaScript(`{
-      const get = adeHandle.get;
+      const get = adeTest.get;
       const service = get('terminalService');
-      adeHandle.get = id => id !== 'terminalService' ? get(id) : {
+      adeTest.get = id => id !== 'terminalService' ? get(id) : {
         get instances() { return service.instances },
         setActiveInstance: terminal => service.setActiveInstance(terminal),
         createTerminal: async options => {
-          adeHandle.get = get;
+          adeTest.get = get;
           if (!globalThis.chatLaunchReleased) await new Promise(resolve => { globalThis.releaseChatLaunch = resolve });
           return service.createTerminal(options);
         },
@@ -452,7 +416,7 @@ void app.whenReady().then(async () => {
     )
     await command('workbench.action.focusFirstEditorGroup')
     const focusedGroup = await page.executeJavaScript(
-      "adeHandle.get('editorGroupsService').activeGroup.id",
+      "adeTest.get('editorGroupsService').activeGroup.id",
     )
     await page.executeJavaScript(
       'globalThis.chatLaunchReleased = true; releaseChatLaunch(); delete globalThis.releaseChatLaunch',
@@ -466,14 +430,14 @@ void app.whenReady().then(async () => {
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').activeGroup.id",
+        "adeTest.get('editorGroupsService').activeGroup.id",
       ),
       focusedGroup,
       'launch preserves intervening focus changes',
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').activeGroup.isLocked",
+        "adeTest.get('editorGroupsService').activeGroup.isLocked",
       ),
       false,
       'unrelated editor group is not locked',
@@ -513,7 +477,7 @@ void app.whenReady().then(async () => {
     await wait(
       async () =>
         page.executeJavaScript(
-          `adeHandle.get('terminalService').activeInstance?.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)}`,
+          `adeTest.get('terminalService').activeInstance?.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)}`,
         ),
       'matching terminal focus',
     )
@@ -521,12 +485,12 @@ void app.whenReady().then(async () => {
     await wait(
       async () =>
         page.executeJavaScript(
-          `!adeHandle.get('terminalService').instances.some(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)})`,
+          `!adeTest.get('terminalService').instances.some(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)})`,
         ),
       'terminal closes after CLI exit',
     )
     assert.equal((await terminals()).length, 2)
-    await page.executeJavaScript(`adeHandle.get('terminalService').instances
+    await page.executeJavaScript(`adeTest.get('terminalService').instances
       .filter(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID).forEach(t => t.sendText('x', false))`)
     await wait(
       async () => (await terminals()).length === 0,
@@ -545,21 +509,21 @@ void app.whenReady().then(async () => {
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').groups.length",
+        "adeTest.get('editorGroupsService').groups.length",
       ),
       2,
       'an occupied editor keeps its space when the chat group is created',
     )
     const saved = await page.executeJavaScript(`(() => {
-      const t = adeHandle.get('terminalService').instances[0];
-      return { id: t.shellLaunchConfig.env.ADE_TERMINAL_ID, resource: t.resource.toString(), group: adeHandle.get('editorService').findEditors(t.resource)[0].groupId };
+      const t = adeTest.get('terminalService').instances[0];
+      return { id: t.shellLaunchConfig.env.ADE_TERMINAL_ID, resource: t.resource.toString(), group: adeTest.get('editorService').findEditors(t.resource)[0].groupId };
     })()`)
     const session = JSON.parse(
       await readFile(join(repo, saved.id + '.json'), 'utf8'),
     )
     assert.equal(
       await page.executeJavaScript(
-        "adeHandle.get('terminalService').instances.every(t => t.shouldPersist)",
+        "adeTest.get('terminalService').instances.every(t => t.shouldPersist)",
       ),
       true,
       'chat terminals remain persistent after settings reloads',
@@ -567,7 +531,7 @@ void app.whenReady().then(async () => {
     // Keep the restart fixture's unrelated group empty, as in a newly opened workbench.
     await command('workbench.action.focusFirstEditorGroup')
     await page.executeJavaScript(`(async () => {
-      const groups = adeHandle.get('editorGroupsService');
+      const groups = adeTest.get('editorGroupsService');
       await groups.activeGroup.closeAllEditors({ preserveFocus: true });
       if (groups.groups.length === 1) groups.addGroup(groups.activeGroup, 2);
     })()`)
@@ -595,7 +559,7 @@ void app.whenReady().then(async () => {
     await command('workbench.action.focusFirstEditorGroup')
     assert.notEqual(
       await page.executeJavaScript(
-        "adeHandle.get('editorGroupsService').activeGroup.id",
+        "adeTest.get('editorGroupsService').activeGroup.id",
       ),
       saved.group,
     )

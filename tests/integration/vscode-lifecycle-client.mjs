@@ -33,20 +33,48 @@ void app.whenReady().then(async () => {
     await wait(() => BrowserWindow.getAllWindows().length === 1, 'picker')
     const picker = BrowserWindow.getAllWindows()[0]
     const run = (script) => picker.webContents.executeJavaScript(script)
-    const row =
-      '[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-name").textContent === "linked")'
+    const row = `[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-open").title === ${JSON.stringify(worktree)})`
     await wait(
       async () =>
         !picker.webContents.isLoading() &&
         (await run('document.querySelectorAll(".worktree-row").length === 2')),
       'worktrees',
     )
-    assert.equal(
+    const menuItem = async (label, action = 'disabled', target = row) => {
+      picker.show()
       await run(
-        '[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-name").textContent === "main").querySelectorAll(".worktree-actions button").length',
+        `${target}.querySelector('.worktree-actions button').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))`,
+      )
+      const item = `[...document.querySelectorAll('[role=menu][data-state=open] [role=menuitem]')].find(item => item.textContent === ${JSON.stringify(label)})`
+      await wait(() => run(`!!(${item})`), 'actions menu')
+      const disabled = await run(
+        `${item}.getAttribute('aria-disabled') === 'true'`,
+      )
+      if (action === 'click') {
+        assert.equal(disabled, false, `${label} is available`)
+        await run(`${item}.click()`)
+      }
+      if (
+        await run(`!!document.querySelector('[role=menu][data-state=open]')`)
+      ) {
+        await run(
+          `document.querySelector('[role=menu][data-state=open]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))`,
+        )
+      }
+      await wait(
+        () => run(`!document.querySelector('[role=menu][data-state=open]')`),
+        'actions menu closed',
+      )
+      return disabled
+    }
+    assert.equal(
+      await menuItem(
+        'Delete worktree',
+        'disabled',
+        '[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-open").title.endsWith("main"))',
       ),
-      1,
-      'main worktree has no delete action',
+      true,
+      'main worktree cannot be deleted',
     )
     const open = async () => {
       await run(`${row}.querySelector('.worktree-open').click()`)
@@ -55,9 +83,7 @@ void app.whenReady().then(async () => {
       await wait(
         async () =>
           !page.isLoading() &&
-          (await page.executeJavaScript(
-            'globalThis.adeHandle?.workbenchReady',
-          )),
+          (await page.executeJavaScript('globalThis.adeTest?.workbenchReady')),
         'workbench ready',
       )
       return page
@@ -69,7 +95,7 @@ void app.whenReady().then(async () => {
     )
     const command = (page, id, ...args) =>
       page.executeJavaScript(
-        `adeHandle.get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
+        `adeTest.get("commandService").executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
       )
     const marker = 'UNSAVED-LIFECYCLE-'
     const restored = (page) =>
@@ -90,11 +116,11 @@ void app.whenReady().then(async () => {
       (await fetch(`${process.env.ADE_LIFECYCLE_CONTROL}/fail-stop`)).status,
       200,
     )
-    await run(`${row}.querySelector('.worktree-actions button').click()`)
+    await menuItem('Stop', 'click')
     await wait(
       async () =>
         await run(
-          `${row}.querySelector('.error-tooltip')?.textContent.includes('pid must be a number') && !${row}.querySelector('.worktree-actions button').disabled`,
+          `!!${row}.querySelector('.worktree-status[aria-label^=Error]')`,
         ),
       'failed termination leaves Stop available',
     )
@@ -107,26 +133,23 @@ void app.whenReady().then(async () => {
       await run(`${row}.querySelector('.worktree-open').disabled`),
       true,
     )
-    assert.equal(
-      await run(
-        `${row}.querySelectorAll('.worktree-actions button')[1].disabled`,
-      ),
-      true,
-    )
-    await run(`${row}.querySelector('.status-error').click()`)
+    assert.equal(await menuItem('Stop'), false)
+    assert.equal(await menuItem('Delete worktree'), true)
+    await menuItem('Dismiss error', 'click')
     await wait(
       async () =>
         await run(
-          `!${row}.querySelector('.status-error') && !!${row}.querySelector('.server-status-stopping') && ${row}.querySelector('.worktree-actions button').disabled`,
+          `!!${row}.querySelector('.worktree-status[aria-label="VS Code Server stopping"]')`,
         ),
       'Stop is disabled while stopping without an error',
     )
+    assert.equal(await menuItem('Stop'), true)
     // A fresh failure from another client enables the same retry action here.
     assert.equal((await fetch(process.env.ADE_LIFECYCLE_CONTROL)).status, 200)
     await wait(
       async () =>
         await run(
-          `!!${row}.querySelector('.status-error') && !${row}.querySelector('.worktree-actions button').disabled`,
+          `!!${row}.querySelector('.worktree-status[aria-label^=Error]')`,
         ),
       'worktree error enables Stop retry',
     )
@@ -134,18 +157,21 @@ void app.whenReady().then(async () => {
       (await fetch(`${process.env.ADE_LIFECYCLE_CONTROL}/allow-stop`)).status,
       200,
     )
-    await run(`${row}.querySelector('.worktree-actions button').click()`)
+    await menuItem('Stop', 'click')
     await wait(
       async () =>
         pages().length === 0 &&
         (await run(
-          `!!${row}.querySelector('.status-error') && !${row}.querySelector('.worktree-open').disabled`,
+          `!!${row}.querySelector('.worktree-status[aria-label^=Error]') && !${row}.querySelector('.worktree-open').disabled`,
         )),
       'stopped and disposed',
     )
-    await run(`${row}.querySelector('.status-error').click()`)
+    await menuItem('Dismiss error', 'click')
     await wait(
-      async () => await run(`!!${row}.querySelector('.server-status-stopped')`),
+      async () =>
+        await run(
+          `!!${row}.querySelector('.worktree-status[aria-label="VS Code Server stopped"]')`,
+        ),
       'recovered error explicitly dismissed',
     )
     await access(worktree)
@@ -179,21 +205,24 @@ void app.whenReady().then(async () => {
       async () =>
         pages().length === 0 &&
         (await run(
-          `${row}.querySelector('.error-tooltip')?.textContent.includes('untracked') && !${row}.querySelector('.worktree-open').disabled`,
+          `!!${row}.querySelector('.worktree-status[aria-label^=Error]') && !${row}.querySelector('.worktree-open').disabled`,
         )),
       'asynchronous deletion failure displayed and row usable again',
     )
     await access(dirty)
     assert.equal(
       await run(
-        '[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-name").textContent === "main").querySelector(".worktree-open").disabled',
+        '[...document.querySelectorAll(".worktree-row")].find(row => row.querySelector(".worktree-open").title.endsWith("main")).querySelector(".worktree-open").disabled',
       ),
       false,
       'another worktree remains available',
     )
-    await run(`${row}.querySelector('.status-error').click()`)
+    await menuItem('Dismiss error', 'click')
     await wait(
-      async () => await run(`!${row}.querySelector('.status-error')`),
+      async () =>
+        await run(
+          `!${row}.querySelector('.worktree-status[aria-label^=Error]')`,
+        ),
       'deletion error dismissed',
     )
     await rm(dirty)
