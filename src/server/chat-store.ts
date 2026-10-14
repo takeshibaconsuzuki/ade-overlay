@@ -1,10 +1,6 @@
 import { chatSchema, type Chat } from '../shared/api'
 import { logger } from '../shared/logger'
-import {
-  chatReportSchema,
-  UnknownChatProviderError,
-  type ChatProvider,
-} from './chat-provider'
+import { UnknownChatProviderError, type ChatProvider } from './chat-provider'
 import type { ProcessProbe } from './process-probe'
 import { MAX_CHAT_DESCRIPTION_LENGTH } from './constants'
 
@@ -64,9 +60,8 @@ export class ChatStore {
     ]).then(([, result]) => {
       if (this.closed) throw new Error('Chat store closed')
       if (result.status === 'rejected') throw result.reason
-      const { shouldPurge, chat: incoming } = chatReportSchema.parse(
-        result.value,
-      )
+      const report = result.value
+      const { shouldPurge, chat: incoming } = report
       const id = `${incoming.providerId}:${incoming.sessionId}`
       const previous = this.chats.get(id)
       if (shouldPurge) {
@@ -84,20 +79,24 @@ export class ChatStore {
         }
         return
       }
-      // Store description previews so every consumer sees the same bounded text.
-      // Titles are expected to be short and intentionally remain untruncated.
-      if (incoming.description !== undefined)
-        incoming.description = Array.from(incoming.description)
-          .slice(0, MAX_CHAT_DESCRIPTION_LENGTH)
-          .join('')
+      const update = report.transformChat
+        ? report.transformChat(previous)
+        : incoming
+      if (update === undefined) return
       const chat = chatSchema.parse({
         ...previous,
         ...Object.fromEntries(
-          Object.entries(incoming).filter(([, value]) => value !== undefined),
+          Object.entries(update).filter(([, value]) => value !== undefined),
         ),
       })
+      // Store description previews so every consumer sees the same bounded text.
+      // Titles are expected to be short and intentionally remain untruncated.
+      if (chat.description !== undefined)
+        chat.description = Array.from(chat.description)
+          .slice(0, MAX_CHAT_DESCRIPTION_LENGTH)
+          .join('')
       // Terminal ownership follows the reporting process, including external resumes.
-      chat.terminalId = incoming.terminalId
+      chat.terminalId = update.terminalId
       this.chats.set(id, chat)
       log.info(
         {

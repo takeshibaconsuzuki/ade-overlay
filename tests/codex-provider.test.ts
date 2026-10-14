@@ -6,6 +6,48 @@ import { test } from 'node:test'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
 
+test('Codex transforms startup using stored status and report receipt times', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ade-codex-grace-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const provider = new CodexChatProvider('unused', directory)
+  let now = 0
+  t.mock.method(Date, 'now', () => now)
+  const raw = { session_id: 'session', cwd: directory, pid: 123 }
+  const { chat: previous } = await provider.readReport({
+    ...raw,
+    hook_event_name: 'UserPromptSubmit',
+  })
+  now = 999
+  for (const source of ['startup', 'resume', 'clear', 'compact']) {
+    const startup = { ...raw, hook_event_name: 'SessionStart', source }
+    const prepared = await provider.readReport(startup)
+    assert.ok(prepared.transformChat)
+    startup.hook_event_name = 'Stop'
+    now += 1000
+    assert.equal(prepared.transformChat(previous), undefined)
+    assert.deepEqual(prepared.transformChat(undefined), prepared.chat)
+    assert.deepEqual(
+      prepared.transformChat({ ...previous, status: 'idle' }),
+      prepared.chat,
+    )
+    now = 999
+  }
+  now = 1000
+  const startup = { ...raw, hook_event_name: 'SessionStart', source: 'startup' }
+  const prepared = await provider.readReport(startup)
+  assert.deepEqual(prepared.transformChat?.(previous), prepared.chat)
+  for (const hook_event_name of [
+    'PreToolUse',
+    'PostToolUse',
+    'PermissionRequest',
+    'Stop',
+  ]) {
+    const event = { ...raw, hook_event_name }
+    const prepared = await provider.readReport(event)
+    assert.deepEqual(prepared.transformChat?.(previous), prepared.chat)
+  }
+})
+
 test('Codex metadata matches resume names and previews, including saved renames', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'ade-codex-metadata-'))
   const db = createCodexMetadata(directory)
@@ -107,6 +149,9 @@ test('Codex provider reads the saved title and derives other metadata from the h
     ['SessionStart', 'resume', 'idle'],
     ['SessionStart', 'clear', 'idle'],
     ['UserPromptSubmit', undefined, 'working'],
+    ['PreToolUse', undefined, 'working'],
+    ['PermissionRequest', undefined, 'idle'],
+    ['PostToolUse', undefined, 'working'],
     ['SessionStart', 'compact', 'working'],
     ['Stop', undefined, 'idle'],
     ['Interrupt', undefined, 'idle'],
