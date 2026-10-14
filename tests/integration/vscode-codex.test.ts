@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { simpleGit } from 'simple-git'
+import { connectRpc } from '../../src/shared/rpc-client'
+import type { DesktopClientMethods, ServerMethods } from '../../src/shared/api'
 import { TestChatProvider } from '../fixtures/chat-provider'
 import { runDesktopClient, startIntegrationServer } from './harness'
 
@@ -57,6 +59,21 @@ async function runChatScenario(phases: string[]): Promise<void> {
     [repo],
     [new TestChatProvider()],
   )
+  // A second desktop must not make extension actions ambiguous or receive them.
+  const otherDesktop = connectRpc<ServerMethods, DesktopClientMethods>(
+    `ws://127.0.0.1:${server.port}/rpc`,
+    {
+      getClientInfo: () => ({
+        kind: 'desktop',
+        name: 'other desktop',
+        version: '1',
+      }),
+      chatsChanged() {},
+      settingsChanged() {},
+      worktreesChanged() {},
+      chatTurnFinished() {},
+    },
+  )
   try {
     for (const phase of phases) {
       await runDesktopClient(
@@ -76,6 +93,7 @@ async function runChatScenario(phases: string[]): Promise<void> {
     )
   } finally {
     process.env.PATH = previousPath
+    await otherDesktop.close()
     await server.close()
   }
 }

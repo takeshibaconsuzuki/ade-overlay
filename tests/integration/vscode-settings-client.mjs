@@ -21,15 +21,15 @@ const pages = () =>
     .filter((page) => /^http:.*\/vscode\//.test(page.getURL()))
 const readSettings = (page) =>
   page.executeJavaScript(`(async () => {
-  if (!globalThis.adeHandle?.workbenchReady) return null;
-  const handle = adeHandle;
+  if (!globalThis.adeTest?.workbenchReady) return null;
+  const handle = adeTest;
   const resource = handle.get('IUserDataProfilesService').defaultProfile.settingsResource;
   if (!await handle.get('fileService').exists(resource)) return null;
   return (await handle.get('textFileService').read(resource)).value;
 })()`)
 const writeSettings = (page, content) =>
   page.executeJavaScript(`(async () => {
-  const handle = adeHandle;
+  const handle = adeTest;
   await handle.get('textFileService').write(handle.get('IUserDataProfilesService').defaultProfile.settingsResource, ${JSON.stringify(content)});
 })()`)
 
@@ -63,7 +63,7 @@ void app.whenReady().then(async () => {
         async () =>
           !page.isLoading() &&
           (await page.executeJavaScript(
-            '!!globalThis.adeHandle?.vscodeSettings?.apply',
+            '!!globalThis.adeTest?.workbenchReady',
           )),
         'settings bridge',
       )
@@ -75,7 +75,7 @@ void app.whenReady().then(async () => {
       async () =>
         !shell.webContents.isLoading() &&
         (await shell.webContents.executeJavaScript(
-          '!!document.querySelector(".connection-screen") && typeof window.editor?.retryEditor === "function"',
+          '!!document.querySelector("[role=status]") && typeof window.editor?.retryEditor === "function"',
         )),
       'editor shell renderer and preload',
     )
@@ -96,27 +96,27 @@ void app.whenReady().then(async () => {
     for (const page of [a, b]) {
       assert.deepEqual(
         await page.executeJavaScript(`({
-          apply: typeof adeHandle.vscodeSettings.apply,
-          changed: typeof adeHandle.vscodeSettings.changed,
+          setHandleCall: typeof adeDesktop.setHandleCall,
+          post: typeof adeDesktop.post,
           globals: Object.getOwnPropertyNames(globalThis).filter(name => /^ade/i.test(name)).sort(),
           picker: typeof window.picker,
           editor: typeof window.editor,
         })`),
         {
-          apply: 'function',
-          changed: 'function',
-          globals: ['adeHandle'],
+          setHandleCall: 'function',
+          post: 'function',
+          globals: ['adeDesktop', 'adeTest'],
           picker: 'undefined',
           editor: 'undefined',
         },
-        'all ADE workbench APIs are accessed through the handle',
+        'production exposes only transport functions; private services are test instrumentation',
       )
     }
     console.log('PASS initial host settings in both workbenches')
     for (const page of [a, b]) {
       await page.executeJavaScript(
         `(async () => {
-          const h = adeHandle;
+          const h = adeTest;
           const trust = h.get('workspaceTrustManagementService');
           await trust.workspaceTrustInitialized;
           await h.get('extensionService').whenInstalledExtensionsRegistered();
@@ -126,14 +126,14 @@ void app.whenReady().then(async () => {
       await wait(
         () =>
           page.executeJavaScript(
-            'globalThis.adeHandle?.workbenchReady && adeHandle.get("extensionService").extensions.some(extension => extension.identifier.value === "ade-test.shared")',
+            'globalThis.adeTest?.workbenchReady && adeTest.get("extensionService").extensions.some(extension => extension.identifier.value === "ade-test.shared")',
           ),
         'shared host extension',
       )
       await wait(
         () =>
           page.executeJavaScript(
-            '!!globalThis.adeHandle?.vscodeSettings?.apply && adeHandle.get("configurationService").getValue("editor.fontSize") === 17',
+            '!!globalThis.adeTest?.workbenchReady && adeTest.get("configurationService").getValue("editor.fontSize") === 17',
           ),
         'effective user settings',
       )
@@ -213,9 +213,8 @@ void app.whenReady().then(async () => {
     await reloaded
     await wait(
       async () =>
-        (await a.executeJavaScript(
-          '!!globalThis.adeHandle?.vscodeSettings?.apply',
-        )) && (await readSettings(a)) === '{"editor.fontSize":24}',
+        (await a.executeJavaScript('!!globalThis.adeTest?.workbenchReady')) &&
+        (await readSettings(a)) === '{"editor.fontSize":24}',
       'settings handle resumes after page reload',
     )
     await writeSettings(a, '{"editor.fontSize":25}')

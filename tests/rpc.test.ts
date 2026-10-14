@@ -93,6 +93,27 @@ describe('RPC', { concurrency: true }, () => {
     assert.equal(await desktop.getName(), 'desktop')
   })
 
+  test('structured arguments and results preserve nested errors and undefined values', async (t) => {
+    const error = Object.assign(
+      new TypeError('Invalid selection', {
+        cause: new Error('Missing terminal'),
+      }),
+      { code: 'TERMINAL_NOT_FOUND' },
+    )
+    const payload = { error, optional: undefined, count: 1n, date: new Date() }
+    const { client } = await pair(
+      t,
+      { echo: (value: typeof payload) => value },
+      {},
+    )
+    const result = await client.rpc.echo(payload)
+    assert.deepEqual(result, payload)
+    assert.ok(result.error instanceof TypeError)
+    assert.ok(result.error.cause instanceof Error)
+    assert.equal(result.error.stack, error.stack)
+    assert.equal(result.error.cause.stack, (error.cause as Error).stack)
+  })
+
   test('remote exceptions preserve Error semantics, messages, codes, and causes', async (t) => {
     const { server, client } = await pair(
       t,

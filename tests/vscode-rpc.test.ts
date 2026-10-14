@@ -113,10 +113,9 @@ test(
             name: 'test',
             version: '1',
           }),
-          openChatTerminal: async () => {},
-          focusChatTerminal: async () => false,
-          openWorktree: async () => {},
+
           chatTurnFinished: () => {},
+          chatsChanged: () => {},
           settingsChanged: () => {},
           worktreesChanged: (next) => {
             worktrees = next

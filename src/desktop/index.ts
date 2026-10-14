@@ -25,6 +25,7 @@ import { DEFAULT_SERVER_URL } from '../shared/constants'
 import { connectRpc } from '../shared/rpc-client'
 import { APP_NAME } from '../shared/constants'
 import { logger } from '../shared/logger'
+import { DesktopChatService } from './chat-service'
 import { EditorWindowManager } from './editor/manager'
 import { ElectronEditorWindow } from './editor/window'
 import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
@@ -61,6 +62,11 @@ app.whenReady().then(() => {
   const editorHost = new ElectronEditorWindow(
     { writeSettings: (content) => server.rpc.writeSettings(content) },
     () => server.rpc.getDisabledExtensions(),
+    {
+      openChat: (id): Promise<void> => chats.openChat(id),
+      openChatTerminal: (options): Promise<void> =>
+        chats.openChatTerminal(options),
+    },
   )
   const serverUrl = process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL
   const editor = new EditorWindowManager(
@@ -68,6 +74,7 @@ app.whenReady().then(() => {
     { ensure: (path): Promise<void> => server.rpc.ensureVscodeServer(path) },
     serverUrl,
   )
+  const chats = new DesktopChatService(editor)
   const openWorktree = (path: string): Promise<void> => {
     const worktree = worktrees.find((worktree) => worktree.path === path)
     if (!worktree) throw new Error('Unknown worktree')
@@ -88,13 +95,10 @@ app.whenReady().then(() => {
           body: `${worktreeBasename}\n${description.slice(0, 8_000)}`,
         }).show()
       },
-      openWorktree,
-      openChatTerminal: (options): Promise<void> =>
-        editor.openChatTerminal(options),
-      focusChatTerminal: (path, id): Promise<boolean> =>
-        editor.focusChatTerminal(path, id),
+      chatsChanged: (snapshot) => chats.updateChats(snapshot),
       worktreesChanged: (next) => {
         worktrees = next
+        chats.updateWorktrees(next)
         editor.updateWorktrees(next)
         worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
       },
@@ -103,6 +107,7 @@ app.whenReady().then(() => {
       onStateChange: (state) => {
         editorHost.receiveVscodeSettings(null)
         if (state !== 'connected') {
+          chats.disconnect()
           worktrees = []
           editor.onServerDisconnected()
           worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
@@ -178,7 +183,8 @@ app.whenReady().then(() => {
         noLink: true,
       })
       if (response !== 1) return
-      await server.rpc.deleteWorktree(path, branchName)
+      if (branchName === undefined) await server.rpc.deleteWorktree(path)
+      else await server.rpc.deleteWorktree(path, branchName)
     },
   )
   let quitting: Promise<void> | undefined
@@ -188,6 +194,7 @@ app.whenReady().then(() => {
     event.preventDefault()
     quitting ??= (async () => {
       try {
+        chats.disconnect()
         await editor.close()
         await server.close()
       } catch (error) {

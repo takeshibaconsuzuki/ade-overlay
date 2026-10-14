@@ -20,6 +20,7 @@ import {
   vscodePlatform,
 } from '../src/server/vscode-runtime'
 
+import { WORKBENCH_VERSION } from '../src/server/vscode-workbench-patch'
 import { workbenchFixture } from './fixtures/vscode-workbench'
 
 async function fixture(t: TestContext) {
@@ -98,7 +99,7 @@ test('installation is verified and shared, and a new runtime uses the cache offl
   const browserDirectory = join(a.entrypoint, '..', 'vs/code/browser/workbench')
   assert.match(
     await readFile(join(browserDirectory, 'workbench.js'), 'utf8'),
-    /globalThis.adeHandle/,
+    /adeWorkbench.attachWorkbench/,
   )
   assert.match(
     await readFile(join(browserDirectory, 'workbench.html'), 'utf8'),
@@ -115,7 +116,7 @@ test('installation is verified and shared, and a new runtime uses the cache offl
   assert.deepEqual(await offline.prepare(signal), a)
   assert.deepEqual(
     await readdir(join(f.options.cacheDirectory, vscodePlatform())),
-    [VSCODE_SERVER_COMMIT],
+    [`${VSCODE_SERVER_COMMIT}-${WORKBENCH_VERSION}`],
   )
 })
 
@@ -204,7 +205,7 @@ test('a different cached commit is preserved while the pinned release is install
     join(
       f.options.cacheDirectory,
       vscodePlatform(),
-      VSCODE_SERVER_COMMIT,
+      `${VSCODE_SERVER_COMMIT}-${WORKBENCH_VERSION}`,
       process.platform === 'win32' ? 'node.exe' : 'node',
     ),
   )

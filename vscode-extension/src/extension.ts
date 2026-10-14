@@ -5,32 +5,29 @@ import type {
   ExtensionClientMethods,
   ServerMethods,
 } from '../../src/shared/api'
-import {
-  DEFAULT_SERVER_URL,
-  FOCUS_CHAT_TERMINAL_COMMAND,
-} from '../../src/shared/constants'
+import { DEFAULT_SERVER_URL } from '../../src/shared/constants'
 import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
 import type { ChatsMessage } from '../shared/api'
 import { ChatTerminals } from './chat-terminals'
+import { connectDesktop } from './desktop'
 import { CodexTerminalProvider } from './providers/codex'
 
+let desktop: ReturnType<typeof connectDesktop> | undefined
 let client: RpcClient<ServerMethods, ExtensionClientMethods> | undefined
 
 export function activate(context: vscode.ExtensionContext) {
   const terminals = new ChatTerminals(context.workspaceState, {
     openChatTerminal: async (options) => {
-      if (!client) throw new Error('ADE is not connected')
-      await client.rpc.openChatTerminal(options)
+      if (!desktop) throw new Error('ADE desktop is not connected')
+      await desktop.rpc.openChatTerminal(options)
     },
   })
   const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
     terminals,
-    vscode.commands.registerCommand(FOCUS_CHAT_TERMINAL_COMMAND, (id: string) =>
-      terminals.focus(id),
-    ),
   )
+  desktop = connectDesktop({ focusChatTerminal: (id) => terminals.focus(id) })
   client = connectRpc<ServerMethods, ExtensionClientMethods>(
     process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL,
     {
@@ -124,8 +121,8 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async openChat(id: string): Promise<void> {
     try {
-      if (!client) throw new Error('ADE is not connected')
-      await client.rpc.openChat(id)
+      if (!desktop) throw new Error('ADE desktop is not connected')
+      await desktop.rpc.openChat(id)
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Unable to open chat: ${error instanceof Error ? error.message : String(error)}`,
@@ -135,6 +132,8 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
 }
 
 export async function deactivate(): Promise<void> {
+  await desktop?.close()
+  desktop = undefined
   await client?.close()
   client = undefined
 }

@@ -1,6 +1,5 @@
 import { basename } from 'node:path'
 import type { BirpcReturn } from 'birpc'
-import pRetry from 'p-retry'
 import type {
   Chat,
   ClientMethods,
@@ -9,7 +8,7 @@ import type {
   ServerMethods,
   Worktree,
 } from '../shared/api'
-import { chatTerminalLaunchSchema, clientInfoSchema } from '../shared/api'
+import { clientInfoSchema } from '../shared/api'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { createConfigStore } from './config-store'
@@ -23,7 +22,6 @@ import { readDisabledExtensions } from './extension-enablement'
 import { NodeProcessProbe } from './process-probe'
 import type { ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
-import { pathKey } from './path-key'
 
 const log = logger.child({ component: 'server' })
 
@@ -50,25 +48,14 @@ export async function startServer(
     BirpcReturn<ExtensionClientMethods, ServerMethods>
   >()
 
-  let pendingFocus:
-    | {
-        chatId: string
-        terminalId: string | undefined
-        worktreePath: string
-        controller: AbortController
-      }
-    | undefined
-  const cancelFocus = () => {
-    pendingFocus?.controller.abort()
-    pendingFocus = undefined
-  }
-
   const sendChats = (
-    client: BirpcReturn<ExtensionClientMethods, ServerMethods>,
+    client:
+      | BirpcReturn<ExtensionClientMethods, ServerMethods>
+      | BirpcReturn<DesktopClientMethods, ServerMethods>,
     snapshot: Record<string, Chat>,
   ) => {
     // Accepted limitation: the aggregate snapshot can still exceed MAX_RPC_PAYLOAD_BYTES,
-    // causing extension reconnect loops until the registry shrinks. We do not expect
+    // causing client reconnect loops until the registry shrinks. We do not expect
     // enough simultaneous chats with large descriptions to reach that limit; aggregate
     // budgeting and chunking are intentionally out of scope.
     void client.chatsChanged.asEvent(snapshot).catch((error: unknown) => {
@@ -76,16 +63,8 @@ export async function startServer(
     })
   }
   chats.setOnChangedListener((snapshot) => {
-    if (pendingFocus) {
-      const chat = snapshot[pendingFocus.chatId]
-      if (
-        !chat ||
-        chat.terminalId !== pendingFocus.terminalId ||
-        pathKey(chat.worktreePath) !== pendingFocus.worktreePath
-      )
-        cancelFocus()
-    }
     for (const client of extensions) sendChats(client, snapshot)
+    for (const client of desktops) sendChats(client, snapshot)
   })
   chats.setOnTurnFinishedListener((chat) => {
     for (const client of desktops) {
@@ -138,7 +117,6 @@ export async function startServer(
     closing ??= (async () => {
       config.setOnChangedListener(undefined)
       worktrees.setOnChangedListener(undefined)
-      cancelFocus()
       chats.close()
       await Promise.all([
         config.close(),
@@ -160,83 +138,6 @@ export async function startServer(
     server = await startRpcServer<ClientMethods, ServerMethods>(
       {
         getChats: () => chats.snapshot,
-        openChatTerminal: async (value) => {
-          const options = chatTerminalLaunchSchema.parse(value)
-          const worktree = worktrees.snapshot.find(
-            (entry) => pathKey(entry.path) === pathKey(options.worktreePath),
-          )
-          if (!worktree) throw new Error('Unknown worktree')
-          if (worktree.deleting) throw new Error('Worktree is being deleted')
-          if (desktops.size !== 1)
-            throw new Error('Exactly one ADE desktop must be connected')
-          const [desktop] = desktops
-          await desktop.openChatTerminal({
-            ...options,
-            worktreePath: worktree.path,
-          })
-        },
-        openChat: async (id) => {
-          const chat = chats.snapshot[id]
-          if (!chat) throw new Error('Chat is no longer available')
-          const worktree = worktrees.snapshot.find(
-            (entry) => pathKey(entry.path) === pathKey(chat.worktreePath),
-          )
-          if (!worktree) throw new Error('Unknown worktree')
-          if (desktops.size === 0)
-            throw new Error('No ADE desktop is connected')
-          if (desktops.size > 1)
-            throw new Error('Multiple ADE desktops are connected')
-          const [desktop] = desktops
-          cancelFocus()
-          const request = {
-            chatId: id,
-            terminalId: chat.terminalId,
-            worktreePath: pathKey(worktree.path),
-            controller: new AbortController(),
-          }
-          pendingFocus = request
-          try {
-            await desktop.openWorktree(worktree.path)
-          } catch (error) {
-            if (pendingFocus === request) cancelFocus()
-            throw error
-          }
-          if (pendingFocus !== request) return
-          const terminalId = request.terminalId
-          if (!terminalId) {
-            cancelFocus()
-            return
-          }
-          // Opening a worktree acknowledges startup before its extension or terminals
-          // are ready. Keep only the latest selection, including across reconnects.
-          const signal = AbortSignal.any([
-            request.controller.signal,
-            AbortSignal.timeout(30_000),
-          ])
-          void pRetry(
-            async () => {
-              signal.throwIfAborted()
-              if (!(await desktop.focusChatTerminal(worktree.path, terminalId)))
-                throw new Error('The chat terminal is not ready')
-            },
-            {
-              retries: Infinity,
-              minTimeout: 250,
-              maxTimeout: 250,
-              signal,
-            },
-          )
-            .catch((error: unknown) => {
-              if (!request.controller.signal.aborted)
-                log.warn(
-                  { err: error },
-                  'Unable to focus chat terminal before expiry',
-                )
-            })
-            .finally(() => {
-              if (pendingFocus === request) cancelFocus()
-            })
-        },
         getServerInfo: () => ({ name: APP_NAME }),
         getDisabledExtensions: async () =>
           readDisabledExtensions(options.vscode.profileDatabase),
@@ -287,10 +188,10 @@ export async function startServer(
             'abort',
             () => {
               desktops.delete(desktop)
-              cancelFocus()
             },
             { once: true },
           )
+          sendChats(desktop, chats.snapshot)
           sendSettings(desktop, settings!.snapshot)
           sendWorktrees(desktop, worktrees.snapshot)
         }

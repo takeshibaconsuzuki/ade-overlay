@@ -55,11 +55,11 @@ void app.whenReady().then(async () => {
       await wait(
         async () =>
           !page.isLoading() &&
-          (await run('globalThis.adeHandle?.workbenchReady')),
+          (await run('globalThis.adeTest?.workbenchReady')),
         'workbench',
       )
       await run(
-        'adeHandle.get("extensionService").whenInstalledExtensionsRegistered()',
+        'adeTest.get("extensionService").whenInstalledExtensionsRegistered()',
       )
     }
     const reload = async () => {
@@ -71,7 +71,7 @@ void app.whenReady().then(async () => {
     }
     const disabled = () =>
       run(
-        'adeHandle.get("IGlobalExtensionEnablementService").getDisabledExtensions().some(e => e.id === "ade-test.enablement")',
+        'adeTest.get("IGlobalExtensionEnablementService").getDisabledExtensions().some(e => e.id === "ade-test.enablement")',
       )
     await ready()
     assert.equal(await disabled(), true)
@@ -89,7 +89,7 @@ void app.whenReady().then(async () => {
 
     // Local global choices last only until startup; workspace overrides persist.
     await run(
-      'adeHandle.get("IGlobalExtensionEnablementService").disableExtension({ id: "ade-test.enablement" })',
+      'adeTest.get("IGlobalExtensionEnablementService").disableExtension({ id: "ade-test.enablement" })',
     )
     assert.equal(await disabled(), true)
     await reload()
@@ -108,7 +108,7 @@ void app.whenReady().then(async () => {
     )
 
     await run(`(async () => {
-      const h = adeHandle;
+      const h = adeTest;
       const extension = (await h.get('extensionManagementService').getInstalled()).find(e => e.identifier.id === 'ade-test.enablement');
       await h.get('extensionEnablementService').setEnablement([extension], 13);
       await h.get('storageService').flush();
@@ -118,7 +118,7 @@ void app.whenReady().then(async () => {
     assert.equal(await disabled(), true, 'host global choice is still disabled')
     assert.equal(
       await run(
-        `JSON.parse(adeHandle.get('storageService').get('extensionsIdentifiers/enabled', 1, '[]')).some(e => e.id === 'ade-test.enablement')`,
+        `JSON.parse(adeTest.get('storageService').get('extensionsIdentifiers/enabled', 1, '[]')).some(e => e.id === 'ade-test.enablement')`,
       ),
       true,
       'workspace enable override survives',
@@ -143,7 +143,7 @@ void app.whenReady().then(async () => {
       'retryable startup error',
     )
     assert.equal(
-      await run('adeHandle.workbenchReady'),
+      await run('adeTest.workbenchReady'),
       false,
       'workbench never starts with an invalid snapshot',
     )

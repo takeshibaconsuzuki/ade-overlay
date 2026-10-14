@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import * as vscode from 'vscode'
-import type { ServerMethods } from '../../src/shared/api'
+import type { DesktopExtensionMethods } from '../../src/shared/editor-rpc'
 import type { TerminalChatProvider } from './terminal-chat-provider'
 import { TerminalIdentities } from './terminal-identities'
 import { WorkspaceTerminalIdentityStore } from './workspace-terminal-identity-store'
@@ -11,7 +11,7 @@ export class ChatTerminals {
 
   constructor(
     state: vscode.Memento,
-    private readonly server: Pick<ServerMethods, 'openChatTerminal'>,
+    private readonly desktop: Pick<DesktopExtensionMethods, 'openChatTerminal'>,
   ) {
     this.identities = new TerminalIdentities(
       new WorkspaceTerminalIdentityStore(state),
@@ -36,7 +36,7 @@ export class ChatTerminals {
   async start(provider: TerminalChatProvider): Promise<void> {
     const worktreePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     if (!worktreePath) throw new Error('No worktree is open')
-    await this.server.openChatTerminal({
+    await this.desktop.openChatTerminal({
       ...provider.getLaunchOptions(),
       worktreePath,
       terminalId: randomUUID(),

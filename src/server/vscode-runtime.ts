@@ -23,7 +23,10 @@ import type { HttpClient } from '../shared/http-client'
 import { logger } from '../shared/logger'
 import { VSCODE_SERVER_COMMIT } from './constants'
 import { extractVscodeArchive } from './vscode-archive'
-import { prepareVscodeWorkbench } from './vscode-workbench-patch'
+import {
+  BundledWorkbenchAssets,
+  type WorkbenchAssets,
+} from './vscode-workbench-patch'
 
 const log = logger.child({ component: 'vscode-runtime' })
 const paths = envPaths(APP_NAME)
@@ -81,6 +84,7 @@ export class DownloadedVscodeRuntime implements VscodeRuntime {
       cacheDirectory?: string
       dataDirectory?: string
     } = {},
+    private readonly workbench: WorkbenchAssets = new BundledWorkbenchAssets(),
   ) {
     this.cacheDirectory = resolve(
       options.cacheDirectory ?? join(paths.cache, 'vscode-server'),
@@ -157,11 +161,14 @@ export class DownloadedVscodeRuntime implements VscodeRuntime {
     platform: string,
     signal: AbortSignal,
   ): Promise<VscodeInstallation> {
-    const target = join(directory, VSCODE_SERVER_COMMIT)
+    const target = join(
+      directory,
+      `${VSCODE_SERVER_COMMIT}-${this.workbench.version}`,
+    )
     const cached = await this.readCached(target)
     signal.throwIfAborted()
     if (cached) {
-      await prepareVscodeWorkbench(target)
+      await this.workbench.prepare(target)
       return cached
     }
     const downloadSignal = AbortSignal.any([
@@ -250,7 +257,7 @@ export class DownloadedVscodeRuntime implements VscodeRuntime {
     release: Release,
     signal: AbortSignal,
   ): Promise<VscodeInstallation> {
-    await prepareVscodeWorkbench(extracted)
+    await this.workbench.prepare(extracted)
     await writeFile(
       join(extracted, 'ade-release.json'),
       JSON.stringify(release),

@@ -1,5 +1,5 @@
-import type { ChatTerminalLaunch } from '../../../shared/api'
-import type { AdeWorkbenchGlobal } from '../../../shared/vscode-ade-handle'
+import type { ChatTerminalLaunch } from '../shared/api'
+import type { WorkbenchServices } from './services'
 
 // Internal contracts of the pinned workbench. VS Code owns these objects.
 // eslint-disable-next-line @typescript-eslint/no-namespace -- Type-only workbench contracts.
@@ -67,21 +67,13 @@ declare namespace ChatTerminalServices {
   }
 }
 
-// Serialized into the workbench: keep runtime code self-contained.
-export async function initializeChatTerminals(): Promise<void> {
-  const scope = globalThis as unknown as AdeWorkbenchGlobal
-  const deadline = Date.now() + 20_000
-  while (!scope.adeHandle?.workbenchReady) {
-    if (Date.now() >= deadline)
-      throw new Error('VS Code chat terminal services did not become ready')
-    await new Promise<void>((resolve) => setTimeout(resolve, 25))
-  }
-  const handle = scope.adeHandle
+export async function createChatTerminals(handle: WorkbenchServices): Promise<{
+  open(launch: ChatTerminalLaunch): Promise<void>
+}> {
   const groups = handle.get(
     'editorGroupsService',
   ) as ChatTerminalServices.Groups
   await groups.whenReady
-  if (handle.chatTerminals) return
   const storage = handle.get('storageService') as ChatTerminalServices.Storage
   const editors = handle.get('editorService') as ChatTerminalServices.Editors
   const groupKey = 'ade.chatTerminalGroup'
@@ -106,7 +98,7 @@ export async function initializeChatTerminals(): Promise<void> {
     if (group?.id === groupId) releaseEmptyGroup()
   })
   let latestRequest = 0
-  handle.chatTerminals = {
+  return {
     async open(launch) {
       const terminals = handle.get(
         'terminalService',
@@ -190,13 +182,4 @@ export async function initializeChatTerminals(): Promise<void> {
       }
     },
   }
-}
-
-// Serialized into the workbench: startup owns controller initialization.
-export async function openChatTerminal(
-  options: ChatTerminalLaunch,
-): Promise<void> {
-  const handle = (globalThis as unknown as AdeWorkbenchGlobal).adeHandle
-  if (!handle.chatTerminals) throw new Error('Chat terminals are not ready')
-  await handle.chatTerminals.open(options)
 }

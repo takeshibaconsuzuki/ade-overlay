@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { copyFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { build } from 'esbuild'
+import { BundledWorkbenchAssets } from '../../src/server/vscode-workbench-patch'
 import { DatabaseSync } from 'node:sqlite'
 import electron from 'electron'
 import treeKill from 'tree-kill'
@@ -20,6 +22,15 @@ export async function startIntegrationServer(
   repos: string[],
   providers: ChatProvider[] = [],
 ) {
+  const bundle = await build({
+    entryPoints: [resolve('tests/integration/workbench.ts')],
+    bundle: true,
+    platform: 'browser',
+    target: 'chrome148',
+    format: 'esm',
+    write: false,
+  })
+  const assets = new BundledWorkbenchAssets(bundle.outputFiles[0].text)
   const profileDatabase = join(directory, 'state.vscdb')
   const database = new DatabaseSync(profileDatabase)
   database.exec(
@@ -43,9 +54,13 @@ export async function startIntegrationServer(
   return startServer(
     config,
     new ProcessVscodeServerFactory(
-      new DownloadedVscodeRuntime(new FetchHttpClient(), {
-        dataDirectory: join(directory, 'vscode-data'),
-      }),
+      new DownloadedVscodeRuntime(
+        new FetchHttpClient(),
+        {
+          dataDirectory: join(directory, 'vscode-data'),
+        },
+        assets,
+      ),
       new NodeVscodeLauncher(),
     ),
     providers,
