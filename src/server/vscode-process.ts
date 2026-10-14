@@ -9,6 +9,7 @@ import treeKill from 'tree-kill'
 import { logger } from '../shared/logger'
 import type { VscodeInstallation } from './vscode-runtime'
 import { vscodeBasePath } from './vscode-route'
+import { prepareVscodeRemoteSettings } from './vscode-remote-settings'
 
 const log = logger.child({ component: 'vscode-process' })
 type Exit = { code: number | null; signal: NodeJS.Signals | null }
@@ -86,6 +87,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       createHash('sha256').update(cwd).digest('hex'),
     )
     await mkdir(directory, { recursive: true, mode: 0o700 })
+    await prepareVscodeRemoteSettings(directory)
     const token = randomBytes(32).toString('hex')
     const tokenFile = join(directory, 'connection-token')
     await writeFile(tokenFile, token, { mode: 0o600 })

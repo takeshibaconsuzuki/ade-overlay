@@ -23,7 +23,10 @@ export function App() {
   return (
     <>
       <Box px="4" py="3">
-        <Button onClick={() => vscode.postMessage({ type: 'startCodex' })}>
+        <Button
+          style={{ width: '100%' }}
+          onClick={() => vscode.postMessage({ type: 'startCodex' })}
+        >
           Codex
         </Button>
       </Box>

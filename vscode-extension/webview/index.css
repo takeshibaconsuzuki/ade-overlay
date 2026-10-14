@@ -53,6 +53,31 @@ body {
   white-space: nowrap;
 }
 
+.chat-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.chat-idle {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green-9);
+}
+
+.chat-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  height: 3lh;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .chat-open {
   width: 100%;
   border: 0;

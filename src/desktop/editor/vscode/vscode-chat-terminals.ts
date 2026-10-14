@@ -56,6 +56,7 @@ declare namespace ChatTerminalServices {
     resolveResource(terminal: Terminal): unknown
   }
   interface Editors {
+    onDidCloseEditor(listener: (event: { groupId: number }) => void): Disposable
     openEditor(
       input: {
         resource: unknown
@@ -82,6 +83,7 @@ export async function initializeChatTerminals(): Promise<void> {
   await groups.whenReady
   if (handle.chatTerminals) return
   const storage = handle.get('storageService') as ChatTerminalServices.Storage
+  const editors = handle.get('editorService') as ChatTerminalServices.Editors
   const groupKey = 'ade.chatTerminalGroup'
   const savedGroup = storage.getNumber(groupKey, 1) // StorageScope.WORKSPACE
   let group = savedGroup === undefined ? undefined : groups.getGroup(savedGroup)
@@ -91,6 +93,17 @@ export async function initializeChatTerminals(): Promise<void> {
       group = undefined
       storage.remove(groupKey, 1)
     }
+  })
+  const releaseEmptyGroup = () => {
+    if (group?.count !== 0) return
+    const empty = group
+    group = undefined
+    storage.remove(groupKey, 1)
+    // VS Code retains its final editor group even after its last editor closes.
+    empty.lock(false)
+  }
+  editors.onDidCloseEditor(({ groupId }) => {
+    if (group?.id === groupId) releaseEmptyGroup()
   })
   let latestRequest = 0
   handle.chatTerminals = {
@@ -104,9 +117,6 @@ export async function initializeChatTerminals(): Promise<void> {
       const terminalEditors = handle.get(
         'terminalEditorService',
       ) as ChatTerminalServices.TerminalEditors
-      const editors = handle.get(
-        'editorService',
-      ) as ChatTerminalServices.Editors
 
       const request = ++latestRequest
       let focusChanged = false
@@ -134,7 +144,10 @@ export async function initializeChatTerminals(): Promise<void> {
           location: 1, // TerminalLocation.Panel
         })
         if (terminal.isDisposed) return
-        group ??= groups.addGroup(groups.activeGroup, 3) // GroupDirection.RIGHT
+        group ??=
+          groups.activeGroup.count === 0
+            ? groups.activeGroup
+            : groups.addGroup(groups.activeGroup, 3) // GroupDirection.RIGHT
         target = group
         target.lock(true)
         storage.store(groupKey, target.id, 1, 1) // Workspace-local, machine-specific state.
@@ -164,8 +177,10 @@ export async function initializeChatTerminals(): Promise<void> {
         }
       } catch (error) {
         terminal?.dispose()
-        if (target?.count === 0 && groups.getGroup(target.id) === target)
+        if (target?.count === 0 && groups.getGroup(target.id) === target) {
+          if (group === target) releaseEmptyGroup()
           groups.removeGroup(target)
+        }
         throw error
       } finally {
         focus.dispose()

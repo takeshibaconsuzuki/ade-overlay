@@ -1,4 +1,5 @@
-import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import assert from 'node:assert/strict'
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -6,13 +7,20 @@ import { simpleGit } from 'simple-git'
 import { TestChatProvider } from '../fixtures/chat-provider'
 import { runDesktopClient, startIntegrationServer } from './harness'
 
-test('Codex button opens locked terminals, chat rows focus them, and command exit closes them', async () => {
+async function runChatScenario(phases: string[]): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'ade-codex-integration-'))
   console.log('Codex test data:', directory)
   const repo = join(directory, 'repo')
   const bin = join(directory, 'bin')
   await mkdir(repo)
   await mkdir(bin)
+  if (phases.includes('sole-group'))
+    await writeFile(
+      join(repo, 'notes.txt'),
+      'A normal editor after closing chats.\n',
+    )
+  const settings = '{"terminal.integrated.enablePersistentSessions":false}\n'
+  await writeFile(join(directory, 'settings.json'), settings)
   await simpleGit(repo).init()
   const extension = join(directory, 'extensions', 'ade.ade-0.1.0')
   await mkdir(extension, { recursive: true })
@@ -50,7 +58,7 @@ test('Codex button opens locked terminals, chat rows focus them, and command exi
     [new TestChatProvider()],
   )
   try {
-    for (const phase of ['launch', 'restore', 'close-restored']) {
+    for (const phase of phases) {
       await runDesktopClient(
         'codex',
         {
@@ -62,8 +70,18 @@ test('Codex button opens locked terminals, chat rows focus them, and command exi
         120_000,
       )
     }
+    assert.equal(
+      await readFile(join(directory, 'settings.json'), 'utf8'),
+      settings,
+    )
   } finally {
     process.env.PATH = previousPath
     await server.close()
   }
-})
+}
+
+test('closing the last chat releases the sole editor group', () =>
+  runChatScenario(['sole-group']))
+
+test('Codex button opens locked terminals, chat rows focus them, and command exit closes them', () =>
+  runChatScenario(['launch', 'restore', 'close-restored']))

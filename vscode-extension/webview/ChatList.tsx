@@ -1,4 +1,4 @@
-import { Box, Flex, Skeleton, Text } from '@radix-ui/themes'
+import { Box, Flex, Skeleton, Spinner, Text } from '@radix-ui/themes'
 import type { Chat } from '../../src/shared/api'
 
 function Field({ value, name }: { value: string | undefined; name: string }) {
@@ -61,7 +61,23 @@ export function ChatList({
                   onClick={() => onOpenChat(id)}
                   title={chat && `Open chat in ${chat.worktreePath}`}
                 >
-                  <Field name="title" value={chat?.title} />
+                  <Flex asChild align="center" gap="2">
+                    <span>
+                      <span
+                        className="chat-status"
+                        role={chat ? 'img' : undefined}
+                        aria-label={chat?.status}
+                        title={chat?.status}
+                      >
+                        {chat?.status === 'idle' ? (
+                          <span className="chat-idle" />
+                        ) : chat?.status === 'working' ? (
+                          <Spinner size="1" aria-hidden="true" />
+                        ) : null}
+                      </span>
+                      <Field name="title" value={chat?.title} />
+                    </span>
+                  </Flex>
                   <Field
                     name="worktree"
                     value={chat?.worktreePath
