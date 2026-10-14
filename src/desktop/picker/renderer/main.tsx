@@ -11,6 +11,7 @@ import {
   DropdownMenu,
   Flex,
   IconButton,
+  ScrollArea,
   Spinner,
   Text,
   TextField,
@@ -423,48 +424,51 @@ function WorktreePicker(): React.JSX.Element {
           </Button>
         </header>
       </Flex>
-      <Flex
+      <ScrollArea
         ref={resultsRef}
         className="picker-results"
-        direction="column"
-        gap="4"
+        type="auto"
+        scrollbars="vertical"
+        size="2"
       >
-        {error && <ErrorMessage>{error}</ErrorMessage>}
-        {connectionState !== 'connected' ? (
-          <Flex align="center" justify="center" gap="3" py="6" role="status">
-            <Spinner aria-hidden="true" />
-            <Text size="2" color="gray">
-              Connecting to server
+        <Flex direction="column" gap="4">
+          {error && <ErrorMessage>{error}</ErrorMessage>}
+          {connectionState !== 'connected' ? (
+            <Flex align="center" justify="center" gap="3" py="6" role="status">
+              <Spinner aria-hidden="true" />
+              <Text size="2" color="gray">
+                Connecting to server
+              </Text>
+            </Flex>
+          ) : filteredWorktrees.length === 0 ? (
+            <Text as="p" size="2" color="gray">
+              {worktrees.length === 0
+                ? 'No worktrees found.'
+                : 'No matching worktrees.'}
             </Text>
-          </Flex>
-        ) : filteredWorktrees.length === 0 ? (
-          <Text as="p" size="2" color="gray">
-            {worktrees.length === 0
-              ? 'No worktrees found.'
-              : 'No matching worktrees.'}
-          </Text>
-        ) : (
-          <Flex asChild direction="column">
-            <ul
-              className="worktrees"
-              id="worktree-list"
-              role="grid"
-              ref={listRef}
-              aria-label="Worktrees"
-              aria-busy={refreshing}
-            >
-              {filteredWorktrees.map((worktree) => (
-                <WorktreeRow
-                  key={worktree.path}
-                  worktree={worktree}
-                  highlighted={worktree.path === highlightedPath}
-                  onHighlight={() => setSelectedPath(worktree.path)}
-                />
-              ))}
-            </ul>
-          </Flex>
-        )}
-      </Flex>
+          ) : (
+            <Flex asChild direction="column">
+              <ul
+                className="worktrees"
+                id="worktree-list"
+                role="grid"
+                ref={listRef}
+                aria-label="Worktrees"
+                aria-busy={refreshing}
+              >
+                {filteredWorktrees.map((worktree) => (
+                  <WorktreeRow
+                    key={worktree.path}
+                    worktree={worktree}
+                    highlighted={worktree.path === highlightedPath}
+                    onHighlight={() => setSelectedPath(worktree.path)}
+                  />
+                ))}
+              </ul>
+            </Flex>
+          )}
+        </Flex>
+      </ScrollArea>
     </main>
   )
 }

@@ -224,7 +224,7 @@ void app.whenReady().then(async () => {
       await run(`(() => {
         const toolbar = document.querySelector('header').getBoundingClientRect();
         const selected = document.querySelector('[data-highlighted="true"]').getBoundingClientRect();
-        return document.querySelector('.picker-results').scrollTop > 0 &&
+        return document.querySelector('.picker-results [data-radix-scroll-area-viewport]').scrollTop > 0 &&
           window.scrollY === 0 && toolbar.top >= 0 &&
           selected.top >= toolbar.bottom && selected.bottom <= innerHeight &&
           document.documentElement.scrollHeight <= innerHeight;
@@ -346,9 +346,13 @@ void app.whenReady().then(async () => {
         await pointer(index, 104)
         await selected(index)
       }
-      await run('document.querySelector(".picker-results").scrollTop = 1000')
+      await run(
+        'document.querySelector(".picker-results [data-radix-scroll-area-viewport]").scrollTop = 1000',
+      )
       assert.equal(
-        await run('document.querySelector(".picker-results").scrollTop > 0'),
+        await run(
+          'document.querySelector(".picker-results [data-radix-scroll-area-viewport]").scrollTop > 0',
+        ),
         true,
         'list is manually scrolled before hiding',
       )
@@ -364,7 +368,9 @@ void app.whenReady().then(async () => {
       )
       await selected(0)
       assert.equal(
-        await run('document.querySelector(".picker-results").scrollTop'),
+        await run(
+          'document.querySelector(".picker-results [data-radix-scroll-area-viewport]").scrollTop',
+        ),
         0,
         `reopening resets scroll after selecting row ${index}`,
       )
