@@ -8,11 +8,7 @@
   border-top: 1px solid var(--gray-a5);
 }
 
-/* Hover anywhere outside the actions section highlights the whole row. */
-.worktree-row:has(.worktree-open:not(:disabled)):hover:not(
-    :has(.worktree-actions:hover)
-  ),
-.worktree-row:has(.worktree-open:focus-visible) {
+.worktree-row[data-highlighted='true'] {
   background-color: var(--gray-a3);
 }
 
@@ -62,8 +58,31 @@
 }
 .worktree-picker {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   max-width: 900px;
   margin: 0 auto;
-  padding: 32px;
-  min-height: 100vh;
+  padding: var(--space-3);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.picker-toolbar {
+  flex: none;
+}
+
+.worktree-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-results {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.worktree-row {
+  flex-shrink: 0;
 }
