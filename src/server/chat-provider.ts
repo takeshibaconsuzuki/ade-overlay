@@ -1,12 +1,12 @@
-import { z } from 'zod'
-import { chatSchema } from '../shared/api'
+import type { Chat } from '../shared/api'
 
-export const chatReportSchema = z.object({
-  shouldPurge: z.boolean(),
-  chat: chatSchema,
-})
-
-export type ChatReport = z.infer<typeof chatReportSchema>
+export interface ChatReport {
+  shouldPurge: boolean
+  chat: Chat
+  // Runs synchronously in receipt order after a successful read, with the stored chat.
+  // Return undefined to ignore an update; retain its provider and session IDs.
+  transformChat?(previous: Readonly<Chat> | undefined): Chat | undefined
+}
 
 export class UnknownChatProviderError extends Error {
   constructor(providerId: string) {

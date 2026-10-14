@@ -49,7 +49,7 @@ test('global installation preserves other handlers and is idempotent', async (t)
   const document = JSON.parse(content)
   assert.equal(document.description, 'User hooks')
   assert.deepEqual(document.hooks.SessionStart[0], group)
-  assert.deepEqual(document.hooks.PostToolUse, [{ hooks: [custom] }])
+  assert.deepEqual(document.hooks.PostToolUse[0], { hooks: [custom] })
   for (const event of CODEX_CHAT_EVENTS)
     assert.equal(document.hooks[event].at(-1).hooks[0].timeout, 3)
   assert.deepEqual(
@@ -62,6 +62,9 @@ test('global installation preserves other handlers and is idempotent', async (t)
     {
       SessionStart: true,
       UserPromptSubmit: true,
+      PreToolUse: true,
+      PermissionRequest: true,
+      PostToolUse: true,
       Stop: true,
       Interrupt: true,
       SessionEnd: false,

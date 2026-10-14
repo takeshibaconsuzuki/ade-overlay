@@ -10,8 +10,9 @@ import { simpleGit } from 'simple-git'
 import writeFileAtomic from 'write-file-atomic'
 import { z } from 'zod'
 import { quotePosixArgument } from '../../../shared/shell'
+import type { Chat } from '../../../shared/api'
 import type { ChatProvider, ChatReport } from '../../chat-provider'
-import { CODEX_CHAT_EVENTS, codexReportSchema } from './report'
+import { CODEX_CHAT_EVENTS, CodexChatReport, codexReportSchema } from './report'
 
 const marker = ' --ade-overlay'
 const hooksSchema = z.looseObject({
@@ -113,6 +114,13 @@ export class CodexChatProvider implements ChatProvider {
   async readReport(value: unknown): Promise<ChatReport> {
     const mtime = Date.now()
     const report = codexReportSchema.parse(value)
+    const working = !(
+      report.hook_event_name === 'Stop' ||
+      report.hook_event_name === 'Interrupt' ||
+      report.hook_event_name === 'SessionEnd' ||
+      report.hook_event_name === 'PermissionRequest' ||
+      (report.hook_event_name === 'SessionStart' && report.source !== 'compact')
+    )
     const [title, worktreePath] = await Promise.all([
       this.readTitle(report.session_id),
       // TODO: Use an environment variable supplied by ADE for the worktree path.
@@ -121,26 +129,18 @@ export class CodexChatProvider implements ChatProvider {
         .then((path) => resolve(path.trim()))
         .catch(() => resolve(report.cwd)),
     ])
-    return {
-      shouldPurge: report.hook_event_name === 'SessionEnd',
-      chat: {
-        providerId: this.id,
-        sessionId: report.session_id,
-        terminalId: report.terminalId,
-        mtime,
-        title,
-        description:
-          report.prompt ?? report.last_assistant_message ?? undefined,
-        worktreePath,
-        pid: report.pid,
-        status:
-          report.hook_event_name === 'UserPromptSubmit' ||
-          (report.hook_event_name === 'SessionStart' &&
-            report.source === 'compact')
-            ? 'working'
-            : 'idle',
-      },
+    const chat: Chat = {
+      providerId: this.id,
+      sessionId: report.session_id,
+      terminalId: report.terminalId,
+      mtime,
+      title,
+      description: report.prompt ?? report.last_assistant_message ?? undefined,
+      worktreePath,
+      pid: report.pid,
+      status: working ? 'working' : 'idle',
     }
+    return new CodexChatReport(chat, report.hook_event_name)
   }
 
   private async readTitle(sessionId: string): Promise<string> {
