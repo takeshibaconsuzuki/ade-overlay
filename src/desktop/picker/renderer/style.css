@@ -77,6 +77,10 @@
   min-width: 0;
 }
 
+.worktree-search .rt-TextFieldInput {
+  padding-bottom: 0;
+}
+
 .picker-results {
   flex: 1;
   min-height: 0;
