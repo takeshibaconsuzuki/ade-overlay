@@ -200,6 +200,15 @@ void app.whenReady().then(async () => {
           }
         }
         const previous = await input()
+        await page.executeJavaScript(`(() => {
+          const manager = adeTest.get('terminalService').activeInstance._processManager;
+          const write = manager.write;
+          adeTest.pasteWrites = [];
+          manager.write = function(data) {
+            if (data.startsWith('\\x1b[200~')) adeTest.pasteWrites.push({ data, at: performance.now() });
+            return write.call(this, data);
+          };
+        })()`)
         const firstImage = Buffer.from(
           'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
           'base64',
@@ -225,6 +234,20 @@ void app.whenReady().then(async () => {
           'ordered remote paste reaches the PTY',
         )
         const pasted = (await input()).slice(previous.length)
+        const writes = await page.executeJavaScript(
+          'adeTest.pasteWrites.slice(0, 5)',
+        )
+        assert.equal(writes.length, 5)
+        for (let index = 1; index < writes.length; index++) {
+          if (
+            writes[index - 1].data.includes('.png"') ||
+            writes[index].data.includes('.png"')
+          )
+            assert.ok(
+              writes[index].at - writes[index - 1].at >= 150,
+              'image isolation is measured before remote delivery can batch input',
+            )
+        }
         const paths = [...pasted.matchAll(/"([^"\r\n]+\.png)"/g)].map(
           (match) => match[1],
         )
@@ -271,6 +294,80 @@ void app.whenReady().then(async () => {
           (await input()).slice(beforeNativePaste.length),
           pasted,
           'native paste is intercepted exactly once',
+        )
+
+        const beforeTyping = await input()
+        await page.executeJavaScript(
+          "void adeTest.get('commandService').executeCommand('workbench.action.terminal.paste')",
+        )
+        await wait(
+          async () =>
+            (await input()).slice(beforeTyping.length).includes('BEFORE'),
+          'paced paste starts before keyboard input',
+        )
+        page.sendInputEvent({ type: 'char', keyCode: 'k' })
+        await delay(25)
+        const deletion = await page.executeJavaScript(
+          "adeTest.get('terminalService').activeInstance.shellType === 'cmd' ? '\\b' : '\\x17'",
+        )
+        page.sendInputEvent({
+          type: 'keyDown',
+          keyCode: 'Backspace',
+          modifiers: ['control'],
+        })
+        page.sendInputEvent({
+          type: 'keyUp',
+          keyCode: 'Backspace',
+          modifiers: ['control'],
+        })
+        await delay(25)
+        await command('workbench.action.terminal.sendSequence', {
+          text: '[sequence]',
+        })
+        await page.executeJavaScript(
+          "void adeTest.get('terminalService').activeInstance.sendText('[sendText]', false); adeTest.get('terminalService').activeInstance.xterm.raw._core.coreService.triggerBinaryEvent('[binary]')",
+        )
+        page.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+        page.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+        await wait(
+          async () =>
+            (await input()).slice(beforeTyping.length).endsWith('[binary]\r'),
+          'typing, shortcuts, sendText, binary input and Enter follow the complete paste',
+        )
+        assert.equal(
+          (await input()).slice(beforeTyping.length),
+          pasted + 'k' + deletion + '[sequence][sendText][binary]\r',
+          'all user input paths retain their order behind a multipart paste',
+        )
+
+        const beforeProtocol = await input()
+        await page.executeJavaScript(
+          "void adeTest.get('commandService').executeCommand('workbench.action.terminal.paste')",
+        )
+        await wait(
+          async () =>
+            (await input()).slice(beforeProtocol.length).includes('BEFORE'),
+          'paced paste starts before a terminal protocol query',
+        )
+        const report = await page.executeJavaScript(
+          "new Promise(resolve => { const raw = adeTest.get('terminalService').activeInstance.xterm.raw; raw.write('\\x1b[6n', () => { const buffer = raw.buffer.active; resolve('\\x1b[' + (buffer.cursorY + 1) + ';' + (buffer.cursorX + 1) + 'R'); }); })",
+        )
+        await wait(
+          async () =>
+            (await input()).slice(beforeProtocol.length).includes(report),
+          'protocol reply bypasses the user-input queue',
+        )
+        assert.ok(
+          !(await input()).slice(beforeProtocol.length).includes('AFTER'),
+        )
+        await wait(
+          async () =>
+            (await input()).slice(beforeProtocol.length).includes('AFTER'),
+          'paste completes after the protocol reply',
+        )
+        assert.equal(
+          (await input()).slice(beforeProtocol.length).replace(report, ''),
+          pasted,
         )
 
         const beforePlainText = await input()

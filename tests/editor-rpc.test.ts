@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test, type TestContext } from 'node:test'
 import { setImmediate } from 'node:timers/promises'
 import { createMessageRpc } from '../src/shared/message-rpc'
+import type { TerminalPastePart } from '../src/shared/clipboard'
 import { EditorConnection } from '../src/desktop/editor/vscode/connection'
 import type {
   DesktopExtensionMethods,
@@ -30,7 +31,7 @@ function fixture(t: TestContext, name: string) {
       },
       ready() {},
       startupFailed() {},
-      prepareChatPaste: async (pid): Promise<string[] | undefined> =>
+      prepareChatPaste: async (pid): Promise<TerminalPastePart[] | undefined> =>
         connection.extension!.prepareChatPaste(pid),
     },
     {
@@ -89,10 +90,19 @@ function fixture(t: TestContext, name: string) {
       },
       {
         focusChatTerminal: (id) => id === name,
-        prepareChatPaste: async (pid): Promise<string[] | undefined> => {
+        prepareChatPaste: async (
+          pid,
+        ): Promise<TerminalPastePart[] | undefined> => {
           if (pid === 0) return undefined
           const parts = await extension.readClipboard()
-          return [new TextDecoder().decode(parts![0].data), 'second paste']
+          return [
+            { text: new TextDecoder().decode(parts![0].data) },
+            {
+              text: '"/image.png"',
+              beforeDelay: 30,
+              afterDelay: 70,
+            },
+          ]
         },
       },
     )
@@ -122,12 +132,12 @@ test('two editor connections route bidirectional calls and nested replies indepe
   assert.equal(await b.connection.extension!.focusChatTerminal('a'), false)
   assert.deepEqual(await b.workbench.getDisabledExtensions(), [{ id: 'b' }])
   assert.deepEqual(await a.workbench.prepareChatPaste(123), [
-    'a',
-    'second paste',
+    { text: 'a' },
+    { text: '"/image.png"', beforeDelay: 30, afterDelay: 70 },
   ])
   assert.deepEqual(await b.workbench.prepareChatPaste(123), [
-    'b',
-    'second paste',
+    { text: 'b' },
+    { text: '"/image.png"', beforeDelay: 30, afterDelay: 70 },
   ])
   assert.equal(await a.workbench.prepareChatPaste(0), undefined)
   await assert.rejects(extensionA.openChat('fail'), (error: unknown) => {

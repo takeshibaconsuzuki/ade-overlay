@@ -1,21 +1,29 @@
 import type { DesktopWorkbenchMethods } from '../shared/editor-rpc'
 import type { WorkbenchServices } from './services'
+import {
+  VscodeTerminalInput,
+  type TerminalInputRaw,
+  type TerminalInputTarget,
+} from './terminal-input'
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
 
 export interface ChatPasteClipboard {
   paste(): Promise<void>
 }
 
-export interface ChatPasteTerminal {
+export interface ChatPasteTerminal extends TerminalInputTarget {
   readonly resource: unknown
   readonly processId: number | undefined
   readonly isDisposed: boolean
   readonly xtermReadyPromise: Promise<unknown>
   readonly xterm?: {
-    raw: {
+    raw: TerminalInputRaw & {
       element?: HTMLElement
       modes: { bracketedPasteMode: boolean }
       options: { ignoreBracketedPasteMode?: boolean }
-      paste(text: string): void
     }
   }
   getContribution(id: string): ChatPasteClipboard | null
@@ -74,12 +82,52 @@ export class ChatPaste {
           throw new Error(
             'VS Code terminal clipboard does not match the ADE integration',
           )
+        const xterm = terminal.xterm?.raw
+        if (!xterm)
+          throw new Error(
+            'VS Code terminal input does not match the ADE integration',
+          )
         const original = clipboard.paste
         let queue = Promise.resolve()
+        let precedingPaste:
+          { processId: number | undefined; failed: boolean } | undefined
+        let buffering = false
+        const enqueue = (
+          operation: () => void | Promise<void>,
+        ): Promise<void> => {
+          const next: Promise<void> = queue
+            .then(operation)
+            .catch((error) => this.reportFailure(error))
+            .finally(() => {
+              if (queue === next) {
+                buffering = false
+                precedingPaste = undefined
+              }
+            })
+          queue = next
+          return next
+        }
+        const isCurrent = (processId: number | undefined) =>
+          !this.closed &&
+          this.installed.has(terminal) &&
+          !terminal.isDisposed &&
+          terminal.processId === processId &&
+          terminal.xterm?.raw === xterm &&
+          this.group.owns(terminal.resource)
+        const input = new VscodeTerminalInput(terminal, xterm, (send) => {
+          if (!buffering || !precedingPaste) return undefined
+          const paste = precedingPaste
+          return enqueue(async () => {
+            if (paste.failed || !isCurrent(paste.processId)) return
+            await send()
+          })
+        })
         clipboard.paste = () => {
           if (!this.group.owns(terminal.resource))
             return original.call(clipboard)
           const processId = terminal.processId
+          const paste = { processId, failed: false }
+          precedingPaste = paste
           const prepared =
             processId === undefined
               ? Promise.reject(new Error('The chat terminal is not ready'))
@@ -92,34 +140,38 @@ export class ChatPaste {
                 })
           // Preparation starts immediately to capture each clipboard, while insertion remains ordered.
           void prepared.catch(() => {})
-          const operation = queue.then(async () => {
-            const pastes = await prepared
-            // No await between validation and insertion: ownership cannot change during a dialog.
-            for (const text of pastes) {
-              if (
-                this.closed ||
-                terminal.isDisposed ||
-                terminal.processId !== processId ||
-                !this.group.owns(terminal.resource)
-              )
-                throw new Error('Chat terminal changed during paste')
-              if (!text) continue
-              const xterm = terminal.xterm?.raw
-              if (
-                !xterm?.modes.bracketedPasteMode ||
-                xterm.options.ignoreBracketedPasteMode
-              )
-                throw new Error(
-                  'The chat terminal is not ready for bracketed paste',
+          return enqueue(async () => {
+            try {
+              const pastes = await prepared
+              // Once insertion starts, input stays queued through later preparation waits until the queue drains.
+              buffering = true
+              for (const { text, beforeDelay = 0, afterDelay = 0 } of pastes) {
+                if (!text) continue
+                if (beforeDelay > 0) await delay(beforeDelay)
+                // Revalidate after every delay, with no await between validation and insertion.
+                if (!isCurrent(processId))
+                  throw new Error('Chat terminal changed during paste')
+                const xterm = terminal.xterm?.raw
+                if (
+                  !xterm?.modes.bracketedPasteMode ||
+                  xterm.options.ignoreBracketedPasteMode
                 )
-              xterm.paste(text)
+                  throw new Error(
+                    'The chat terminal is not ready for bracketed paste',
+                  )
+                input.paste(text)
+                // Keep the queue occupied so subsequent requests respect the provider's trailing delay.
+                if (afterDelay > 0) await delay(afterDelay)
+              }
+            } catch (error) {
+              paste.failed = true
+              throw error
             }
           })
-          queue = operation.catch((error) => this.reportFailure(error))
-          return queue
         }
         this.installed.set(terminal, () => {
           clipboard.paste = original
+          input.dispose()
         })
       })
       .catch((error) => {

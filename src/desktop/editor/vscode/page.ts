@@ -13,6 +13,7 @@ import {
   type DesktopExtensionMethods,
 } from '../../../shared/editor-rpc'
 import { EditorConnection } from './connection'
+import type { TerminalPastePart } from '../../../shared/clipboard'
 import {
   VscodeSettingsSync,
   type VscodeSettingsPage,
@@ -83,7 +84,7 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
             getDisabledExtensions: readDisabledExtensions,
             prepareChatPaste: async (
               processId,
-            ): Promise<string[] | undefined> => {
+            ): Promise<TerminalPastePart[] | undefined> => {
               if (!connection.extension)
                 throw new Error('The chat extension is not ready')
               return connection.extension.prepareChatPaste(processId)

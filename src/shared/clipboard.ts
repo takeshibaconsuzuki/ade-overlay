@@ -4,6 +4,14 @@ export interface ClipboardPart {
   data: Uint8Array
 }
 
+// Prepared terminal input retains source order and provider-requested timing.
+export interface TerminalPastePart {
+  text: string
+  // Delays are in milliseconds and default to zero when omitted.
+  beforeDelay?: number
+  afterDelay?: number
+}
+
 // Representations are alternatives for one item, not additional content to append.
 export interface ClipboardItem {
   readonly types: readonly string[]

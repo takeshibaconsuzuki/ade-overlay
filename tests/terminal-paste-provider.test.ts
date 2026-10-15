@@ -31,11 +31,19 @@ test('Codex converts mixed content to separate ordered text and image-path paste
     imageFileWriter,
   )
   assert.deepEqual(pastes, [
-    'α\n  before',
-    '"/remote path/image-1.png"',
-    'middle',
-    '"/remote path/image-2.png"',
-    'after',
+    { text: 'α\n  before' },
+    {
+      text: '"/remote path/image-1.png"',
+      beforeDelay: 200,
+      afterDelay: 200,
+    },
+    { text: 'middle' },
+    {
+      text: '"/remote path/image-2.png"',
+      beforeDelay: 200,
+      afterDelay: 200,
+    },
+    { text: 'after' },
   ])
   assert.deepEqual(imageFileWriter.data, [
     new Uint8Array([1]),
@@ -47,11 +55,26 @@ test('Codex keeps single and consecutive image attachments in separate paste eve
   const provider = new CodexTerminalProvider()
   const image = { type: 'image' as const, data: new Uint8Array([1]) }
   assert.deepEqual(await provider.convertClipboard([image], new Writer()), [
-    '"/remote path/image-1.png"',
+    {
+      text: '"/remote path/image-1.png"',
+      beforeDelay: 200,
+      afterDelay: 200,
+    },
   ])
   assert.deepEqual(
     await provider.convertClipboard([image, image], new Writer()),
-    ['"/remote path/image-1.png"', '"/remote path/image-2.png"'],
+    [
+      {
+        text: '"/remote path/image-1.png"',
+        beforeDelay: 200,
+        afterDelay: 200,
+      },
+      {
+        text: '"/remote path/image-2.png"',
+        beforeDelay: 200,
+        afterDelay: 200,
+      },
+    ],
   )
 })
 

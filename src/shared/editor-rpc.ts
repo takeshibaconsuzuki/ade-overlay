@@ -1,5 +1,5 @@
 import type { ChatTerminalLaunch, ExtensionIdentifier } from './api'
-import type { ClipboardPart } from './clipboard'
+import type { ClipboardPart, TerminalPastePart } from './clipboard'
 
 export const DESKTOP_RPC_COMMAND = 'ade.desktopRpc'
 export const EXTENSION_RPC_COMMAND = 'ade.extensionRpc'
@@ -24,7 +24,7 @@ export interface ExtensionMethods {
   focusChatTerminal(id: string): boolean
   // Uses the chat terminal's provider to convert the desktop clipboard into separate, ordered pastes.
   // undefined means this process has no chat identity; retain native paste.
-  prepareChatPaste(processId: number): Promise<string[] | undefined>
+  prepareChatPaste(processId: number): Promise<TerminalPastePart[] | undefined>
 }
 
 export interface DesktopWorkbenchMethods {
@@ -33,7 +33,7 @@ export interface DesktopWorkbenchMethods {
   ready(): void
   startupFailed(message: string): void
   // Returns ordered paste events, or undefined for a process without a chat identity. Preparation failures reject.
-  prepareChatPaste(processId: number): Promise<string[] | undefined>
+  prepareChatPaste(processId: number): Promise<TerminalPastePart[] | undefined>
 }
 
 export interface WorkbenchMethods {
