@@ -8,8 +8,9 @@ import { TemporaryImageFileWriter } from './image-file-writer'
 
 export class ChatTerminals {
   private readonly identities: TerminalIdentities
-  private readonly activeTerminalChanged = new vscode.EventEmitter<void>()
-  readonly onDidChangeActiveTerminal = this.activeTerminalChanged.event
+  private focusedTerminalId: string | undefined
+  private readonly chatFocusChanged = new vscode.EventEmitter<void>()
+  readonly onDidChangeChatFocus = this.chatFocusChanged.event
   private readonly subscriptions: vscode.Disposable[]
   private readonly imageFileWriters = new Map<
     string,
@@ -28,6 +29,14 @@ export class ChatTerminals {
     this.identities = new TerminalIdentities(
       new WorkspaceTerminalIdentityStore(state),
     )
+    const updateFocus = () => {
+      const terminal = vscode.window.activeTerminal
+      const id = terminal ? this.identities.get(terminal)?.id : undefined
+      // Ordinary terminals must not erase the last chat focus.
+      if (id === undefined || id === this.focusedTerminalId) return
+      this.focusedTerminalId = id
+      this.chatFocusChanged.fire()
+    }
     const remember = (terminal: vscode.Terminal) => {
       if (terminal.exitStatus !== undefined) return
       const id =
@@ -40,18 +49,15 @@ export class ChatTerminals {
           : undefined
       void this.identities
         .track(terminal, id && providerId ? { id, providerId } : undefined)
-        .then(() => this.activeTerminalChanged.fire())
+        .then(updateFocus)
     }
     this.subscriptions = [
-      this.activeTerminalChanged,
-      vscode.window.onDidChangeActiveTerminal(() =>
-        this.activeTerminalChanged.fire(),
-      ),
+      this.chatFocusChanged,
+      vscode.window.onDidChangeActiveTerminal(updateFocus),
       vscode.window.onDidOpenTerminal(remember),
       vscode.window.onDidCloseTerminal((terminal) => {
         const identity = this.identities.get(terminal)
         this.identities.forget(terminal)
-        this.activeTerminalChanged.fire()
         if (identity) {
           const imageFileWriter =
             this.imageFileWriters.get(identity.id) ??
@@ -66,9 +72,8 @@ export class ChatTerminals {
     vscode.window.terminals.forEach(remember)
   }
 
-  get activeTerminalId(): string | undefined {
-    const terminal = vscode.window.activeTerminal
-    return terminal ? this.identities.get(terminal)?.id : undefined
+  get lastFocusedTerminalId(): string | undefined {
+    return this.focusedTerminalId
   }
 
   async start(providerId: string): Promise<void> {

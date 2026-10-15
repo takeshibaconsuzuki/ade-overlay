@@ -31,7 +31,7 @@ export function App() {
       </Box>
       <ChatList
         chats={snapshot?.chats}
-        activeTerminalId={snapshot?.activeTerminalId}
+        selectedChatId={snapshot?.selectedChatId}
         onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
       />
     </>
