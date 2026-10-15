@@ -31,6 +31,7 @@ import { EditorWindowManager } from './editor/manager'
 import { ElectronEditorWindow } from './editor/window'
 import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
 import { createWorktreePickerWindow } from './picker/window'
+import { WorktreeOrder } from './picker/worktree-order'
 import { ClipboardService } from './clipboard/service'
 import { ElectronClipboardSource } from './clipboard/electron'
 import { UrlClipboardImageReader } from './clipboard/image-reader'
@@ -66,6 +67,13 @@ app.whenReady().then(() => {
     globalShortcut.unregister(pickerShortcut)
   })
   let worktrees: Worktree[] = []
+  const worktreeOrder = new WorktreeOrder()
+  const publishWorktrees = () => {
+    worktreePickerWindow?.webContents.send(
+      WORKTREES_CHANGED,
+      worktreeOrder.sort(worktrees),
+    )
+  }
   const clipboard = new ClipboardService(new ElectronClipboardSource(), [
     new HtmlClipboardNormalizer(
       new UrlClipboardImageReader(new FetchHttpClient()),
@@ -87,6 +95,10 @@ app.whenReady().then(() => {
     editorHost,
     { ensure: (path): Promise<void> => server.rpc.ensureVscodeServer(path) },
     serverUrl,
+    (path) => {
+      worktreeOrder.recordOpen(path)
+      publishWorktrees()
+    },
   )
   const chats = new DesktopChatService(editor)
   const openWorktree = (path: string): Promise<void> => {
@@ -114,7 +126,7 @@ app.whenReady().then(() => {
         worktrees = next
         chats.updateWorktrees(next)
         editor.updateWorktrees(next)
-        worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
+        publishWorktrees()
       },
     },
     {
@@ -124,7 +136,7 @@ app.whenReady().then(() => {
           chats.disconnect()
           worktrees = []
           editor.onServerDisconnected()
-          worktreePickerWindow?.webContents.send(WORKTREES_CHANGED, worktrees)
+          publishWorktrees()
         }
         log.info({ state }, 'Server connection changed')
         worktreePickerWindow?.webContents.send(CONNECTION_STATE_CHANGED, state)
@@ -138,7 +150,7 @@ app.whenReady().then(() => {
   ipcMain.on(WORKTREE_PICKER_INITIALIZE, (event) => {
     if (event.sender !== worktreePickerWindow?.webContents) return
     event.sender.send(CONNECTION_STATE_CHANGED, server.state)
-    event.sender.send(WORKTREES_CHANGED, worktrees)
+    event.sender.send(WORKTREES_CHANGED, worktreeOrder.sort(worktrees))
     event.sender.send(
       WORKTREE_PICKER_VISIBILITY_CHANGED,
       worktreePickerWindow.isVisible(),

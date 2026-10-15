@@ -128,6 +128,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
     description: 'Fix startup\nDetails',
     status: 'working',
     mtime: chats['codex:first'].mtime,
+    lastActivityAt: chats['codex:first'].mtime,
     pid: process.pid,
     terminalId: undefined,
   })

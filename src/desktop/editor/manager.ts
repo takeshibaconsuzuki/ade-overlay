@@ -64,6 +64,7 @@ export class EditorWindowManager {
     private readonly host: EditorHost,
     private readonly server: EditorServer,
     serverUrl: string,
+    private readonly onOpened?: (path: string) => void,
   ) {
     // VS Code requires a secure browser context: remote servers must use WSS/HTTPS.
     // Plain WS/HTTP is supported only on loopback origins, which Chromium trusts.
@@ -87,6 +88,7 @@ export class EditorWindowManager {
     }
     this.selected = entry
     this.host.showAndFocusWindow(`${worktree.basename} — VS Code`)
+    this.onOpened?.(worktree.path)
     this.render()
     if (entry.request) return entry.request
     if (entry.state === 'loaded' || entry.state === 'loadingPage') {

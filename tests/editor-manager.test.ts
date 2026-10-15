@@ -106,6 +106,7 @@ test('duplicate clicks share startup; readiness and page load gate presentation'
   const host = new Host()
   const ack = deferred<void>()
   let starts = 0
+  const opened: string[] = []
   const manager = new EditorWindowManager(
     host,
     {
@@ -115,6 +116,7 @@ test('duplicate clicks share startup; readiness and page load gate presentation'
       },
     },
     'wss://remote.example/rpc',
+    (path) => opened.push(path),
   )
   const first = manager.open(a)
   assert.equal(manager.open(a), first)
@@ -133,6 +135,7 @@ test('duplicate clicks share startup; readiness and page load gate presentation'
   await manager.open(a)
   assert.equal(starts, 1)
   assert.equal(host.pages[0].urls.length, 1)
+  assert.deepEqual(opened, [a.path, a.path, a.path])
   await manager.close()
 })
 
