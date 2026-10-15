@@ -54,6 +54,7 @@ export class ChatPaste {
   private readonly installed = new Map<ChatPasteTerminal, () => void>()
   private readonly subscriptions: Disposable[]
   private closed = false
+  private pasteSequence = 0
 
   constructor(
     private readonly handle: WorkbenchServices,
@@ -123,9 +124,15 @@ export class ChatPaste {
           })
         })
         clipboard.paste = () => {
-          if (!this.group.owns(terminal.resource))
+          if (!this.group.owns(terminal.resource)) {
+            console.debug('Using native terminal paste', {
+              processId: terminal.processId,
+            })
             return original.call(clipboard)
+          }
           const processId = terminal.processId
+          const logContext = { pasteId: ++this.pasteSequence, processId }
+          console.debug('Chat paste requested', logContext)
           const paste = { processId, failed: false }
           precedingPaste = paste
           const prepared =
@@ -133,8 +140,21 @@ export class ChatPaste {
               ? Promise.reject(new Error('The chat terminal is not ready'))
               : Promise.resolve().then(async () => {
                   const pastes = await this.desktop.prepareChatPaste(processId)
-                  if (pastes !== undefined) return pastes
+                  if (pastes !== undefined) {
+                    console.debug('Chat paste prepared', {
+                      ...logContext,
+                      parts: pastes.map(
+                        ({ text, beforeDelay = 0, afterDelay = 0 }) => ({
+                          characters: text.length,
+                          beforeDelay,
+                          afterDelay,
+                        }),
+                      ),
+                    })
+                    return pastes
+                  }
                   // An ordinary terminal uses native paste without waiting for the chat insertion queue.
+                  console.debug('Using native terminal paste', logContext)
                   await original.call(clipboard)
                   return []
                 })
@@ -145,6 +165,7 @@ export class ChatPaste {
               const pastes = await prepared
               // Once insertion starts, input stays queued through later preparation waits until the queue drains.
               buffering = true
+              let insertedParts = 0
               for (const { text, beforeDelay = 0, afterDelay = 0 } of pastes) {
                 if (!text) continue
                 if (beforeDelay > 0) await delay(beforeDelay)
@@ -160,11 +181,23 @@ export class ChatPaste {
                     'The chat terminal is not ready for bracketed paste',
                   )
                 input.paste(text)
+                console.debug('Chat paste part inserted', {
+                  ...logContext,
+                  partIndex: insertedParts++,
+                  characters: text.length,
+                  beforeDelay,
+                  afterDelay,
+                })
                 // Keep the queue occupied so subsequent requests respect the provider's trailing delay.
                 if (afterDelay > 0) await delay(afterDelay)
               }
+              console.debug('Paste request completed', {
+                ...logContext,
+                insertedParts,
+              })
             } catch (error) {
               paste.failed = true
+              console.warn('Chat paste failed', logContext)
               throw error
             }
           })

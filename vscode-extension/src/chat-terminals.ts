@@ -99,21 +99,44 @@ export class ChatTerminals {
     processId: number,
   ): Promise<TerminalPastePart[] | undefined> {
     const identity = this.identities.forProcess(processId)
-    if (!identity) return undefined
-    const provider = this.providers.get(identity.providerId)
-    if (!provider) throw new Error('The chat terminal provider is unavailable')
-    const parts = await this.desktop.readClipboard()
-    if (this.identities.forProcess(processId) !== identity)
-      throw new Error('Chat terminal closed during paste')
-    let imageFileWriter = this.imageFileWriters.get(identity.id)
-    if (!imageFileWriter) {
-      imageFileWriter = new TemporaryImageFileWriter(identity.id)
-      this.imageFileWriters.set(identity.id, imageFileWriter)
+    if (!identity) {
+      console.debug('Paste process has no chat identity', { processId })
+      return undefined
     }
-    const pastes = await provider.convertClipboard(parts, imageFileWriter)
-    if (this.identities.forProcess(processId) !== identity)
-      throw new Error('Chat terminal closed during paste')
-    return pastes
+    const logContext = {
+      processId,
+      terminalId: identity.id,
+      providerId: identity.providerId,
+    }
+    console.debug('Preparing chat paste', logContext)
+    try {
+      const provider = this.providers.get(identity.providerId)
+      if (!provider)
+        throw new Error('The chat terminal provider is unavailable')
+      const parts = await this.desktop.readClipboard()
+      if (this.identities.forProcess(processId) !== identity)
+        throw new Error('Chat terminal closed during paste')
+      let imageFileWriter = this.imageFileWriters.get(identity.id)
+      if (!imageFileWriter) {
+        imageFileWriter = new TemporaryImageFileWriter(identity.id)
+        this.imageFileWriters.set(identity.id, imageFileWriter)
+      }
+      const pastes = await provider.convertClipboard(parts, imageFileWriter)
+      if (this.identities.forProcess(processId) !== identity)
+        throw new Error('Chat terminal closed during paste')
+      console.debug('Chat paste provider conversion completed', {
+        ...logContext,
+        sourceParts: parts.map((part) => ({
+          type: part.type,
+          bytes: part.data.byteLength,
+        })),
+        partCount: pastes.length,
+      })
+      return pastes
+    } catch (error) {
+      console.warn('Chat paste preparation failed', logContext)
+      throw error
+    }
   }
 
   dispose(): void {

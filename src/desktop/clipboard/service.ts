@@ -17,25 +17,34 @@ export class ClipboardService implements DesktopClipboardMethods {
 
   // Unsupported snapshots are logged and produce no parts; supported conversion failures reject.
   async readClipboard(): Promise<ClipboardPart[]> {
-    const items = await this.source.read()
-    const selectedNormalizers = items.map((item) => ({
-      item,
-      normalizer: this.normalizers.find((normalizer) =>
-        item.types.includes(normalizer.representation),
-      ),
-    }))
-    if (selectedNormalizers.every(({ normalizer }) => !normalizer)) {
-      log.warn(
+    try {
+      const items = await this.source.read()
+      const selectedNormalizers = items.map((item) => ({
+        item,
+        normalizer: this.normalizers.find((normalizer) =>
+          item.types.includes(normalizer.representation),
+        ),
+      }))
+      log.debug(
         {
           formats: items.map((item) => item.types),
-          platform: process.platform,
+          representations: selectedNormalizers.map(
+            ({ normalizer }) => normalizer?.representation ?? null,
+          ),
         },
-        'Paste contains no supported clipboard representations',
+        'Clipboard snapshot captured',
       )
-      return []
-    }
-    // Do not silently drop items from a multi-item copy.
-    try {
+      if (selectedNormalizers.every(({ normalizer }) => !normalizer)) {
+        log.warn(
+          {
+            formats: items.map((item) => item.types),
+            platform: process.platform,
+          },
+          'Paste contains no supported clipboard representations',
+        )
+        return []
+      }
+      // Do not silently drop items from a multi-item copy.
       if (selectedNormalizers.some(({ normalizer }) => !normalizer))
         throw new Error('Paste contains an unsupported clipboard item')
       const parts = await Promise.all(
@@ -44,9 +53,19 @@ export class ClipboardService implements DesktopClipboardMethods {
         ),
       )
       // Node Buffer subclasses cannot be decoded by the shared typed-array RPC codec.
-      return parts
+      const result = parts
         .flat()
         .map((part) => ({ ...part, data: new Uint8Array(part.data) }))
+      log.debug(
+        {
+          parts: result.map((part) => ({
+            type: part.type,
+            bytes: part.data.byteLength,
+          })),
+        },
+        'Clipboard conversion completed',
+      )
+      return result
     } catch (error) {
       log.warn({ err: error }, 'Clipboard conversion failed')
       throw error
