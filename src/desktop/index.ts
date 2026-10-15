@@ -27,6 +27,7 @@ import { connectRpc } from '../shared/rpc-client'
 import { APP_NAME } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { DesktopChatService } from './chat-service'
+import { NotificationRetention } from './notification-retention'
 import { EditorWindowManager } from './editor/manager'
 import { ElectronEditorWindow } from './editor/window'
 import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
@@ -40,6 +41,7 @@ import { TextClipboardNormalizer } from './clipboard/text'
 import { FetchHttpClient } from '../shared/http-client'
 
 const log = logger.child({ component: 'desktop' })
+const notifications = new NotificationRetention(100)
 let worktreePickerWindow: BrowserWindow | undefined
 
 app.whenReady().then(() => {
@@ -116,17 +118,31 @@ app.whenReady().then(() => {
       }),
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
       chatTurnFinished: (id, title, worktreeBasename, description) => {
-        new Notification({
+        const notification = new Notification({
           title,
           body: `${worktreeBasename}\n${description.slice(0, 8_000)}`,
         })
-          .on('click', () => {
+        // Native notifications can outlive their JavaScript object and its click handler.
+        notifications.add(notification)
+        notification
+          .once('click', () => {
+            notifications.delete(notification)
+            log.info({ chatId: id }, 'Notification clicked')
             void chats.openChat(id).catch((error: unknown) => {
               log.warn(
                 { err: error, chatId: id },
                 'Unable to open chat from notification',
               )
             })
+          })
+          .on('close', (event) => {
+            // Windows keeps timed-out popups clickable in Notification Center.
+            if (process.platform !== 'win32' || event.reason !== 'timedOut')
+              notifications.delete(notification)
+          })
+          .once('failed', (_event, error) => {
+            notifications.delete(notification)
+            log.warn({ error, chatId: id }, 'Unable to show chat notification')
           })
           .show()
       },

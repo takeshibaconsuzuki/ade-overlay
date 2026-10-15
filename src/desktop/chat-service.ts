@@ -95,6 +95,10 @@ export class DesktopChatService implements DesktopChatMethods {
     const chat = this.chats[id]
     if (!chat) throw new Error('Chat is no longer available')
     const worktree = this.worktree(chat.worktreePath)
+    logger.debug(
+      { chatId: id, path: worktree.path, terminalId: chat.terminalId },
+      'Opening chat worktree',
+    )
     this.cancelFocus()
     const request = {
       id,
@@ -125,13 +129,17 @@ export class DesktopChatService implements DesktopChatMethods {
         signal.throwIfAborted()
         if (!(await this.editor.focusChatTerminal(worktree.path, terminalId)))
           throw new Error('The chat terminal is not ready')
+        logger.debug(
+          { chatId: id, path: worktree.path, terminalId },
+          'Chat terminal focused',
+        )
       },
       { retries: Infinity, minTimeout: 250, maxTimeout: 250, signal },
     )
       .catch((error: unknown) => {
         if (!request.controller.signal.aborted)
           logger.warn(
-            { err: error },
+            { err: error, chatId: id, path: worktree.path, terminalId },
             'Unable to focus chat terminal before expiry',
           )
       })
