@@ -45,6 +45,7 @@ export class ElectronEditorWindow implements EditorHost {
         title,
         width: 1200,
         height: 800,
+        show: false,
         backgroundColor: '#18181b',
         webPreferences: {
           preload: join(import.meta.dirname, '../preload/editor.cjs'),
@@ -66,6 +67,7 @@ export class ElectronEditorWindow implements EditorHost {
             join(import.meta.dirname, '../renderer/editor/renderer/index.html'),
           )
       void loading.catch(() => {})
+      window.maximize()
     }
     this.window.setTitle(title)
     if (this.window.isMinimized()) this.window.restore()
