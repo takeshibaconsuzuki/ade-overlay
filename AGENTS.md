@@ -33,10 +33,11 @@ On Posix:
 eval "$(python scripts/bootstrap.py)"
 ```
 
-- `npm run dev`: start the development app.
+- `npm run dev:desktop`: start the development desktop client.
 - `npm run dev:server`: start the development server.
-- `npm run package`: build a desktop installer for the current platform in `out/packages`.
-- `npm run lint:fix`: run lint with auto-fixes.
+- `npm run package`: package both the desktop client and server.
+- `npm run lint`: check lint rules; pass `-- --fix` to apply auto-fixes.
+- `npm test`: run all test suites.
 - `npm run format`: format files.
 
 See `package.json` for other commands.

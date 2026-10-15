@@ -28,7 +28,7 @@ function deferred() {
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-chat-lifecycle-'))
-  const provider = new CodexChatProvider('unused', directory)
+  const provider = new CodexChatProvider(['unused'], directory)
   const processes = new Processes()
   const store = new ChatStore(processes, [provider])
   t.after(async () => {

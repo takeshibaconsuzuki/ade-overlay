@@ -26,7 +26,7 @@ async function fixture(t: TestContext) {
   return {
     directory,
     entrypoint,
-    installer: new CodexChatProvider(entrypoint, directory),
+    installer: new CodexChatProvider([process.execPath, entrypoint], directory),
   }
 }
 
@@ -142,7 +142,10 @@ for (const { architecture, provider, executable } of scenarios) {
           `http://127.0.0.1:${port}`,
         ),
       )
-      await new CodexChatProvider(entrypoint, directory).install()
+      await new CodexChatProvider(
+        [process.execPath, entrypoint],
+        directory,
+      ).install()
       const handler = JSON.parse(
         await readFile(join(directory, 'hooks.json'), 'utf8'),
       ).hooks.UserPromptSubmit[0].hooks[0]

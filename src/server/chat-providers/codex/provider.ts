@@ -42,15 +42,14 @@ export class CodexChatProvider implements ChatProvider {
   readonly id = 'codex'
 
   constructor(
-    private readonly entrypoint: string,
+    private readonly command: readonly [string, ...string[]],
     private readonly directory = resolve(
       process.env.CODEX_HOME || join(homedir(), '.codex'),
     ),
   ) {}
 
   async install(): Promise<void> {
-    const entrypoint = resolve(this.entrypoint)
-    await access(entrypoint)
+    await access(this.command[0])
     await mkdir(this.directory, { recursive: true })
     const path = join(this.directory, 'hooks.json')
     const release = await lockfile.lock(path, {
@@ -80,7 +79,7 @@ export class CodexChatProvider implements ChatProvider {
               : []
         })
       }
-      const args = [process.execPath, entrypoint, this.id, 'codex']
+      const args = [...this.command, this.id, 'codex']
       const handler = {
         type: 'command',
         command: args.map(quotePosixArgument).join(' ') + marker,

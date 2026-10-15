@@ -9,7 +9,7 @@ import { createCodexMetadata } from './fixtures/codex-metadata'
 test('Codex transforms startup using stored status and report receipt times', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'ade-codex-grace-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const provider = new CodexChatProvider('unused', directory)
+  const provider = new CodexChatProvider(['unused'], directory)
   let now = 0
   t.mock.method(Date, 'now', () => now)
   const raw = { session_id: 'session', cwd: directory, pid: 123 }
@@ -101,7 +101,7 @@ test('Codex metadata matches resume names and previews, including saved renames'
       .map((entry) => JSON.stringify(entry))
       .join('\n') + '\n{unfinished',
   )
-  const provider = new CodexChatProvider('unused', directory)
+  const provider = new CodexChatProvider(['unused'], directory)
   const title = async (session_id: string) => {
     const result = await provider.readReport({
       session_id,
@@ -136,7 +136,7 @@ test('Codex provider reads the saved title and derives other metadata from the h
     'Saved name',
     'Saved description',
   )
-  const provider = new CodexChatProvider('unused', directory)
+  const provider = new CodexChatProvider(['unused'], directory)
   const report = {
     session_id: 'session',
     hook_event_name: 'SessionStart',

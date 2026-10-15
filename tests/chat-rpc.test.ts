@@ -55,7 +55,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
     )
     .run('first', 'Saved Codex name', 'Original request', 'Stored preview')
   const server = await startServer(config, vscode, [
-    new CodexChatProvider(entry, directory),
+    new CodexChatProvider([process.execPath, entry], directory),
   ])
   t.after(() => server.close())
   const url = `ws://127.0.0.1:${server.port}/rpc`

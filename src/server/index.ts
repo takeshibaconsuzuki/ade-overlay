@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { dirname, join, resolve } from 'node:path'
+import { isSea } from 'node:sea'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
 import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
@@ -31,12 +32,17 @@ async function main(): Promise<void> {
     ),
     [
       new CodexChatProvider(
-        join(
-          dirname(resolve(process.argv[1])),
-          process.argv[1].endsWith('.ts')
-            ? '../../scripts/report-chat.mjs'
-            : 'report-chat.mjs',
-        ),
+        isSea()
+          ? [process.execPath, '--report-chat']
+          : [
+              process.execPath,
+              join(
+                dirname(resolve(process.argv[1])),
+                process.argv[1].endsWith('.ts')
+                  ? '../../scripts/report-chat.mjs'
+                  : 'report-chat.mjs',
+              ),
+            ],
       ),
     ],
   )
