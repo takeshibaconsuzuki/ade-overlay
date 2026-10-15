@@ -1,9 +1,13 @@
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parse } from 'yaml'
 import { z } from 'zod'
-import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from './constants'
+import {
+  DEFAULT_SERVER_CONFIG_PATH,
+  DEFAULT_SERVER_HOST,
+  DEFAULT_SERVER_PORT,
+} from './constants'
 
 const home = homedir()
 const configHome =
@@ -51,6 +55,20 @@ export const serverOptionsSchema = z.strictObject({
 })
 
 export type ServerOptions = z.infer<typeof serverOptionsSchema>
+
+export async function resolveServerConfigPath(
+  configPath?: string,
+): Promise<string> {
+  if (configPath !== undefined) return resolve(configPath)
+  const path = resolve(DEFAULT_SERVER_CONFIG_PATH)
+  try {
+    await access(path)
+    return path
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  return join(home, '.ade-overlay', DEFAULT_SERVER_CONFIG_PATH)
+}
 
 export async function optionsFromFile(path: string): Promise<ServerOptions> {
   try {

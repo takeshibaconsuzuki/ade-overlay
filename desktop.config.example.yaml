@@ -1,0 +1,4 @@
+# Copy to ~/.ade-overlay/desktop.config.yaml to configure the desktop client. Changes require a
+# desktop restart.
+# ADE_SERVER_URL overrides serverUrl.
+serverUrl: ws://127.0.0.1:4317/rpc

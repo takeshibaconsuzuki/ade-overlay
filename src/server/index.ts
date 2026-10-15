@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { isSea } from 'node:sea'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
-import { DEFAULT_SERVER_CONFIG_PATH } from './constants'
+import { resolveServerConfigPath } from './options'
 import { startServer } from './application'
 import { FetchHttpClient } from '../shared/http-client'
 import { ProcessVscodeServerFactory } from './vscode-server'
@@ -19,13 +19,12 @@ async function main(): Promise<void> {
     .description('Run the RPC server')
     .option(
       '--config <path>',
-      'YAML configuration file; relative paths are resolved from the working directory',
-      DEFAULT_SERVER_CONFIG_PATH,
+      'YAML configuration file; relative paths are resolved from the working directory (default: ./server.config.yaml, then ~/.ade-overlay/server.config.yaml)',
     )
     .parse()
-    .opts<{ config: string }>()
+    .opts<{ config?: string }>()
   const server = await startServer(
-    flags.config,
+    await resolveServerConfigPath(flags.config),
     new ProcessVscodeServerFactory(
       new DownloadedVscodeRuntime(new FetchHttpClient()),
       new NodeVscodeLauncher(),

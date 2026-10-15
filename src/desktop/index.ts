@@ -23,7 +23,6 @@ import {
   WORKTREE_OPEN,
   WORKTREE_CLEAR_ERROR,
 } from './picker/api'
-import { DEFAULT_SERVER_URL } from '../shared/constants'
 import { connectRpc } from '../shared/rpc-client'
 import { APP_NAME } from '../shared/constants'
 import { logger } from '../shared/logger'
@@ -40,6 +39,7 @@ import { UrlClipboardImageReader } from './clipboard/image-reader'
 import { HtmlClipboardNormalizer } from './clipboard/html'
 import { TextClipboardNormalizer } from './clipboard/text'
 import { FetchHttpClient } from '../shared/http-client'
+import { loadDesktopOptions } from './options'
 
 const log = logger.child({ component: 'desktop' })
 const notifications = new NotificationRetention(100)
@@ -51,7 +51,8 @@ function hideWorktreePicker(): void {
   worktreePickerWindow?.hide()
 }
 
-app.whenReady().then(() => {
+async function main(): Promise<void> {
+  const { serverUrl } = await loadDesktopOptions()
   if (process.platform === 'win32') app.setAppUserModelId(APP_NAME)
   const pickerShortcut = 'CommandOrControl+Shift+Space'
   if (
@@ -97,7 +98,6 @@ app.whenReady().then(() => {
       readClipboard: () => clipboard.readClipboard(),
     },
   )
-  const serverUrl = process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL
   const editor = new EditorWindowManager(
     editorHost,
     { ensure: (path): Promise<void> => server.rpc.ensureVscodeServer(path) },
@@ -274,4 +274,12 @@ app.whenReady().then(() => {
     worktreePickerWindow = undefined
     app.quit()
   })
-})
+}
+
+void app
+  .whenReady()
+  .then(main)
+  .catch((error: unknown) => {
+    log.fatal({ err: error }, 'Desktop startup failed')
+    app.exit(1)
+  })

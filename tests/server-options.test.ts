@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { parse, stringify, YAMLParseError } from 'yaml'
@@ -10,14 +10,19 @@ import {
 } from '../src/server/constants'
 import {
   optionsFromFile,
+  resolveServerConfigPath,
   serverOptionsSchema,
   vscodeOptionsSchema,
 } from '../src/server/options'
 import { startRpcServer } from '../src/server/server'
 
-async function configFile(t: TestContext, contents: string): Promise<string> {
+async function configFile(
+  t: TestContext,
+  contents: string,
+  name = 'server config.yaml',
+): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ade-server-config-'))
-  const path = join(directory, 'server config.yaml')
+  const path = join(directory, name)
   await writeFile(path, contents)
   t.after(async () => {
     await unlink(path)
@@ -25,6 +30,48 @@ async function configFile(t: TestContext, contents: string): Promise<string> {
   })
   return path
 }
+
+test('default config in the working directory takes precedence over the home config', async (t) => {
+  const path = await configFile(t, 'port: 0\n', 'server.config.yaml')
+  t.mock.method(process, 'cwd', () => dirname(path))
+  assert.equal(await resolveServerConfigPath(), path)
+})
+
+test('missing default config falls back to the home directory', async (t) => {
+  const path = await configFile(t, 'port: 0\n')
+  t.mock.method(process, 'cwd', () => dirname(path))
+  assert.equal(
+    await resolveServerConfigPath(),
+    join(homedir(), '.ade-overlay', 'server.config.yaml'),
+  )
+})
+
+test('explicit config paths never fall back, including the default filename', async (t) => {
+  const path = await configFile(t, 'port: 0\n')
+  t.mock.method(process, 'cwd', () => dirname(path))
+  for (const name of ['custom.yaml', 'server.config.yaml']) {
+    const selected = await resolveServerConfigPath(name)
+    assert.equal(selected, join(dirname(path), name))
+    await assert.rejects(optionsFromFile(selected), (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal((error.cause as NodeJS.ErrnoException).code, 'ENOENT')
+      return true
+    })
+  }
+  assert.equal(await resolveServerConfigPath(path), path)
+})
+
+test('invalid default config reports an error without falling back', async (t) => {
+  const path = await configFile(t, 'host: [\n', 'server.config.yaml')
+  t.mock.method(process, 'cwd', () => dirname(path))
+  const selected = await resolveServerConfigPath()
+  assert.equal(selected, path)
+  await assert.rejects(optionsFromFile(selected), (error: unknown) => {
+    assert.ok(error instanceof Error)
+    assert.ok(error.cause instanceof YAMLParseError)
+    return true
+  })
+})
 
 test('partial file config receives defaults and survives YAML serialization', async (t) => {
   const path = await configFile(t, '# Bind to loopback\nhost: 127.0.0.1\n')
