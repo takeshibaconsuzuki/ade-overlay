@@ -5,6 +5,7 @@ var storage={},tracker={},invocations=0;
 var me=cK.serviceIds.get('storageService');
 var TLo=async()=>{},ke=()=>{};
 globalThis.browserMain={
+ configuration:{},
  initServices:async()=>({serviceCollection:{get:()=>storage},logService:{}}),
  createWorkbench(){return {startup(){globalThis.started=true;globalThis.start()}}},
  async open(){let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);t.startup()}

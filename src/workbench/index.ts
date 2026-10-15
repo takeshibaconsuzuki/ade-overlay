@@ -14,6 +14,8 @@ import { createSettings } from './settings'
 import { persistVscodeSession } from './session'
 import type { ProfileStorage, WorkbenchServices } from './services'
 
+export { configureWorkbench } from './layout'
+
 class WorkbenchConnection {
   readonly desktop: BirpcReturn<DesktopWorkbenchMethods, WorkbenchMethods>
   private services: WorkbenchServices | undefined

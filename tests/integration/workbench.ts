@@ -7,6 +7,8 @@ import type {
   WorkbenchServices,
 } from '../../src/workbench/services'
 
+export { configureWorkbench } from '../../src/workbench/layout'
+
 // Only integration installations load this bundle. Production exposes no service locator.
 const probe = { workbenchReady: false } as WorkbenchServices & {
   workbenchReady: boolean
