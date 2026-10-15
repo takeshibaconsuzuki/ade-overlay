@@ -19,6 +19,8 @@ export const chatSchema = z.strictObject({
   status: z.enum(['idle', 'working']),
   // Unix milliseconds, captured when the server receives the report.
   mtime: z.int().nonnegative(),
+  // Unix milliseconds of the last observed user prompt or turn end; absent until observed.
+  lastActivityAt: z.int().nonnegative().optional(),
   // The owning provider process, never the short-lived hook process.
   pid: z
     .int()

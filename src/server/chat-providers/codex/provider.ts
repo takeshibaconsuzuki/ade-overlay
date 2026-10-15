@@ -134,6 +134,12 @@ export class CodexChatProvider implements ChatProvider {
       sessionId: report.session_id,
       terminalId: report.terminalId,
       mtime,
+      lastActivityAt:
+        report.hook_event_name === 'UserPromptSubmit' ||
+        report.hook_event_name === 'Stop' ||
+        report.hook_event_name === 'Interrupt'
+          ? mtime
+          : undefined,
       title,
       description: report.prompt ?? report.last_assistant_message ?? undefined,
       worktreePath,

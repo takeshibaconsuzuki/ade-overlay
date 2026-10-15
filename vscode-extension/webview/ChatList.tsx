@@ -33,7 +33,9 @@ export function ChatList({
     chats === undefined
       ? undefined
       : Object.entries(chats).sort(
-          ([aId, a], [bId, b]) => b.mtime - a.mtime || aId.localeCompare(bId),
+          ([aId, a], [bId, b]) =>
+            (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) ||
+            aId.localeCompare(bId),
         )
   return (
     <main aria-label="Live chats" aria-busy={chats === undefined}>

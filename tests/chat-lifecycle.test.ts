@@ -183,6 +183,42 @@ test('tool activity updates status through permission waits and retains the desc
   assert.equal(store.snapshot['codex:session'].description, 'All checks passed')
 })
 
+test('chat recency advances only on user prompts and turn endings', async (t) => {
+  const { store, report } = await fixture(t)
+  let now = 0
+  t.mock.method(Date, 'now', () => now)
+  await report('session', 'SessionStart', { source: 'startup' })
+  assert.equal(store.snapshot['codex:session'].lastActivityAt, undefined)
+  now = 100
+  await report('session', 'UserPromptSubmit', { prompt: 'Keep working' })
+  now = 200
+  await report('other', 'UserPromptSubmit')
+  for (const [event, source] of [
+    ['PreToolUse', undefined],
+    ['PermissionRequest', undefined],
+    ['PostToolUse', undefined],
+    ['SessionStart', 'compact'],
+    ['SessionStart', 'resume'],
+  ] as const) {
+    now += 2000
+    await report('session', event, { source })
+    const chat = store.snapshot['codex:session']
+    assert.equal(chat.mtime, now)
+    assert.equal(chat.lastActivityAt, 100)
+    assert.ok(
+      chat.lastActivityAt < store.snapshot['codex:other'].lastActivityAt!,
+    )
+  }
+  for (const event of ['Stop', 'UserPromptSubmit', 'Interrupt']) {
+    now += 2000
+    await report('session', event)
+    assert.equal(store.snapshot['codex:session'].lastActivityAt, now)
+  }
+  now += 2000
+  await report('unseen', 'PostToolUse')
+  assert.equal(store.snapshot['codex:unseen'].lastActivityAt, undefined)
+})
+
 test('A to B to A recovers on the next prompt when the second A start is lost', async (t) => {
   const { store, report, snapshots } = await fixture(t)
   await report('A', 'SessionStart', { source: 'startup' })
