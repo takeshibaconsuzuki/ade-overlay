@@ -98,7 +98,7 @@ test('images inside headings retain their markers while surrounding text uses de
   assert.deepEqual(imageReader.sources, ['first', 'second'])
 })
 
-test('HTML text formatting follows html-to-text defaults', async () => {
+test('HTML text formatting follows html-to-text defaults without word wrapping', async () => {
   const normalizer = new HtmlClipboardNormalizer(new ImageReader())
   for (const html of [
     '<pre>  α &lt; β\n    next()</pre>',
@@ -112,7 +112,7 @@ test('HTML text formatting follows html-to-text defaults', async () => {
   ]) {
     assert.deepEqual(
       readable(await normalizer.normalize(new Item({ 'text/html': html }))),
-      [{ type: 'text', data: convert(html) }],
+      [{ type: 'text', data: convert(html, { wordwrap: false }) }],
     )
   }
 })

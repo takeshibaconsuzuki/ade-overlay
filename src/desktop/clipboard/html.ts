@@ -11,7 +11,6 @@ export interface ClipboardImageReader {
   read(source: string): Promise<Uint8Array>
 }
 
-// Text formatting follows html-to-text defaults. Only image extraction is customized.
 export class HtmlClipboardNormalizer implements ClipboardNormalizer {
   readonly representation = 'text/html'
 
@@ -22,7 +21,9 @@ export class HtmlClipboardNormalizer implements ClipboardNormalizer {
     const imageSources: string[] = []
     // Image markers retain their positions in the converted text for replacement with binary parts.
     const marker = `ADE_IMAGE_${randomUUID()}_`
+    // Follow html-to-text defaults with targeted behavior changes only as necessary.
     const text = convert(html, {
+      wordwrap: false,
       selectors: [{ selector: 'img', format: 'clipboardImage' }],
       formatters: {
         clipboardImage(element, _walk, builder) {
