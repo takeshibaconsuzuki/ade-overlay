@@ -121,6 +121,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       [
         installation.entrypoint,
         '--accept-server-license-terms',
+        '--disable-workspace-trust',
         '--host',
         '127.0.0.1',
         '--port',

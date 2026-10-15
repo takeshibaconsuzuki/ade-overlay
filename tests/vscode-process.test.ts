@@ -68,6 +68,7 @@ test(
       await readFile(join(f.directory, 'arguments.json'), 'utf8'),
     )
     assert.equal(args[args.indexOf('--default-folder') + 1], f.directory)
+    assert.ok(args.includes('--disable-workspace-trust'))
     assert.equal(
       args[args.indexOf('--server-base-path') + 1],
       vscodeBasePath(f.directory),
