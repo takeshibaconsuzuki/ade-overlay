@@ -23,9 +23,12 @@ adeWorkbench.attachWorkbench({
 });
 return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}`
 const startupAnchor =
-  ']),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
-const startupBridge =
-  ']);await adeWorkbench.initializeExtensions(e.serviceCollection.get(me));let t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
+  'async open(){let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
+const startupBridge = `async open(){
+adeWorkbench.configureWorkbench(this.configuration);
+let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]);
+await adeWorkbench.initializeExtensions(e.serviceCollection.get(me));
+let t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);`
 const marker = '/* ADE workbench RPC */'
 
 // Isolate installations across integration versions; existing running clients keep their assets.

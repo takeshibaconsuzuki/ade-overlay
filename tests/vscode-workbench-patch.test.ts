@@ -7,10 +7,12 @@ import type {
   WorkbenchServices,
   ProfileStorage,
 } from '../src/workbench/services'
+import { configureWorkbench } from '../src/workbench/layout'
 
 function fixture() {
   const context = {
     hooks: {
+      configureWorkbench,
       initializeExtensions: async () => {},
       attachWorkbench: (services: WorkbenchServices) => {
         context.services = services
@@ -18,12 +20,17 @@ function fixture() {
     },
   } as unknown as {
     hooks: {
+      configureWorkbench: typeof configureWorkbench
       initializeExtensions(storage: ProfileStorage): Promise<void>
       attachWorkbench(services: WorkbenchServices): void
     }
     services?: WorkbenchServices
     start(): void
-    browserMain: { open(): Promise<void> }
+    browserMain: {
+      open(): Promise<void>
+      initServices(): Promise<unknown>
+      configuration: Parameters<typeof configureWorkbench>[0]
+    }
     storage: object
     tracker: object
     invocations: number
@@ -105,4 +112,34 @@ test('the module attaches only after initialization succeeds', async () => {
   await assert.rejects(failed.browserMain.open(), /Host unavailable/)
   assert.equal(failed.started, undefined)
   assert.equal(failed.services, undefined)
+})
+
+test('layout defaults are supplied before configuration services initialize', async () => {
+  const context = fixture()
+  context.browserMain.configuration.configurationDefaults = {
+    'editor.fontSize': 16,
+  }
+  const initialize = context.browserMain.initServices
+  context.browserMain.initServices = function () {
+    const options = this.configuration
+    assert.deepEqual(
+      Array.from(options.defaultLayout!.views!, (view) => view.id),
+      ['ade.sidebar'],
+    )
+    assert.equal('force' in options.defaultLayout!, false)
+    assert.equal(options.configurationDefaults!['editor.fontSize'], 16)
+    assert.equal(
+      options.configurationDefaults!['workbench.sideBar.location'],
+      'left',
+    )
+    assert.equal(
+      options.configurationDefaults![
+        'workbench.secondarySideBar.defaultVisibility'
+      ],
+      'hidden',
+    )
+    return initialize.call(this)
+  }
+  await context.browserMain.open()
+  assert.equal(context.started, true)
 })
