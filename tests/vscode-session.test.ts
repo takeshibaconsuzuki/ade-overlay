@@ -27,13 +27,13 @@ class Session {
   flushed = false
   joined = 0
   readonly services = {
-    storageService: {
-      flush: async (reason: 1) => {
-        assert.equal(reason, 1)
+    lifecycleService: {
+      withExpectedShutdown: async (reason: 3) => {
+        assert.equal(reason, 3, 'reopening the page restores the saved layout')
         this.flushed = true
         await this.flush.promise
       },
-    } satisfies SessionServices.StorageService,
+    } satisfies SessionServices.LifecycleService,
     workingCopyBackupService: {
       joinBackups: async () => {
         this.joined++
@@ -67,7 +67,7 @@ class Session {
   }
 }
 
-test('flushes the view while waiting for native backups, deletions and queued writes', async () => {
+test('marks the page for reload and flushes the view while waiting for native backups, deletions and queued writes', async () => {
   const session = new Session()
   const saving = session.start()
   session.flush.resolve()
