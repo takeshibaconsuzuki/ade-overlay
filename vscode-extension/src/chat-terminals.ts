@@ -8,6 +8,8 @@ import { TemporaryImageFileWriter } from './image-file-writer'
 
 export class ChatTerminals {
   private readonly identities: TerminalIdentities
+  private readonly activeTerminalChanged = new vscode.EventEmitter<void>()
+  readonly onDidChangeActiveTerminal = this.activeTerminalChanged.event
   private readonly subscriptions: vscode.Disposable[]
   private readonly imageFileWriters = new Map<
     string,
@@ -36,16 +38,20 @@ export class ChatTerminals {
         'env' in terminal.creationOptions
           ? terminal.creationOptions.env?.ADE_TERMINAL_PROVIDER
           : undefined
-      this.identities.track(
-        terminal,
-        id && providerId ? { id, providerId } : undefined,
-      )
+      void this.identities
+        .track(terminal, id && providerId ? { id, providerId } : undefined)
+        .then(() => this.activeTerminalChanged.fire())
     }
     this.subscriptions = [
+      this.activeTerminalChanged,
+      vscode.window.onDidChangeActiveTerminal(() =>
+        this.activeTerminalChanged.fire(),
+      ),
       vscode.window.onDidOpenTerminal(remember),
       vscode.window.onDidCloseTerminal((terminal) => {
         const identity = this.identities.get(terminal)
         this.identities.forget(terminal)
+        this.activeTerminalChanged.fire()
         if (identity) {
           const imageFileWriter =
             this.imageFileWriters.get(identity.id) ??
@@ -58,6 +64,11 @@ export class ChatTerminals {
       }),
     ]
     vscode.window.terminals.forEach(remember)
+  }
+
+  get activeTerminalId(): string | undefined {
+    const terminal = vscode.window.activeTerminal
+    return terminal ? this.identities.get(terminal)?.id : undefined
   }
 
   async start(providerId: string): Promise<void> {

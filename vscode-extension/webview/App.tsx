@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Box, Button } from '@radix-ui/themes'
-import type { Chat } from '../../src/shared/api'
 import type { ChatsMessage, SidebarMessage } from '../shared/api'
 import { ChatList } from './ChatList'
 
@@ -11,10 +10,10 @@ declare function acquireVsCodeApi(): {
 const vscode = acquireVsCodeApi()
 
 export function App() {
-  const [chats, setChats] = useState<Record<string, Chat>>()
+  const [snapshot, setSnapshot] = useState<ChatsMessage>()
   useEffect(() => {
     const receive = (event: MessageEvent<ChatsMessage>) => {
-      if (event.data.type === 'chats') setChats(event.data.chats)
+      if (event.data.type === 'chats') setSnapshot(event.data)
     }
     window.addEventListener('message', receive)
     vscode.postMessage({ type: 'ready' })
@@ -31,7 +30,8 @@ export function App() {
         </Button>
       </Box>
       <ChatList
-        chats={chats}
+        chats={snapshot?.chats}
+        activeTerminalId={snapshot?.activeTerminalId}
         onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
       />
     </>

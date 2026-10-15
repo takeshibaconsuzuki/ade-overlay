@@ -30,16 +30,16 @@ export class TerminalIdentities {
     this.identities = store.read()
   }
 
-  track(
+  async track(
     terminal: ChatTerminal,
     identity: ChatTerminalIdentity | undefined,
-  ): void {
+  ): Promise<void> {
     // Restored terminals have no launch options; match their PID against saved identities.
     if (!identity && !Object.keys(this.identities).length) return
     if (this.resolving.has(terminal) || this.live.has(terminal)) return
     const controller = new AbortController()
     this.resolving.set(terminal, controller)
-    void this.resolve(terminal, identity, controller)
+    await this.resolve(terminal, identity, controller)
   }
 
   private async resolve(

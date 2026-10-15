@@ -24,9 +24,11 @@ function Field({ value, name }: { value: string | undefined; name: string }) {
 
 export function ChatList({
   chats,
+  activeTerminalId,
   onOpenChat,
 }: {
   chats: Record<string, Chat> | undefined
+  activeTerminalId: string | undefined
   onOpenChat: (id: string) => void
 }) {
   const entries =
@@ -57,6 +59,12 @@ export function ChatList({
                 <button
                   type="button"
                   className="chat-open"
+                  aria-current={
+                    chat?.terminalId !== undefined &&
+                    chat.terminalId === activeTerminalId
+                      ? true
+                      : undefined
+                  }
                   disabled={!chat}
                   onClick={() => onOpenChat(id)}
                   title={chat && `Open chat in ${chat.worktreePath}`}
