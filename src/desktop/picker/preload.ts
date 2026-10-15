@@ -4,6 +4,7 @@ import {
   type PickerApi,
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
+  WORKTREE_PICKER_HIDE,
   WORKTREE_PICKER_VISIBILITY_CHANGED,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
@@ -43,6 +44,7 @@ const api: PickerApi = {
     onVisibilityChangedListener = listener
   },
   initializeWorktreePicker: () => ipcRenderer.send(WORKTREE_PICKER_INITIALIZE),
+  hideWorktreePicker: () => ipcRenderer.send(WORKTREE_PICKER_HIDE),
   setOnConnectionStateChangedListener(listener) {
     onConnectionStateChangedListener = listener
   },

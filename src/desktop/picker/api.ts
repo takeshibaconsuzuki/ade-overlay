@@ -3,6 +3,9 @@ import type { ConnectionState, Worktree } from '../../shared/api'
 // Worktree-picker renderer → main: requests current connection state and worktrees after listeners are registered.
 export const WORKTREE_PICKER_INITIALIZE = 'worktreePicker:initialize'
 
+// Worktree-picker renderer → main: ends the picker session and relinquishes window focus.
+export const WORKTREE_PICKER_HIDE = 'worktreePicker:hide'
+
 // Main → renderer: starts or ends a picker session when its window is shown or hidden.
 export const WORKTREE_PICKER_VISIBILITY_CHANGED =
   'worktreePicker:visibilityChanged'
@@ -39,6 +42,7 @@ export interface PickerApi {
     listener: ((worktrees: Worktree[]) => void) | undefined,
   ): void
   initializeWorktreePicker(): void
+  hideWorktreePicker(): void
   refreshWorktrees(): Promise<void>
   openWorktree(path: string): Promise<void>
   clearWorktreeError(path: string, errorId: string): Promise<void>
