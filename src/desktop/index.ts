@@ -14,6 +14,7 @@ import type {
 import {
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
+  WORKTREE_PICKER_HIDE,
   WORKTREE_PICKER_VISIBILITY_CHANGED,
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
@@ -44,15 +45,19 @@ const log = logger.child({ component: 'desktop' })
 const notifications = new NotificationRetention(100)
 let worktreePickerWindow: BrowserWindow | undefined
 
+function hideWorktreePicker(): void {
+  // Relinquish focus before hiding; blur cannot activate another window once hidden.
+  if (worktreePickerWindow?.isFocused()) worktreePickerWindow.blur()
+  worktreePickerWindow?.hide()
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'win32') app.setAppUserModelId(APP_NAME)
   const pickerShortcut = 'CommandOrControl+Shift+Space'
   if (
     !globalShortcut.register(pickerShortcut, () => {
       if (worktreePickerWindow?.isVisible()) {
-        // Relinquish focus before hiding; blur cannot activate another window once hidden.
-        if (worktreePickerWindow.isFocused()) worktreePickerWindow.blur()
-        worktreePickerWindow.hide()
+        hideWorktreePicker()
       } else {
         worktreePickerWindow?.show()
       }
@@ -180,6 +185,10 @@ app.whenReady().then(() => {
       WORKTREE_PICKER_VISIBILITY_CHANGED,
       worktreePickerWindow.isVisible(),
     )
+  })
+  ipcMain.on(WORKTREE_PICKER_HIDE, (event) => {
+    if (event.sender !== worktreePickerWindow?.webContents) return
+    hideWorktreePicker()
   })
   ipcMain.handle(WORKTREES_REFRESH, (event) => {
     if (event.sender !== worktreePickerWindow?.webContents)

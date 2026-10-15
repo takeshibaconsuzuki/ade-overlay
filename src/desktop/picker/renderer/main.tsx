@@ -327,7 +327,10 @@ function WorktreePicker(): React.JSX.Element {
       (event.target as HTMLElement).closest('[role="menu"]')
     )
       return
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'Escape' && event.target === searchRef.current) {
+      event.preventDefault()
+      window.picker.hideWorktreePicker()
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       if (!filteredWorktrees.length) return
       const direction = event.key === 'ArrowDown' ? 1 : -1
