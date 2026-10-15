@@ -22,6 +22,8 @@ import {
 
 import { WORKBENCH_VERSION } from '../src/server/vscode-workbench-patch'
 import { workbenchFixture } from './fixtures/vscode-workbench'
+import { terminalSerializerFixture } from './fixtures/vscode-terminal-serializer'
+import { patchVscodeTerminalSerializer } from '../src/server/vscode-terminal-serializer-patch'
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-vscode-runtime-'))
@@ -39,6 +41,17 @@ async function fixture(t: TestContext) {
     { mode: 0o755 },
   )
   await writeFile(join(directory, 'vscode/out/server-main.js'), 'fixture')
+  await mkdir(
+    join(directory, 'vscode/node_modules/@xterm/addon-serialize/lib'),
+    { recursive: true },
+  )
+  await writeFile(
+    join(
+      directory,
+      'vscode/node_modules/@xterm/addon-serialize/lib/addon-serialize.js',
+    ),
+    terminalSerializerFixture,
+  )
   await writeFile(
     join(directory, 'vscode/out/vs/code/browser/workbench/workbench.js'),
     workbenchFixture,
@@ -96,6 +109,16 @@ test('installation is verified and shared, and a new runtime uses the cache offl
   assert.equal(f.requests(), 2)
   assert.equal(await readFile(a.node, 'utf8'), 'fixture')
   assert.equal(await readFile(a.entrypoint, 'utf8'), 'fixture')
+  assert.equal(
+    await readFile(
+      join(
+        a.entrypoint,
+        '../../node_modules/@xterm/addon-serialize/lib/addon-serialize.js',
+      ),
+      'utf8',
+    ),
+    patchVscodeTerminalSerializer(terminalSerializerFixture),
+  )
   const browserDirectory = join(a.entrypoint, '..', 'vs/code/browser/workbench')
   assert.match(
     await readFile(join(browserDirectory, 'workbench.js'), 'utf8'),

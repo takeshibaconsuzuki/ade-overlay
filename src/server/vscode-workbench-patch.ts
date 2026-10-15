@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 import workbenchSource from '../../out/workbench/source'
+import {
+  patchVscodeTerminalSerializer,
+  TERMINAL_SERIALIZER_PATCH,
+} from './vscode-terminal-serializer-patch'
 
 // Minified identifiers belong to the pinned distribution and are checked on upgrades.
 const anchor =
@@ -27,7 +31,7 @@ const marker = '/* ADE workbench RPC */'
 // Isolate installations across integration versions; existing running clients keep their assets.
 function version(source: string): string {
   return createHash('sha256')
-    .update(bridge + startupBridge + source)
+    .update(bridge + startupBridge + TERMINAL_SERIALIZER_PATCH + source)
     .digest('hex')
     .slice(0, 16)
 }
@@ -82,6 +86,14 @@ async function prepareVscodeWorkbench(
   sourceCode: string,
   assetVersion: string,
 ): Promise<void> {
+  const serializerPath = join(
+    directory,
+    'node_modules/@xterm/addon-serialize/lib/addon-serialize.js',
+  )
+  const serializer = await readFile(serializerPath, 'utf8')
+  const patchedSerializer = patchVscodeTerminalSerializer(serializer)
+  if (patchedSerializer !== serializer)
+    await replaceFile(serializerPath, patchedSerializer)
   const root = join(directory, 'out/vs/code/browser/workbench')
   const path = join(root, 'workbench.js')
   await replaceFile(join(root, 'ade-workbench.js'), sourceCode)
