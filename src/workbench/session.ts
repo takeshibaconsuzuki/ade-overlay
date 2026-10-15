@@ -3,8 +3,8 @@ import type { WorkbenchServices } from './services'
 // Only the internal contracts used by persistence are described here. VS Code owns the objects.
 // eslint-disable-next-line @typescript-eslint/no-namespace -- Groups type-only contracts without emitting a runtime namespace.
 export declare namespace SessionServices {
-  interface StorageService {
-    flush(reason: 1): Promise<void>
+  interface LifecycleService {
+    withExpectedShutdown(reason: 3): Promise<void>
   }
 
   interface WorkingCopyBackupService {
@@ -20,7 +20,9 @@ export declare namespace SessionServices {
 export async function persistVscodeSession(
   handle: WorkbenchServices,
 ): Promise<void> {
-  const storage = handle.get('storageService') as SessionServices.StorageService
+  const lifecycle = handle.get(
+    'lifecycleService',
+  ) as SessionServices.LifecycleService
   const backups = handle.get(
     'workingCopyBackupService',
   ) as SessionServices.WorkingCopyBackupService
@@ -28,8 +30,9 @@ export async function persistVscodeSession(
     'workbench.contrib.browserWorkingCopyBackupTracker',
   ) as SessionServices.WorkingCopyBackupTracker
   const results = await Promise.allSettled([
+    // Treat reopening ADE's page as a reload so VS Code restores the complete saved layout.
     // Capture the view independently so a stuck backup cannot prevent this flush.
-    storage.flush(1),
+    lifecycle.withExpectedShutdown(3), // ShutdownReason.RELOAD
     (async () => {
       // Let VS Code own backup creation and deletion. Its write queue does not include
       // scheduled backups yet; wait for the tracker too. Electron bounds the entire wait.

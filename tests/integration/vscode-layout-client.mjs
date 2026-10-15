@@ -54,6 +54,24 @@ void app.whenReady().then(async () => {
       )
 
     await ready()
+    const phase = process.env.ADE_LAYOUT_PHASE
+    if (phase !== 'initial') {
+      assert.equal(
+        await sidebar(),
+        phase === 'restore-ade'
+          ? 'workbench.view.extension.ade'
+          : 'workbench.view.explorer',
+        'selected sidebar survives a full desktop restart',
+      )
+      assert.equal(await secondaryVisible(), true)
+      if (phase === 'restore-ade')
+        await run(
+          '(async () => { await adeTest.executeCommand("workbench.view.explorer"); })()',
+        )
+      console.log(`PASS saved layout after desktop restart: ${phase}`)
+      app.quit()
+      return
+    }
     assert.equal(await sidebar(), 'workbench.view.extension.ade')
     assert.equal(await secondaryVisible(), false)
     assert.equal(
@@ -88,6 +106,10 @@ void app.whenReady().then(async () => {
     await ready()
     assert.equal(await sidebar(), 'workbench.view.explorer')
     assert.equal(await secondaryVisible(), true)
+    await run(
+      '(async () => { await adeTest.executeCommand("workbench.view.extension.ade"); })()',
+    )
+    assert.equal(await sidebar(), 'workbench.view.extension.ade')
     console.log('PASS initial ADE layout and saved layout restoration')
     app.quit()
   } catch (error) {

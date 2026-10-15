@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import { simpleGit } from 'simple-git'
 import { runDesktopClient, startIntegrationServer } from './harness'
 
-test('initial layout opens ADE and preserves later layout choices', async () => {
+test('initial layout opens ADE and preserves layout choices across desktop restarts', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ade-layout-integration-'))
   const repo = join(directory, 'repo')
   await mkdir(repo)
@@ -24,10 +24,13 @@ test('initial layout opens ADE and preserves later layout choices', async () => 
   await writeFile(manifestPath, JSON.stringify(manifest))
   const server = await startIntegrationServer(directory, [repo])
   try {
-    await runDesktopClient('layout', {
-      ADE_SERVER_URL: `ws://127.0.0.1:${server.port}/rpc`,
-      ADE_LAYOUT_DATA: join(directory, 'electron-data'),
-    })
+    for (const phase of ['initial', 'restore-ade', 'restore-files']) {
+      await runDesktopClient('layout', {
+        ADE_SERVER_URL: `ws://127.0.0.1:${server.port}/rpc`,
+        ADE_LAYOUT_DATA: join(directory, 'electron-data'),
+        ADE_LAYOUT_PHASE: phase,
+      })
+    }
   } finally {
     await server.close()
   }
