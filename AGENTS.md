@@ -1,6 +1,7 @@
 # Agent Rules
 
 - Activate the development environment before running any other command.
+- NEVER bypass `scripts/bootstrap.py` for development environment setup or activation. Run it from the checkout being used and let it provision that checkout's own environment; do not substitute manual setup or share another checkout's environment through junctions or symlinks.
 - During reviews, treat TODOs that explicitly defer behavior as intentional scope decisions. Do not flag the deferred behavior itself; flag defects outside that scope or consequences the TODO does not acknowledge. A TODO alone does not exempt surrounding code from review.
 - Do not install dependencies globally. Install them into the project instead, using methods such as vendoring or virtual environments.
 - Use `npm run upgrade` instead of manually editing version ranges when updating dependencies.
