@@ -1,4 +1,11 @@
-import { app, BrowserWindow, webContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  webContents,
+  clipboard,
+  ClipboardItem,
+  nativeImage,
+} from 'electron'
 import assert from 'node:assert/strict'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -38,6 +45,15 @@ void app.whenReady().then(async () => {
         .find((entry) => /^http:.*\/vscode\//.test(entry.getURL()))
       return page
     }, 'editor page')
+    if (process.env.ADE_CODEX_PHASE.startsWith('paste')) {
+      page.on('console-message', (event) => {
+        if (
+          event.level === 'error' &&
+          event.message.startsWith('Unable to paste')
+        )
+          console.error('WORKBENCH', event.message)
+      })
+    }
     await wait(
       async () =>
         !page.isLoading() &&
@@ -47,10 +63,23 @@ void app.whenReady().then(async () => {
     await page.executeJavaScript(
       'adeTest.get("workspaceTrustManagementService").setWorkspaceTrust(true)',
     )
-    const command = (id, ...args) =>
-      page.executeJavaScript(
-        `adeTest.get('commandService').executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
-      )
+    const command = (id, ...args) => {
+      if (id === 'workbench.action.terminal.paste') {
+        BrowserWindow.getAllWindows()
+          .find((window) => window !== picker)
+          .focus()
+        page.focus()
+      }
+      return Promise.race([
+        page.executeJavaScript(
+          `adeTest.get('commandService').executeCommand(${[id, ...args].map((value) => JSON.stringify(value)).join(',')})`,
+          true,
+        ),
+        delay(12000).then(() => {
+          throw new Error(`Command timed out: ${id}`)
+        }),
+      ])
+    }
     await wait(
       async () => page.executeJavaScript('adeTest.workbenchReady'),
       'chat controller initialized at startup',
@@ -61,6 +90,13 @@ void app.whenReady().then(async () => {
           "adeTest.get('configurationService').inspect('terminal.integrated.enablePersistentSessions').userLocalValue === false",
         ),
       'host setting disables terminal persistence',
+    )
+    await wait(
+      () =>
+        page.executeJavaScript(
+          "adeTest.get('configurationService').inspect('terminal.integrated.enablePersistentSessions').userRemoteValue === true",
+        ),
+      'remote settings loaded',
     )
     assert.deepEqual(
       await page.executeJavaScript(`(() => {
@@ -105,6 +141,263 @@ void app.whenReady().then(async () => {
     const sessions = async () =>
       (await readdir(repo)).filter((name) => name.endsWith('.json'))
     const markerPath = join(process.env.ADE_CODEX_DATA, 'restored-chat.json')
+    if (process.env.ADE_CODEX_PHASE.startsWith('paste')) {
+      const originalClipboard = await Promise.all(
+        (await clipboard.read())
+          .filter((item) => item.types.length > 0)
+          .map(
+            async (item) =>
+              new ClipboardItem(
+                Object.fromEntries(
+                  await Promise.all(
+                    item.types.map(async (type) => [
+                      type,
+                      await item.getType(type),
+                    ]),
+                  ),
+                ),
+              ),
+          ),
+      )
+      try {
+        const restored = process.env.ADE_CODEX_PHASE === 'paste-restored'
+        if (!restored) await clickCodex()
+        await wait(
+          () =>
+            page.executeJavaScript(
+              "adeTest.get('terminalService').instances.some(t => t.target === 2 && !!t.processId)",
+            ),
+          'chat terminal ready for paste',
+        )
+        await page.executeJavaScript(
+          "adeTest.get('terminalEditorService').focusInstance(adeTest.get('terminalService').instances.find(t => t.target === 2))",
+        )
+        await wait(
+          () =>
+            page.executeJavaScript(
+              "adeTest.get('terminalService').activeInstance?.target === 2 && adeTest.get('terminalService').activeInstance?.xterm.raw.modes.bracketedPasteMode",
+            ),
+          'chat terminal selected for paste',
+        )
+        await delay(1000)
+        await page.executeJavaScript(
+          "adeTest.get('configurationService').updateValue('terminal.integrated.enableMultiLinePasteWarning', 'always', 8)",
+        )
+        const id = restored
+          ? JSON.parse(await readFile(markerPath, 'utf8')).id
+          : (await sessions())[0].replace('.json', '')
+        const inputPath = join(repo, id + '.input.jsonl')
+        const input = async () => {
+          try {
+            return (await readFile(inputPath, 'utf8'))
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => JSON.parse(line))
+              .join('')
+          } catch (error) {
+            if (error.code === 'ENOENT') return ''
+            throw error
+          }
+        }
+        const previous = await input()
+        const firstImage = Buffer.from(
+          'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+          'base64',
+        )
+        const secondImage = nativeImage
+          .createFromBitmap(Buffer.from([0, 255, 0, 255]), {
+            width: 1,
+            height: 1,
+          })
+          .toPNG()
+        const html = `<h1>before<img src="data:image/gif;base64,${firstImage.toString('base64')}">middle<img src="data:image/png;base64,${secondImage.toString('base64')}">after</h1>`
+        await clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob(['NATIVE_UNRELATED'], {
+              type: 'text/plain',
+            }),
+          }),
+        ])
+        await command('workbench.action.terminal.paste')
+        await wait(
+          async () => (await input()).slice(previous.length).includes('AFTER'),
+          'ordered remote paste reaches the PTY',
+        )
+        const pasted = (await input()).slice(previous.length)
+        const paths = [...pasted.matchAll(/"([^"\r\n]+\.png)"/g)].map(
+          (match) => match[1],
+        )
+        assert.equal(paths.length, 2)
+        const firstPng = nativeImage.createFromBuffer(await readFile(paths[0]))
+        assert.deepEqual(firstPng.getSize(), { width: 1, height: 1 })
+        assert.deepEqual(firstPng.toBitmap(), Buffer.from([0, 0, 0, 0]))
+        assert.deepEqual(
+          nativeImage.createFromBuffer(await readFile(paths[1])).toBitmap(),
+          nativeImage.createFromBuffer(secondImage).toBitmap(),
+        )
+        assert.equal(
+          pasted,
+          ['BEFORE', `"${paths[0]}"`, 'MIDDLE', `"${paths[1]}"`, 'AFTER']
+            .map((text) => `\x1b[200~${text}\x1b[201~`)
+            .join(''),
+          'paste preserves separate image-path events and source order without submission',
+        )
+        const pasteParts = async () =>
+          (await readFile(join(repo, id + '.pastes.jsonl'), 'utf8'))
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        await wait(
+          async () => (await pasteParts()).at(-1)?.text === 'AFTER',
+          'composer processes the ordered paste events',
+        )
+        assert.deepEqual((await pasteParts()).slice(-5), [
+          { type: 'text', text: 'BEFORE' },
+          { type: 'image', path: paths[0] },
+          { type: 'text', text: 'MIDDLE' },
+          { type: 'image', path: paths[1] },
+          { type: 'text', text: 'AFTER' },
+        ])
+
+        const beforeNativePaste = await input()
+        page.paste()
+        await wait(
+          async () =>
+            (await input()).slice(beforeNativePaste.length).includes('AFTER'),
+          'native menu paste reaches the chat PTY',
+        )
+        assert.equal(
+          (await input()).slice(beforeNativePaste.length),
+          pasted,
+          'native paste is intercepted exactly once',
+        )
+
+        const beforePlainText = await input()
+        await clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob(['PLAIN_TEXT\nSECOND_LINE']),
+          }),
+        ])
+        await command('workbench.action.terminal.paste')
+        await wait(
+          async () =>
+            (await input())
+              .slice(beforePlainText.length)
+              .includes('SECOND_LINE'),
+          'plain text normalizer pastes multiline content without a shell warning',
+        )
+        assert.equal(
+          (await input()).slice(beforePlainText.length),
+          '\x1b[200~PLAIN_TEXT\rSECOND_LINE\x1b[201~',
+          'multiline plain text stays inside a bracketed paste without submission',
+        )
+
+        if (!restored) {
+          await page.executeJavaScript(`(async () => {
+            const service = adeTest.get('terminalService');
+            const terminal = await service.createTerminal({
+              config: { executable: ${JSON.stringify(process.env.ADE_PASTE_NODE)}, args: [${JSON.stringify(process.env.ADE_PASTE_CLI)}], cwd: ${JSON.stringify(repo)}, env: { ADE_TERMINAL_ID: 'unrelated' }, waitOnExit: false },
+              location: 1,
+            });
+            service.setActiveInstance(terminal);
+            await adeTest.get('terminalGroupService').showPanel(true);
+            await terminal.xtermReadyPromise;
+            await terminal.focusWhenReady(true);
+          })()`)
+          await wait(
+            () =>
+              page.executeJavaScript(
+                "adeTest.get('terminalService').activeInstance?.target === 1 && adeTest.get('terminalService').activeInstance?.xterm.raw.modes.bracketedPasteMode",
+              ),
+            'ordinary terminal ready',
+          )
+          await clipboard.write([
+            new ClipboardItem({
+              'text/html': new Blob([html]),
+              'text/plain': new Blob(['NATIVE_UNRELATED']),
+            }),
+          ])
+          await command('workbench.action.terminal.paste')
+          await wait(async () => {
+            try {
+              return (
+                await readFile(join(repo, 'unrelated.input.jsonl'), 'utf8')
+              ).includes('NATIVE_UNRELATED')
+            } catch (error) {
+              if (error.code === 'ENOENT') return false
+              throw error
+            }
+          }, 'ordinary terminal receives native text')
+          assert.ok(
+            !(
+              await readFile(join(repo, 'unrelated.input.jsonl'), 'utf8')
+            ).includes('.png'),
+          )
+          await page.executeJavaScript(`(async () => {
+            const service = adeTest.get('terminalService');
+            const terminal = service.instances.find(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID === 'unrelated');
+            const chat = service.instances.find(t => t.target === 2);
+            const editors = adeTest.get('editorService');
+            const groupId = editors.findEditors(chat.resource)[0].groupId;
+            adeTest.get('terminalGroupService').getGroupForInstance(terminal)?.removeInstance(terminal);
+            await editors.openEditor({
+              resource: adeTest.get('terminalEditorService').resolveResource(terminal),
+              options: { pinned: true },
+            }, groupId);
+            await adeTest.get('terminalEditorService').focusInstance(terminal);
+          })()`)
+          const beforeMovedShellPaste = await readFile(
+            join(repo, 'unrelated.input.jsonl'),
+            'utf8',
+          )
+          await command('workbench.action.terminal.paste')
+          await wait(
+            async () =>
+              (await readFile(join(repo, 'unrelated.input.jsonl'), 'utf8'))
+                .slice(beforeMovedShellPaste.length)
+                .includes('NATIVE_UNRELATED'),
+            'ordinary terminal retains native paste inside the owned group',
+          )
+          assert.ok(
+            !(await readFile(join(repo, 'unrelated.input.jsonl'), 'utf8'))
+              .slice(beforeMovedShellPaste.length)
+              .includes('.png'),
+          )
+          await page.executeJavaScript(
+            "adeTest.get('terminalService').instances.find(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID === 'unrelated').dispose()",
+          )
+          await page.executeJavaScript(
+            "adeTest.get('terminalEditorService').focusInstance(adeTest.get('terminalService').instances.find(t => t.target === 2))",
+          )
+          await writeFile(markerPath, JSON.stringify({ id, paths }))
+        } else {
+          const saved = JSON.parse(await readFile(markerPath, 'utf8'))
+          await command('workbench.action.terminal.sendSequence', { text: 'q' })
+          await wait(
+            () =>
+              page.executeJavaScript(
+                "adeTest.get('terminalService').instances.length === 0",
+              ),
+            'chat closes',
+          )
+          await wait(async () => {
+            try {
+              await readFile(saved.paths[0])
+              return false
+            } catch (error) {
+              if (error.code === 'ENOENT') return true
+              throw error
+            }
+          }, 'chat paste images removed on close')
+        }
+        console.log('PASS HTML chat paste', process.env.ADE_CODEX_PHASE)
+      } finally {
+        await clipboard.write(originalClipboard)
+      }
+      app.quit()
+      return
+    }
     if (process.env.ADE_CODEX_PHASE === 'sole-group') {
       await wait(
         () =>

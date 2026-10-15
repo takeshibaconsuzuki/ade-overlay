@@ -95,6 +95,7 @@ test('terminal launch validates arguments and resolves server paths independentl
   service.updateWorktrees([windows])
   const options = {
     terminalId,
+    providerId: 'codex',
     worktreePath: 'c:/repo',
     shellPath: 'pwsh',
     shellArgs: [],

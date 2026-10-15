@@ -9,6 +9,7 @@ import {
   type WorkbenchMethods,
 } from '../shared/editor-rpc'
 import { createChatTerminals } from './chat-terminals'
+import { installChatPaste } from './chat-paste'
 import { createSettings } from './settings'
 import { persistVscodeSession } from './session'
 import type { ProfileStorage, WorkbenchServices } from './services'
@@ -103,6 +104,7 @@ class WorkbenchConnection {
     window.addEventListener('pagehide', () => command.dispose(), { once: true })
     return (async () => {
       this.terminals = await createChatTerminals(services)
+      installChatPaste(services, this.terminals, this.desktop)
       this.settings = createSettings(services, (generation, content) => {
         void this.desktop
           .settingsChanged(generation, content)

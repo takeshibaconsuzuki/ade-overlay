@@ -645,6 +645,7 @@ test('chat launches target the requested loaded page without changing worktree f
     'ws://remote.example/rpc',
   )
   const launch: ChatTerminalLaunch = {
+    providerId: 'codex',
     worktreePath: a.path,
     terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
     shellPath: 'codex',

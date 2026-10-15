@@ -30,6 +30,8 @@ function fixture(t: TestContext, name: string) {
       },
       ready() {},
       startupFailed() {},
+      prepareChatPaste: async (pid): Promise<string[] | undefined> =>
+        connection.extension!.prepareChatPaste(pid),
     },
     {
       openChat: async (id) => {
@@ -39,6 +41,9 @@ function fixture(t: TestContext, name: string) {
         received.push(id)
       },
       openChatTerminal: async () => {},
+      readClipboard: async () => [
+        { type: 'text', data: new TextEncoder().encode(name) },
+      ],
     },
   )
   const workbench = createMessageRpc<DesktopWorkbenchMethods, WorkbenchMethods>(
@@ -84,6 +89,11 @@ function fixture(t: TestContext, name: string) {
       },
       {
         focusChatTerminal: (id) => id === name,
+        prepareChatPaste: async (pid): Promise<string[] | undefined> => {
+          if (pid === 0) return undefined
+          const parts = await extension.readClipboard()
+          return [new TextDecoder().decode(parts![0].data), 'second paste']
+        },
       },
     )
     t.after(() => extension.$close())
@@ -111,6 +121,15 @@ test('two editor connections route bidirectional calls and nested replies indepe
   assert.equal(await a.connection.extension!.focusChatTerminal('a'), true)
   assert.equal(await b.connection.extension!.focusChatTerminal('a'), false)
   assert.deepEqual(await b.workbench.getDisabledExtensions(), [{ id: 'b' }])
+  assert.deepEqual(await a.workbench.prepareChatPaste(123), [
+    'a',
+    'second paste',
+  ])
+  assert.deepEqual(await b.workbench.prepareChatPaste(123), [
+    'b',
+    'second paste',
+  ])
+  assert.equal(await a.workbench.prepareChatPaste(0), undefined)
   await assert.rejects(extensionA.openChat('fail'), (error: unknown) => {
     assert.ok(error instanceof TypeError)
     assert.equal(error.message, 'Missing chat')
