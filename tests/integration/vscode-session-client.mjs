@@ -39,9 +39,14 @@ void app.whenReady().then(async () => {
         (await page.executeJavaScript('globalThis.adeTest?.workbenchReady')),
       'workbench API',
     )
-    // Only the disposable fixture workspace is trusted; no user profile is used.
-    await page.executeJavaScript(
-      'adeTest.get("workspaceTrustManagementService").setWorkspaceTrust(true)',
+    assert.equal(
+      await page.executeJavaScript(`(async () => {
+        const trust = adeTest.get('workspaceTrustManagementService');
+        await trust.workspaceTrustInitialized;
+        return trust.isWorkspaceTrusted();
+      })()`),
+      true,
+      'worktree is trusted automatically on startup',
     )
     const command = async (id, ...args) => {
       console.log('COMMAND', id)

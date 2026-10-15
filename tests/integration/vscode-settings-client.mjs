@@ -114,14 +114,18 @@ void app.whenReady().then(async () => {
     }
     console.log('PASS initial host settings in both workbenches')
     for (const page of [a, b]) {
-      await page.executeJavaScript(
-        `(async () => {
+      assert.equal(
+        await page.executeJavaScript(
+          `(async () => {
           const h = adeTest;
           const trust = h.get('workspaceTrustManagementService');
           await trust.workspaceTrustInitialized;
           await h.get('extensionService').whenInstalledExtensionsRegistered();
-          await trust.setWorkspaceTrust(true);
+          return trust.isWorkspaceTrusted();
         })()`,
+        ),
+        true,
+        'each worktree is trusted automatically on startup',
       )
       await wait(
         () =>
