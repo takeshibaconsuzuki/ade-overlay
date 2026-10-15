@@ -5,6 +5,7 @@
 - Do not install dependencies globally. Install them into the project instead, using methods such as vendoring or virtual environments.
 - Use `npm run upgrade` instead of manually editing version ranges when updating dependencies.
 - Keep prose focused on durable intent and contracts. Preserve general wording that already describes the behavior correctly. Don’t add implementation details or enumerate current components. Change documentation only when the task makes it inaccurate or incomplete.
+- When refactoring, remove dead code made obsolete by the change.
 
 # Code Rules
 

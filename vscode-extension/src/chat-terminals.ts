@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import * as vscode from 'vscode'
 import type { DesktopExtensionMethods } from '../../src/shared/editor-rpc'
+import type { TerminalPastePart } from '../../src/shared/clipboard'
 import type { TerminalChatProvider } from './terminal-chat-provider'
 import { TerminalIdentities } from './terminal-identities'
 import { WorkspaceTerminalIdentityStore } from './workspace-terminal-identity-store'
@@ -89,7 +90,9 @@ export class ChatTerminals {
     return vscode.window.state.focused && this.identities.focus(id)
   }
 
-  async preparePaste(processId: number): Promise<string[] | undefined> {
+  async preparePaste(
+    processId: number,
+  ): Promise<TerminalPastePart[] | undefined> {
     const identity = this.identities.forProcess(processId)
     if (!identity) return undefined
     const provider = this.providers.get(identity.providerId)
