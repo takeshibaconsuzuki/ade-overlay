@@ -115,11 +115,20 @@ app.whenReady().then(() => {
         version: app.getVersion(),
       }),
       settingsChanged: (content) => editorHost.receiveVscodeSettings(content),
-      chatTurnFinished: (title, worktreeBasename, description) => {
+      chatTurnFinished: (id, title, worktreeBasename, description) => {
         new Notification({
           title,
           body: `${worktreeBasename}\n${description.slice(0, 8_000)}`,
-        }).show()
+        })
+          .on('click', () => {
+            void chats.openChat(id).catch((error: unknown) => {
+              log.warn(
+                { err: error, chatId: id },
+                'Unable to open chat from notification',
+              )
+            })
+          })
+          .show()
       },
       chatsChanged: (snapshot) => chats.updateChats(snapshot),
       worktreesChanged: (next) => {

@@ -99,6 +99,7 @@ export interface DesktopClientMethods extends ClientMethods {
   getClientInfo(): ClientInfo & { kind: 'desktop' }
   // A chat changed from working to idle.
   chatTurnFinished(
+    id: string,
     title: string,
     worktreeBasename: string,
     description: string,

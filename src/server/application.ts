@@ -70,6 +70,7 @@ export async function startServer(
     for (const client of desktops) {
       void client.chatTurnFinished
         .asEvent(
+          `${chat.providerId}:${chat.sessionId}`,
           chat.title,
           basename(chat.worktreePath),
           chat.description ?? '',

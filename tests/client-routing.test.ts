@@ -109,17 +109,19 @@ const desktopMethods: DesktopClientMethods = {
   worktreesChanged: () => {},
 }
 
-test('working to idle transitions notify desktops with the current chat title, worktree basename and description', async (t) => {
+test('working to idle transitions notify desktops with the chat ID, current title, worktree basename and description', async (t) => {
   const f = await fixture(t)
-  const notifications: [string, string, string][] = []
+  const notifications: Parameters<DesktopClientMethods['chatTurnFinished']>[] =
+    []
   const desktop = await f.connect({
     ...desktopMethods,
     chatTurnFinished: (
+      id: string,
       title: string,
       worktreeBasename: string,
       description: string,
     ) => {
-      notifications.push([title, worktreeBasename, description])
+      notifications.push([id, title, worktreeBasename, description])
     },
   })
   const extension = await f.connect({
@@ -138,7 +140,12 @@ test('working to idle transitions notify desktops with the current chat title, w
   await f.report('Finished', { description: 'Implemented notifications.' })
   await waitFor(() => notifications.length === 1)
   assert.deepEqual(notifications, [
-    ['Finished', basename(f.directory), 'Implemented notifications.'],
+    [
+      'test:one',
+      'Finished',
+      basename(f.directory),
+      'Implemented notifications.',
+    ],
   ])
   await f.report('Still idle')
   await desktop.rpc.getServerInfo()
@@ -150,8 +157,13 @@ test('working to idle transitions notify desktops with the current chat title, w
   await f.report('Next turn finished', { description: 'Updated the tests.' })
   await waitFor(() => notifications.length === 3)
   assert.deepEqual(notifications.slice(1), [
-    ['Another chat finished', basename(f.directory), ''],
-    ['Next turn finished', basename(f.directory), 'Updated the tests.'],
+    ['test:two', 'Another chat finished', basename(f.directory), ''],
+    [
+      'test:one',
+      'Next turn finished',
+      basename(f.directory),
+      'Updated the tests.',
+    ],
   ])
   await extension.rpc.getServerInfo()
   assert.ok(!extension.requests.includes('chatTurnFinished'))
@@ -213,15 +225,17 @@ test('descriptions are stored as previews and sent unchanged to extensions', asy
 
 test('notifications inherit stored description previews without disconnecting the desktop', async (t) => {
   const f = await fixture(t)
-  const notifications: [string, string, string][] = []
+  const notifications: Parameters<DesktopClientMethods['chatTurnFinished']>[] =
+    []
   const desktop = await f.connect({
     ...desktopMethods,
     chatTurnFinished: (
+      id: string,
       title: string,
       worktreeBasename: string,
       description: string,
     ) => {
-      notifications.push([title, worktreeBasename, description])
+      notifications.push([id, title, worktreeBasename, description])
     },
   })
   await waitFor(() => desktop.requests.includes('worktreesChanged'))
@@ -233,7 +247,7 @@ test('notifications inherit stored description previews without disconnecting th
   await f.report(title)
   await waitFor(() => notifications.length === 1)
   assert.deepEqual(notifications, [
-    [title, basename(f.directory), 'a'.repeat(64_000)],
+    ['test:one', title, basename(f.directory), 'a'.repeat(64_000)],
   ])
   const stored = (await desktop.rpc.getChats())['test:one']
   assert.equal(stored.description, 'a'.repeat(64_000))
