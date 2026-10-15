@@ -421,7 +421,9 @@ function WorktreePicker(): React.JSX.Element {
             disabled={refreshing || connectionState !== 'connected'}
             aria-busy={refreshing}
           >
-            {refreshing ? <Spinner aria-hidden="true" /> : <ReloadIcon />}
+            <Spinner loading={refreshing} aria-hidden="true">
+              <ReloadIcon />
+            </Spinner>
             Refresh
           </Button>
         </header>
