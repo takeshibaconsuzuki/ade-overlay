@@ -41,7 +41,32 @@ async function runChatScenario(phases: string[]): Promise<void> {
     fs.writeFileSync(id + '.json', JSON.stringify({ id, pid: process.pid, cwd: process.cwd() }));
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on('data', data => process.exit(data.toString().includes('x') ? 7 : 0));
+    ${
+      phases.some((phase) => phase.startsWith('paste'))
+        ? `
+      process.stdout.write('\\x1b[?2004h');
+      let pending = '';
+      process.stdin.on('data', data => {
+        fs.appendFileSync(id + '.input.jsonl', JSON.stringify(data.toString()) + '\\n');
+        if (data.toString() === 'q') process.exit(0);
+        pending += data.toString();
+        let end;
+        while ((end = pending.indexOf('\\x1b[201~')) !== -1) {
+          const start = pending.indexOf('\\x1b[200~');
+          if (start === -1) throw new Error('Missing paste boundary');
+          const text = pending.slice(start + 6, end);
+          pending = pending.slice(end + 6);
+          // Like Codex's composer, only a whole image-path paste creates an attachment.
+          const image = /^"([^"\\r\\n]+\\.png)"$/.exec(text);
+          const part = image ? { type: 'image', path: image[1] } : { type: 'text', text };
+          if (image && fs.readFileSync(image[1]).subarray(0, 8).toString('hex') !== '89504e470d0a1a0a')
+            throw new Error('Invalid image attachment');
+          fs.appendFileSync(id + '.pastes.jsonl', JSON.stringify(part) + '\\n');
+        }
+      });
+    `
+        : `process.stdin.on('data', data => process.exit(data.toString().includes('x') ? 7 : 0));`
+    }
     console.log('CODEX_READY');
   `,
   )
@@ -83,6 +108,8 @@ async function runChatScenario(phases: string[]): Promise<void> {
           ADE_CODEX_DATA: directory,
           ADE_CODEX_REPO: repo,
           ADE_CODEX_PHASE: phase,
+          ADE_PASTE_NODE: process.execPath,
+          ADE_PASTE_CLI: cli,
         },
         120_000,
       )
@@ -103,3 +130,6 @@ test('closing the last chat releases the sole editor group', () =>
 
 test('Codex button opens locked terminals, chat rows focus them, and command exit closes them', () =>
   runChatScenario(['launch', 'restore', 'close-restored']))
+
+test('HTML paste preserves order in chat terminals, falls back for other terminals, and survives restoration', () =>
+  runChatScenario(['paste', 'paste-restored']))

@@ -6,7 +6,7 @@ import {
   type ChatTerminalLaunch,
   type Worktree,
 } from '../shared/api'
-import type { DesktopExtensionMethods } from '../shared/editor-rpc'
+import type { DesktopChatMethods } from '../shared/editor-rpc'
 import { logger } from '../shared/logger'
 
 export interface ChatEditor {
@@ -22,7 +22,7 @@ function pathKey(path: string): string {
     : posix.normalize(path)
 }
 
-export class DesktopChatService implements DesktopExtensionMethods {
+export class DesktopChatService implements DesktopChatMethods {
   private chats: Record<string, Chat> = {}
   private worktrees: Worktree[] = []
   private pending:

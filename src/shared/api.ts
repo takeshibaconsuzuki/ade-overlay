@@ -31,6 +31,7 @@ export type Chat = z.infer<typeof chatSchema>
 export const chatTerminalLaunchSchema = z.strictObject({
   worktreePath: z.string().min(1),
   terminalId: z.uuid(),
+  providerId: z.string().min(1),
   shellPath: z.string().min(1),
   shellArgs: z.array(z.string()),
 })

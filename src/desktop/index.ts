@@ -31,6 +31,12 @@ import { EditorWindowManager } from './editor/manager'
 import { ElectronEditorWindow } from './editor/window'
 import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
 import { createWorktreePickerWindow } from './picker/window'
+import { ClipboardService } from './clipboard/service'
+import { ElectronClipboardSource } from './clipboard/electron'
+import { UrlClipboardImageReader } from './clipboard/image-reader'
+import { HtmlClipboardNormalizer } from './clipboard/html'
+import { TextClipboardNormalizer } from './clipboard/text'
+import { FetchHttpClient } from '../shared/http-client'
 
 const log = logger.child({ component: 'desktop' })
 let worktreePickerWindow: BrowserWindow | undefined
@@ -60,6 +66,12 @@ app.whenReady().then(() => {
     globalShortcut.unregister(pickerShortcut)
   })
   let worktrees: Worktree[] = []
+  const clipboard = new ClipboardService(new ElectronClipboardSource(), [
+    new HtmlClipboardNormalizer(
+      new UrlClipboardImageReader(new FetchHttpClient()),
+    ),
+    new TextClipboardNormalizer(),
+  ])
   const editorHost = new ElectronEditorWindow(
     { writeSettings: (content) => server.rpc.writeSettings(content) },
     () => server.rpc.getDisabledExtensions(),
@@ -67,6 +79,7 @@ app.whenReady().then(() => {
       openChat: (id): Promise<void> => chats.openChat(id),
       openChatTerminal: (options): Promise<void> =>
         chats.openChatTerminal(options),
+      readClipboard: () => clipboard.readClipboard(),
     },
   )
   const serverUrl = process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL

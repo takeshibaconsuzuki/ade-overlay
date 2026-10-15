@@ -6,34 +6,45 @@ export interface ChatTerminal {
 }
 
 export interface TerminalIdentityStore {
-  read(): Record<string, string>
-  write(identities: Record<string, string>): PromiseLike<void>
+  read(): Record<string, ChatTerminalIdentity>
+  write(identities: Record<string, ChatTerminalIdentity>): PromiseLike<void>
+}
+
+export interface ChatTerminalIdentity {
+  id: string
+  providerId: string
 }
 
 // Only resolved identities enter the live index or persistence queue. A failed
 // process must never delay registration or focus of another terminal.
 export class TerminalIdentities {
-  private readonly identities: Record<string, string>
+  private readonly identities: Record<string, ChatTerminalIdentity>
   private readonly resolving = new Map<ChatTerminal, AbortController>()
-  private readonly live = new Map<ChatTerminal, { pid: number; id: string }>()
+  private readonly live = new Map<
+    ChatTerminal,
+    { pid: number; identity: ChatTerminalIdentity }
+  >()
   private writes = Promise.resolve()
 
   constructor(private readonly store: TerminalIdentityStore) {
     this.identities = store.read()
   }
 
-  track(terminal: ChatTerminal, id: string | undefined): void {
+  track(
+    terminal: ChatTerminal,
+    identity: ChatTerminalIdentity | undefined,
+  ): void {
     // Restored terminals have no launch options; match their PID against saved identities.
-    if (!id && !Object.keys(this.identities).length) return
+    if (!identity && !Object.keys(this.identities).length) return
     if (this.resolving.has(terminal) || this.live.has(terminal)) return
     const controller = new AbortController()
     this.resolving.set(terminal, controller)
-    void this.resolve(terminal, id, controller)
+    void this.resolve(terminal, identity, controller)
   }
 
   private async resolve(
     terminal: ChatTerminal,
-    id: string | undefined,
+    identity: ChatTerminalIdentity | undefined,
     controller: AbortController,
   ): Promise<void> {
     try {
@@ -42,10 +53,10 @@ export class TerminalIdentities {
         delay(10_000, undefined, { signal: controller.signal, ref: false }),
       ])
       if (controller.signal.aborted || pid === undefined) return
-      id ??= this.identities[pid]
-      if (!id) return
-      this.live.set(terminal, { pid, id })
-      this.identities[pid] = id
+      identity ??= this.identities[pid]
+      if (!identity) return
+      this.live.set(terminal, { pid, identity })
+      this.identities[pid] = identity
       this.save()
     } catch (error) {
       if (!controller.signal.aborted)
@@ -60,7 +71,7 @@ export class TerminalIdentities {
     this.resolving.get(terminal)?.abort()
     const identity = this.live.get(terminal)
     this.live.delete(terminal)
-    if (identity && this.identities[identity.pid] === identity.id) {
+    if (identity && this.identities[identity.pid] === identity.identity) {
       delete this.identities[identity.pid]
       this.save()
     }
@@ -77,11 +88,19 @@ export class TerminalIdentities {
 
   focus(id: string): boolean {
     const terminal = [...this.live].find(
-      ([, identity]) => identity.id === id,
+      ([, entry]) => entry.identity.id === id,
     )?.[0]
     if (!terminal) return false
     terminal.show()
     return true
+  }
+
+  get(terminal: ChatTerminal): ChatTerminalIdentity | undefined {
+    return this.live.get(terminal)?.identity
+  }
+
+  forProcess(pid: number): ChatTerminalIdentity | undefined {
+    return [...this.live.values()].find((entry) => entry.pid === pid)?.identity
   }
 
   dispose(): void {

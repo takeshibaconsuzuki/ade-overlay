@@ -16,18 +16,33 @@ let desktop: ReturnType<typeof connectDesktop> | undefined
 let client: RpcClient<ServerMethods, ExtensionClientMethods> | undefined
 
 export function activate(context: vscode.ExtensionContext) {
-  const terminals = new ChatTerminals(context.workspaceState, {
-    openChatTerminal: async (options) => {
-      if (!desktop) throw new Error('ADE desktop is not connected')
-      await desktop.rpc.openChatTerminal(options)
+  const terminals = new ChatTerminals(
+    context.workspaceState,
+    {
+      openChat: async (id) => {
+        if (!desktop) throw new Error('ADE desktop is not connected')
+        await desktop.rpc.openChat(id)
+      },
+      openChatTerminal: async (options) => {
+        if (!desktop) throw new Error('ADE desktop is not connected')
+        await desktop.rpc.openChatTerminal(options)
+      },
+      readClipboard: async () => {
+        if (!desktop) throw new Error('ADE desktop is not connected')
+        return desktop.rpc.readClipboard()
+      },
     },
-  })
+    [new CodexTerminalProvider()],
+  )
   const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
     terminals,
   )
-  desktop = connectDesktop({ focusChatTerminal: (id) => terminals.focus(id) })
+  desktop = connectDesktop({
+    focusChatTerminal: (id) => terminals.focus(id),
+    prepareChatPaste: (processId) => terminals.preparePaste(processId),
+  })
   client = connectRpc<ServerMethods, ExtensionClientMethods>(
     process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL,
     {
@@ -111,7 +126,7 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async startCodex(): Promise<void> {
     try {
-      await this.terminals.start(new CodexTerminalProvider())
+      await this.terminals.start('codex')
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Unable to start Codex: ${error instanceof Error ? error.message : String(error)}`,

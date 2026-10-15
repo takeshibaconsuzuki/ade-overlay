@@ -81,6 +81,13 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
           },
           {
             getDisabledExtensions: readDisabledExtensions,
+            prepareChatPaste: async (
+              processId,
+            ): Promise<string[] | undefined> => {
+              if (!connection.extension)
+                throw new Error('The chat extension is not ready')
+              return connection.extension.prepareChatPaste(processId)
+            },
             settingsChanged: (generation, content) =>
               this.vscodeSettingsSync.changed(generation, content),
             ready: () => {

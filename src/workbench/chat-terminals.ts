@@ -10,6 +10,7 @@ declare namespace ChatTerminalServices {
   interface Group {
     id: number
     count: number
+    isLocked: boolean
     lock(locked: boolean): void
     focus(): void
   }
@@ -56,6 +57,7 @@ declare namespace ChatTerminalServices {
     resolveResource(terminal: Terminal): unknown
   }
   interface Editors {
+    findEditors(resource: unknown): { groupId: number }[]
     onDidCloseEditor(listener: (event: { groupId: number }) => void): Disposable
     openEditor(
       input: {
@@ -69,6 +71,7 @@ declare namespace ChatTerminalServices {
 
 export async function createChatTerminals(handle: WorkbenchServices): Promise<{
   open(launch: ChatTerminalLaunch): Promise<void>
+  owns(resource: unknown): boolean
 }> {
   const groups = handle.get(
     'editorGroupsService',
@@ -99,6 +102,16 @@ export async function createChatTerminals(handle: WorkbenchServices): Promise<{
   })
   let latestRequest = 0
   return {
+    owns(resource) {
+      const owned = group
+      return (
+        !!owned?.isLocked &&
+        groups.getGroup(owned.id) === owned &&
+        editors
+          .findEditors(resource)
+          .some((editor) => editor.groupId === owned.id)
+      )
+    },
     async open(launch) {
       const terminals = handle.get(
         'terminalService',
@@ -130,7 +143,10 @@ export async function createChatTerminals(handle: WorkbenchServices): Promise<{
             executable: launch.shellPath,
             args: launch.shellArgs,
             cwd: launch.worktreePath,
-            env: { ADE_TERMINAL_ID: launch.terminalId },
+            env: {
+              ADE_TERMINAL_ID: launch.terminalId,
+              ADE_TERMINAL_PROVIDER: launch.providerId,
+            },
             waitOnExit: false,
           },
           location: 1, // TerminalLocation.Panel
