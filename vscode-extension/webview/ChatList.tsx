@@ -24,11 +24,11 @@ function Field({ value, name }: { value: string | undefined; name: string }) {
 
 export function ChatList({
   chats,
-  activeTerminalId,
+  selectedChatId,
   onOpenChat,
 }: {
   chats: Record<string, Chat> | undefined
-  activeTerminalId: string | undefined
+  selectedChatId: string | undefined
   onOpenChat: (id: string) => void
 }) {
   const entries =
@@ -62,10 +62,7 @@ export function ChatList({
                   type="button"
                   className="chat-open"
                   aria-current={
-                    chat?.terminalId !== undefined &&
-                    chat.terminalId === activeTerminalId
-                      ? true
-                      : undefined
+                    chat && id === selectedChatId ? true : undefined
                   }
                   disabled={!chat}
                   onClick={() => onOpenChat(id)}

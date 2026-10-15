@@ -736,33 +736,53 @@ void app.whenReady().then(async () => {
       'unrelated editor group is not locked',
     )
 
-    const response = await fetch(
-      process.env.ADE_SERVER_URL.replace('ws:', 'http:').replace(
-        '/rpc',
-        '/chats/report/test',
-      ),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerId: 'test',
-          sessionId: 'first',
-          terminalId: first.id,
-          worktreePath: repo,
-          title: 'First chat',
-          status: 'idle',
-          mtime: Date.now(),
-          pid: first.pid,
-        }),
-      },
-    )
-    assert.equal(response.status, 204)
+    const reportChat = async (chat) => {
+      const response = await fetch(
+        process.env.ADE_SERVER_URL.replace('ws:', 'http:').replace(
+          '/rpc',
+          '/chats/report/test',
+        ),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            providerId: 'test',
+            sessionId: 'first',
+            worktreePath: repo,
+            status: 'idle',
+            mtime: Date.now(),
+            ...chat,
+          }),
+        },
+      )
+      assert.equal(response.status, 204)
+    }
+    const firstChat = {
+      terminalId: first.id,
+      title: 'First chat',
+      pid: first.pid,
+    }
+    await reportChat({ ...firstChat, worktreePath: join(repo, 'other') })
     await wait(
       async () =>
         sidebar.executeJavaScript(
           '!!document.querySelector(".chat-open:enabled")',
         ),
       'chat row',
+    )
+    const selectedChatTitle = () =>
+      sidebar.executeJavaScript(
+        'document.querySelector(".chat-open[aria-current=true] .chat-title")?.textContent ?? null',
+      )
+    assert.equal(
+      await selectedChatTitle(),
+      null,
+      'other worktrees have no indicator',
+    )
+    await reportChat(firstChat)
+    await wait(
+      async () => (await selectedChatTitle()) === 'First chat',
+      'live chat has an indicator before its terminal is focused',
     )
     await sidebar.executeJavaScript(
       'document.querySelector(".chat-open:enabled").click()',
@@ -773,6 +793,68 @@ void app.whenReady().then(async () => {
           `adeTest.get('terminalService').activeInstance?.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)}`,
         ),
       'matching terminal focus',
+    )
+    const second = JSON.parse(
+      await readFile(join(repo, opened[1].id + '.json'), 'utf8'),
+    )
+    await reportChat({
+      sessionId: 'second',
+      terminalId: second.id,
+      title: 'Second chat',
+      pid: second.pid,
+    })
+    await wait(
+      () =>
+        sidebar.executeJavaScript(
+          'document.querySelectorAll(".chat-open:enabled").length === 2',
+        ),
+      'second chat row',
+    )
+    assert.equal(
+      await selectedChatTitle(),
+      'First chat',
+      'new reports preserve chat focus',
+    )
+    await page.executeJavaScript(
+      `adeTest.get('terminalEditorService').focusInstance(adeTest.get('terminalService').instances.find(t => t.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(second.id)}))`,
+    )
+    await wait(
+      async () => (await selectedChatTitle()) === 'Second chat',
+      'indicator follows chat focus',
+    )
+    await command('workbench.action.terminal.new')
+    await wait(
+      () =>
+        page.executeJavaScript(
+          "adeTest.get('terminalService').activeInstance?.target === 1",
+        ),
+      'ordinary terminal is active',
+    )
+    await reportChat({ ...firstChat, title: 'First chat updated' })
+    await wait(
+      () =>
+        sidebar.executeJavaScript(
+          '[...document.querySelectorAll(".chat-title")].some(t => t.textContent === "First chat updated")',
+        ),
+      'chat update reaches sidebar after ordinary terminal focus',
+    )
+    assert.equal(
+      await selectedChatTitle(),
+      'Second chat',
+      'ordinary terminal focus retains the chat indicator',
+    )
+    await page.executeJavaScript(
+      "adeTest.get('terminalService').activeInstance.dispose()",
+    )
+    await sidebar.executeJavaScript(
+      'document.querySelector(".chat-open:enabled").click()',
+    )
+    await wait(
+      () =>
+        page.executeJavaScript(
+          `adeTest.get('terminalService').activeInstance?.shellLaunchConfig.env?.ADE_TERMINAL_ID === ${JSON.stringify(first.id)}`,
+        ),
+      'chat terminal focused again',
     )
     await command('workbench.action.terminal.sendSequence', { text: 'q' })
     await wait(
@@ -828,27 +910,11 @@ void app.whenReady().then(async () => {
       await groups.activeGroup.closeAllEditors({ preserveFocus: true });
       if (groups.groups.length === 1) groups.addGroup(groups.activeGroup, 2);
     })()`)
-    const report = await fetch(
-      process.env.ADE_SERVER_URL.replace('ws:', 'http:').replace(
-        '/rpc',
-        '/chats/report/test',
-      ),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerId: 'test',
-          sessionId: 'first',
-          terminalId: saved.id,
-          worktreePath: repo,
-          title: 'Restored chat',
-          status: 'idle',
-          mtime: Date.now(),
-          pid: session.pid,
-        }),
-      },
-    )
-    assert.equal(report.status, 204)
+    await reportChat({
+      terminalId: saved.id,
+      title: 'Restored chat',
+      pid: session.pid,
+    })
     await command('workbench.action.focusFirstEditorGroup')
     assert.notEqual(
       await page.executeJavaScript(

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { relative } from 'node:path'
 import * as vscode from 'vscode'
 import type {
   Chat,
@@ -73,7 +74,7 @@ class SidebarViewProvider
     private readonly extensionUri: vscode.Uri,
     private readonly terminals: ChatTerminals,
   ) {
-    this.terminalChanges = terminals.onDidChangeActiveTerminal(() =>
+    this.terminalChanges = terminals.onDidChangeChatFocus(() =>
       this.sendSnapshot(),
     )
   }
@@ -84,10 +85,22 @@ class SidebarViewProvider
   }
 
   private sendSnapshot(): void {
+    const worktreePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    const localChats = Object.entries(this.chats ?? {}).filter(
+      ([, chat]) =>
+        worktreePath !== undefined &&
+        relative(worktreePath, chat.worktreePath) === '',
+    )
+    const selected =
+      localChats.find(
+        ([, chat]) =>
+          chat.terminalId !== undefined &&
+          chat.terminalId === this.terminals.lastFocusedTerminalId,
+      ) ?? localChats[0]
     const message: ChatsMessage = {
       type: 'chats',
       chats: this.chats,
-      activeTerminalId: this.terminals.activeTerminalId,
+      selectedChatId: selected?.[0],
     }
     void this.view?.webview.postMessage(message)
   }
