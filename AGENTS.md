@@ -16,6 +16,7 @@
 - We are still in development. Do not implement backwards compatibility or migrations.
 - Keep direct dependencies pinned to exact versions in `package.json`.
 - Keep the fast path of `scripts/bootstrap.py` fast enough to run before every command; the agent does not have a persistent shell session, so it must run it before every command.
+- Strongly prefer to use the bidirectional RPC to communicate between the desktop client and the extension. Treat patching vscode as a last resort, used only when no other alternatives exist.
 
 # Development
 
