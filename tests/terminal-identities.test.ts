@@ -65,11 +65,15 @@ test('restored terminals resolve independently of unrelated unresolved processes
   const unrelated = new Terminal()
   const restored = new Terminal()
   identities.track(unrelated, undefined)
-  identities.track(restored, undefined)
+  const registration = identities.track(restored, undefined)
   assert.equal(identities.focus('restored'), false)
   restored.resolve(123)
-  await setImmediate()
+  await registration
   assert.equal(identities.focus('restored'), true)
+  assert.deepEqual(identities.get(restored), {
+    id: 'restored',
+    providerId: 'codex',
+  })
   assert.deepEqual(identities.forProcess(123), {
     id: 'restored',
     providerId: 'codex',

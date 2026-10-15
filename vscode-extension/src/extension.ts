@@ -37,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
   const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
+    sidebar,
     terminals,
   )
   desktop = connectDesktop({
@@ -61,14 +62,21 @@ export function activate(context: vscode.ExtensionContext) {
   )
 }
 
-class SidebarViewProvider implements vscode.WebviewViewProvider {
+class SidebarViewProvider
+  implements vscode.WebviewViewProvider, vscode.Disposable
+{
   private view: vscode.WebviewView | undefined
   private chats: Record<string, Chat> | undefined
+  private readonly terminalChanges: vscode.Disposable
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly terminals: ChatTerminals,
-  ) {}
+  ) {
+    this.terminalChanges = terminals.onDidChangeActiveTerminal(() =>
+      this.sendSnapshot(),
+    )
+  }
 
   setChats(chats: Record<string, Chat> | undefined): void {
     this.chats = chats
@@ -76,8 +84,16 @@ class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private sendSnapshot(): void {
-    const message: ChatsMessage = { type: 'chats', chats: this.chats }
+    const message: ChatsMessage = {
+      type: 'chats',
+      chats: this.chats,
+      activeTerminalId: this.terminals.activeTerminalId,
+    }
     void this.view?.webview.postMessage(message)
+  }
+
+  dispose(): void {
+    this.terminalChanges.dispose()
   }
 
   resolveWebviewView(view: vscode.WebviewView) {

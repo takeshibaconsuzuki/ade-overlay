@@ -95,6 +95,10 @@ body {
   background: var(--vscode-list-hoverBackground);
 }
 
+.chat-open[aria-current='true'] {
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder);
+}
+
 .chat-open:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
