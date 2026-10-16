@@ -47,6 +47,7 @@ test(
     const args = process.argv.slice(2);
     fs.writeFileSync('arguments.json', JSON.stringify(args));
     fs.writeFileSync('ade-server-url', process.env.ADE_SERVER_URL);
+    fs.writeFileSync('ade-chat-report-url', process.env.ADE_CHAT_REPORT_URL);
     const token = fs.readFileSync(args[args.indexOf('--connection-token-file') + 1], 'utf8');
     const server = http.createServer((request, response) => {
       fs.writeFileSync('probed', 'yes');
@@ -63,6 +64,10 @@ test(
     assert.equal(
       await readFile(join(f.directory, 'ade-server-url'), 'utf8'),
       'ws://127.0.0.1:54321/rpc',
+    )
+    assert.equal(
+      await readFile(join(f.directory, 'ade-chat-report-url'), 'utf8'),
+      'http://127.0.0.1:54321/chats/report',
     )
     const args: string[] = JSON.parse(
       await readFile(join(f.directory, 'arguments.json'), 'utf8'),

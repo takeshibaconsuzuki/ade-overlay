@@ -6,8 +6,6 @@ import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
 const [provider, executable] = process.argv.slice(2)
-// TODO: Take the server address from an environment variable.
-const address = 'http://127.0.0.1:4317'
 
 async function findOwner() {
   const options = {
@@ -81,8 +79,11 @@ async function main() {
   }
   const payload = JSON.parse(input)
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return
+  // ADE provides the endpoint to its terminals; chats started elsewhere are not reported.
+  const endpoint = process.env.ADE_CHAT_REPORT_URL
+  if (!endpoint) return
   const pid = await findOwner()
-  await fetch(`${address}/chats/report/${encodeURIComponent(provider)}`, {
+  await fetch(`${endpoint}/${encodeURIComponent(provider)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

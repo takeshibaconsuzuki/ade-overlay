@@ -7,6 +7,7 @@ import type { Readable } from 'node:stream'
 import pRetry from 'p-retry'
 import treeKill from 'tree-kill'
 import { logger } from '../shared/logger'
+import { CHAT_REPORT_PATH } from './constants'
 import type { VscodeInstallation } from './vscode-runtime'
 import { vscodeBasePath } from './vscode-route'
 import { prepareVscodeRemoteSettings } from './vscode-remote-settings'
@@ -116,6 +117,8 @@ export class NodeVscodeProcess implements VscodeProcess {
     extensionsDirectory: string,
     serverUrl: string,
   ) {
+    const chatReportUrl = new URL(CHAT_REPORT_PATH, serverUrl)
+    chatReportUrl.protocol = chatReportUrl.protocol.replace('ws', 'http')
     this.child = spawn(
       installation.node,
       [
@@ -141,7 +144,12 @@ export class NodeVscodeProcess implements VscodeProcess {
         cwd: path,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ADE_SERVER_URL: serverUrl },
+        env: {
+          ...process.env,
+          ADE_SERVER_URL: serverUrl,
+          // Terminals inherit this; chat hooks report only when it is set.
+          ADE_CHAT_REPORT_URL: chatReportUrl.href,
+        },
       },
     )
     this.exited = this.observeProcess()

@@ -5,6 +5,8 @@ export const DEFAULT_SERVER_HOST = '0.0.0.0'
 export const DEFAULT_SERVER_PORT = 4317
 export const DEFAULT_SERVER_CONFIG_PATH = 'server.config.yaml'
 export const MAX_CHAT_DESCRIPTION_LENGTH = 64_000
+// Chat reporters POST provider events to `${CHAT_REPORT_PATH}/<provider-id>`.
+export const CHAT_REPORT_PATH = '/chats/report'
 
 // Packaged executables embed the full build version; see scripts/build-version.ts.
 declare const __BUILD_VERSION__: string | undefined

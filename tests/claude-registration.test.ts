@@ -126,12 +126,7 @@ test(
         }),
     )
     const port = (server.address() as { port: number }).port
-    // Change only the hardcoded address in this isolated copy so tests can use an ephemeral port.
-    const source = await readFile(resolve('scripts/report-chat.mjs'), 'utf8')
-    await writeFile(
-      entrypoint,
-      source.replace('http://127.0.0.1:4317', `http://127.0.0.1:${port}`),
-    )
+    await copyFile(resolve('scripts/report-chat.mjs'), entrypoint)
     await new ClaudeChatProvider(
       [process.execPath, entrypoint],
       directory,
@@ -154,6 +149,7 @@ test(
     `
     const env = {
       ...process.env,
+      ADE_CHAT_REPORT_URL: `http://127.0.0.1:${port}/chats/report`,
       ADE_TERMINAL_ID: 'bcf08308-3214-4d40-8a47-ea183fa95752',
     }
     const owner = spawn(

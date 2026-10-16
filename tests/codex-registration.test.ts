@@ -130,18 +130,8 @@ for (const { architecture, provider, executable } of scenarios) {
       )
       const port = (server.address() as { port: number }).port
       const entrypoint = join(directory, 'report-chat.mjs')
-      // Change only the hardcoded address in this isolated copy so tests can use an ephemeral port.
-      const scriptSource = await readFile(
-        resolve('scripts/report-chat.mjs'),
-        'utf8',
-      )
-      await writeFile(
-        entrypoint,
-        scriptSource.replace(
-          'http://127.0.0.1:4317',
-          `http://127.0.0.1:${port}`,
-        ),
-      )
+      // The copy's path exercises quoting in the installed command.
+      await copyFile(resolve('scripts/report-chat.mjs'), entrypoint)
       await new CodexChatProvider(
         [process.execPath, entrypoint],
         directory,
@@ -181,6 +171,7 @@ for (const { architecture, provider, executable } of scenarios) {
   `
       const env: NodeJS.ProcessEnv = {
         ...process.env,
+        ADE_CHAT_REPORT_URL: `http://127.0.0.1:${port}/chats/report`,
         ADE_TERMINAL_ID: 'bcf08308-3214-4d40-8a47-ea183fa95752',
       }
       if (architecture !== process.arch) {

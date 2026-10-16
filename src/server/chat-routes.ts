@@ -2,13 +2,14 @@ import type { FastifyPluginAsync } from 'fastify'
 import { ZodError } from 'zod'
 import { UnknownChatProviderError } from './chat-provider'
 import type { ChatStore } from './chat-store'
+import { CHAT_REPORT_PATH } from './constants'
 
 export const chatRoutes: FastifyPluginAsync<{ chats: ChatStore }> = async (
   app,
   { chats },
 ) => {
   app.post<{ Params: { provider: string }; Body: unknown }>(
-    '/chats/report/:provider',
+    `${CHAT_REPORT_PATH}/:provider`,
     async (request, reply) => {
       request.log = request.log.child({ providerId: request.params.provider })
       try {
