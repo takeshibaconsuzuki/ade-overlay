@@ -4,6 +4,7 @@ import { exec } from '@yao-pkg/pkg'
 import { build } from 'esbuild'
 import { create } from 'tar'
 import { version } from '../package.json'
+import { buildVersion } from './build-version'
 
 const root = resolve(import.meta.dirname, '..')
 const platforms: Record<string, string> = {
@@ -35,6 +36,7 @@ try {
     // Prefer ESM over UMD modules whose runtime require calls cannot be bundled.
     mainFields: ['module', 'main'],
     external: ['bufferutil', 'utf-8-validate', '@aws-sdk/client-s3'],
+    define: { __BUILD_VERSION__: JSON.stringify(await buildVersion(root)) },
     logLevel: 'info',
   })
   const executable = join(

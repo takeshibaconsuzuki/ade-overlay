@@ -15,7 +15,7 @@
     "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node24 --format=cjs --main-fields=module,main --outfile=out/server/index.cjs --external:bufferutil --external:utf-8-validate --external:@aws-sdk/client-s3 && node -e \"require('node:fs').copyFileSync('scripts/report-chat.mjs', 'out/server/report-chat.mjs')\"",
     "build:workbench": "tsx scripts/build-workbench.ts",
     "package": "npm run package:desktop && npm run package:server",
-    "package:desktop": "npm run build:desktop && electron-builder --publish never",
+    "package:desktop": "npm run build:desktop && tsx scripts/package-desktop.ts",
     "package:server": "tsx scripts/package-server.ts",
     "test": "npm run test:unit && npm run test:integration && npm run test:package",
     "test:unit": "python -B -m unittest discover -s scripts -p test_*.py && tsx --test tests/*.test.ts",

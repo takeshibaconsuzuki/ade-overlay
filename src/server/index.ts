@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { isSea } from 'node:sea'
 import { APP_NAME, RPC_PATH } from '../shared/constants'
 import { logger } from '../shared/logger'
+import { APP_VERSION } from './constants'
 import { resolveServerConfigPath } from './options'
 import { startServer } from './application'
 import { FetchHttpClient } from '../shared/http-client'
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
     )
     .parse()
     .opts<{ config?: string }>()
+  log.info({ version: APP_VERSION }, 'Server starting')
   const server = await startServer(
     await resolveServerConfigPath(flags.config),
     new ProcessVscodeServerFactory(
