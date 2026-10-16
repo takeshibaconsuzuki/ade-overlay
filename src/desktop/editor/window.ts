@@ -60,6 +60,17 @@ export class ElectronEditorWindow implements EditorHost {
         window.hide()
       })
       window.on('resize', () => this.resize())
+      // Electron gives keyboard focus to the shell whenever the window gains it, including on
+      // app activation; it belongs to the current page. The shell also reports focus when the
+      // window merely becomes main while another window of this app, such as About, is key,
+      // and focusing the page then would take key status from that window; so only a key
+      // window is acted on.
+      window.webContents.on('focus', () => {
+        setImmediate(() => {
+          if (!window.isDestroyed() && window.isFocused())
+            this.current?.view.webContents.focus()
+        })
+      })
       const devUrl = process.env.ELECTRON_RENDERER_URL
       const loading = devUrl
         ? window.loadURL(new URL('editor/renderer/index.html', devUrl).href)

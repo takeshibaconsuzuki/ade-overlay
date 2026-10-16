@@ -1,11 +1,4 @@
-import {
-  app,
-  type BrowserWindow,
-  globalShortcut,
-  ipcMain,
-  dialog,
-  Notification,
-} from 'electron'
+import { app, globalShortcut, ipcMain, dialog, Notification } from 'electron'
 import type {
   DesktopClientMethods,
   ServerMethods,
@@ -31,7 +24,7 @@ import { NotificationRetention } from './notification-retention'
 import { EditorWindowManager } from './editor/manager'
 import { ElectronEditorWindow } from './editor/window'
 import { EDITOR_INITIALIZE, EDITOR_RETRY } from './editor/api'
-import { createWorktreePickerWindow } from './picker/window'
+import { WorktreePickerWindow } from './picker/window'
 import { WorktreeOrder } from './picker/worktree-order'
 import { ClipboardService } from './clipboard/service'
 import { ElectronClipboardSource } from './clipboard/electron'
@@ -43,13 +36,7 @@ import { loadDesktopOptions } from './options'
 
 const log = logger.child({ component: 'desktop' })
 const notifications = new NotificationRetention(100)
-let worktreePickerWindow: BrowserWindow | undefined
-
-function hideWorktreePicker(): void {
-  // Relinquish focus before hiding; blur cannot activate another window once hidden.
-  if (worktreePickerWindow?.isFocused()) worktreePickerWindow.blur()
-  worktreePickerWindow?.hide()
-}
+let worktreePicker: WorktreePickerWindow | undefined
 
 async function main(): Promise<void> {
   const { serverUrl } = await loadDesktopOptions()
@@ -57,11 +44,11 @@ async function main(): Promise<void> {
   const pickerShortcut = 'CommandOrControl+Shift+Space'
   if (
     !globalShortcut.register(pickerShortcut, () => {
-      if (worktreePickerWindow?.isVisible()) {
-        hideWorktreePicker()
-      } else {
-        worktreePickerWindow?.show()
-      }
+      log.debug(
+        { visible: worktreePicker?.isVisible ?? null },
+        'Picker shortcut pressed',
+      )
+      worktreePicker?.toggle()
     })
   ) {
     log.error(
@@ -77,7 +64,7 @@ async function main(): Promise<void> {
   let worktrees: Worktree[] = []
   const worktreeOrder = new WorktreeOrder()
   const publishWorktrees = () => {
-    worktreePickerWindow?.webContents.send(
+    worktreePicker?.window.webContents.send(
       WORKTREES_CHANGED,
       worktreeOrder.sort(worktrees),
     )
@@ -169,7 +156,7 @@ async function main(): Promise<void> {
           publishWorktrees()
         }
         log.info({ state }, 'Server connection changed')
-        worktreePickerWindow?.webContents.send(CONNECTION_STATE_CHANGED, state)
+        worktreePicker?.window.webContents.send(CONNECTION_STATE_CHANGED, state)
       },
     },
   )
@@ -178,25 +165,25 @@ async function main(): Promise<void> {
     editorHost.sendShellState()
   })
   ipcMain.on(WORKTREE_PICKER_INITIALIZE, (event) => {
-    if (event.sender !== worktreePickerWindow?.webContents) return
+    if (event.sender !== worktreePicker?.window.webContents) return
     event.sender.send(CONNECTION_STATE_CHANGED, server.state)
     event.sender.send(WORKTREES_CHANGED, worktreeOrder.sort(worktrees))
     event.sender.send(
       WORKTREE_PICKER_VISIBILITY_CHANGED,
-      worktreePickerWindow.isVisible(),
+      worktreePicker.isVisible,
     )
   })
   ipcMain.on(WORKTREE_PICKER_HIDE, (event) => {
-    if (event.sender !== worktreePickerWindow?.webContents) return
-    hideWorktreePicker()
+    if (event.sender !== worktreePicker?.window.webContents) return
+    worktreePicker.hide()
   })
   ipcMain.handle(WORKTREES_REFRESH, (event) => {
-    if (event.sender !== worktreePickerWindow?.webContents)
+    if (event.sender !== worktreePicker?.window.webContents)
       throw new Error('Invalid sender')
     return server.rpc.refreshWorktrees()
   })
   ipcMain.handle(WORKTREE_OPEN, (event, path: string) => {
-    if (event.sender !== worktreePickerWindow?.webContents)
+    if (event.sender !== worktreePicker?.window.webContents)
       throw new Error('Invalid sender')
     return openWorktree(path)
   })
@@ -207,20 +194,21 @@ async function main(): Promise<void> {
   ipcMain.handle(
     WORKTREE_CLEAR_ERROR,
     (event, path: string, errorId: string) => {
-      if (event.sender !== worktreePickerWindow?.webContents)
+      if (event.sender !== worktreePicker?.window.webContents)
         throw new Error('Invalid sender')
       return server.rpc.clearWorktreeError(path, errorId)
     },
   )
   ipcMain.handle(VSCODE_SERVER_STOP, (event, path: string) => {
-    if (event.sender !== worktreePickerWindow?.webContents)
+    if (event.sender !== worktreePicker?.window.webContents)
       throw new Error('Invalid sender')
     return server.rpc.stopVscodeServer(path)
   })
   ipcMain.handle(
     WORKTREE_DELETE,
     async (event, path: string, branchName?: string) => {
-      if (event.sender !== worktreePickerWindow?.webContents)
+      const picker = worktreePicker?.window
+      if (!picker || event.sender !== picker.webContents)
         throw new Error('Invalid sender')
       const worktree = worktrees.find((worktree) => worktree.path === path)
       if (!worktree) throw new Error('Unknown worktree')
@@ -230,7 +218,8 @@ async function main(): Promise<void> {
         branchName === undefined
           ? 'Delete worktree'
           : 'Delete worktree and branch'
-      const { response } = await dialog.showMessageBox({
+      // Attached to the picker so the confirmation does not take focus away from it and hide it.
+      const { response } = await dialog.showMessageBox(picker, {
         type: 'warning',
         message:
           branchName === undefined
@@ -269,9 +258,9 @@ async function main(): Promise<void> {
       }
     })()
   })
-  worktreePickerWindow = createWorktreePickerWindow()
-  worktreePickerWindow.once('closed', () => {
-    worktreePickerWindow = undefined
+  worktreePicker = new WorktreePickerWindow()
+  worktreePicker.window.once('closed', () => {
+    worktreePicker = undefined
     app.quit()
   })
 }

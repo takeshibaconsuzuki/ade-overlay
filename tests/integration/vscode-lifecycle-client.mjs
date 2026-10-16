@@ -10,7 +10,7 @@ app.setPath('userData', join(directory, 'electron-data'))
 let response = 0
 let confirmations = 0
 // Keep the real IPC path, while answering the native confirmation deterministically.
-dialog.showMessageBox = async (options) => {
+dialog.showMessageBox = async (_window, options) => {
   assert.match(options.message, /Delete worktree linked/)
   assert.equal(options.defaultId, 0)
   confirmations++

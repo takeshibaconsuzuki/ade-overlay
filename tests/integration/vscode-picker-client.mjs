@@ -28,10 +28,23 @@ void app.whenReady().then(async () => {
     const picker = BrowserWindow.getAllWindows()[0]
     // Unrelated desktop focus changes must not clear an in-progress test.
     // Exercise the production blur handler explicitly below.
-    const blurListeners = picker.listeners('blur')
-    picker.removeAllListeners('blur')
+    const blurListeners = picker.webContents.listeners('blur')
+    picker.webContents.removeAllListeners('blur')
     picker.setFocusable(false)
     const run = (script) => picker.webContents.executeJavaScript(script)
+    // Show and hide through the shortcut handler so the renderer is told about visibility.
+    // The picker's session state is tracked here, as Electron's visibility is unreliable.
+    let pickerShown = true
+    const toggleTrackedPicker = () => {
+      togglePicker()
+      pickerShown = !pickerShown
+    }
+    const showPicker = () => {
+      if (!pickerShown) toggleTrackedPicker()
+    }
+    const hidePicker = () => {
+      if (pickerShown) toggleTrackedPicker()
+    }
     await wait(
       async () =>
         !picker.webContents.isLoading() &&
@@ -146,7 +159,7 @@ void app.whenReady().then(async () => {
         `document.querySelectorAll('.worktree-row')[${index}].dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: ${x}, clientY: ${y} }))`,
       )
     }
-    picker.show()
+    showPicker()
     publish(worktrees)
     await selected(0)
     assert.equal(
@@ -260,23 +273,24 @@ void app.whenReady().then(async () => {
 
     await search('branch-21')
     await selected(21)
-    for (const listener of blurListeners) listener.call(picker)
+    for (const listener of blurListeners) listener.call(picker.webContents)
+    pickerShown = false
     await wait(
       () => run('document.querySelector("input").value === ""'),
       'search clears while hidden',
     )
     await selected(0)
     await run('document.querySelector("input").blur()')
-    picker.show()
+    showPicker()
     await wait(
       () => run('document.activeElement === document.querySelector("input")'),
       'search focuses on show',
     )
-    // Show/hide events must also survive an immediate toggle.
+    // Visibility changes must also survive an immediate toggle.
     await search('branch-3')
     await selected(3)
-    picker.hide()
-    picker.show()
+    hidePicker()
+    showPicker()
     await wait(
       () =>
         run(
@@ -354,12 +368,12 @@ void app.whenReady().then(async () => {
       document.addEventListener('visibilitychange', window.deferPickerVisibility, true)`)
     for (const hiddenDuration of [0, 25, 200]) {
       await clickActions()
-      togglePicker()
+      toggleTrackedPicker()
       if (hiddenDuration) {
         await wait(() => run('document.hidden'), 'menu hidden with picker')
         await delay(hiddenDuration)
       }
-      togglePicker()
+      toggleTrackedPicker()
       await wait(
         () =>
           run(
@@ -477,9 +491,9 @@ void app.whenReady().then(async () => {
         true,
         'list is manually scrolled before hiding',
       )
-      picker.hide()
+      hidePicker()
       await wait(() => run('document.hidden'), 'picker hidden')
-      picker.show()
+      showPicker()
       await wait(
         () =>
           run(
