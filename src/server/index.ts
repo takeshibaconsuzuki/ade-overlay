@@ -11,6 +11,7 @@ import { ProcessVscodeServerFactory } from './vscode-server'
 import { NodeVscodeLauncher } from './vscode-process'
 import { DownloadedVscodeRuntime } from './vscode-runtime'
 import { CodexChatProvider } from './chat-providers/codex/provider'
+import { ClaudeChatProvider } from './chat-providers/claude/provider'
 
 const log = logger.child({ component: 'server' })
 
@@ -25,27 +26,24 @@ async function main(): Promise<void> {
     .parse()
     .opts<{ config?: string }>()
   log.info({ version: APP_VERSION }, 'Server starting')
+  const reporter: [string, ...string[]] = isSea()
+    ? [process.execPath, '--report-chat']
+    : [
+        process.execPath,
+        join(
+          dirname(resolve(process.argv[1])),
+          process.argv[1].endsWith('.ts')
+            ? '../../scripts/report-chat.mjs'
+            : 'report-chat.mjs',
+        ),
+      ]
   const server = await startServer(
     await resolveServerConfigPath(flags.config),
     new ProcessVscodeServerFactory(
       new DownloadedVscodeRuntime(new FetchHttpClient()),
       new NodeVscodeLauncher(),
     ),
-    [
-      new CodexChatProvider(
-        isSea()
-          ? [process.execPath, '--report-chat']
-          : [
-              process.execPath,
-              join(
-                dirname(resolve(process.argv[1])),
-                process.argv[1].endsWith('.ts')
-                  ? '../../scripts/report-chat.mjs'
-                  : 'report-chat.mjs',
-              ),
-            ],
-      ),
-    ],
+    [new CodexChatProvider(reporter), new ClaudeChatProvider(reporter)],
   )
   log.info(
     { host: server.host, port: server.port, path: RPC_PATH },

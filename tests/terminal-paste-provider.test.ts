@@ -3,6 +3,7 @@ import { chmod, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
+import { ClaudeTerminalProvider } from '../vscode-extension/src/providers/claude'
 import { CodexTerminalProvider } from '../vscode-extension/src/providers/codex'
 import {
   TemporaryImageFileWriter,
@@ -75,6 +76,47 @@ test('Codex keeps single and consecutive image attachments in separate paste eve
         afterDelay: 200,
       },
     ],
+  )
+})
+
+test('Claude Code receives text and escaped image paths as separate ordered paste events', async () => {
+  class WindowsWriter extends Writer {
+    async write(data: Uint8Array): Promise<string> {
+      await super.write(data)
+      return `C:\\Users\\A User\\image-${this.data.length}.png`
+    }
+  }
+  const imageFileWriter = new WindowsWriter()
+  const image = { type: 'image' as const, data: new Uint8Array([1]) }
+  assert.deepEqual(
+    await new ClaudeTerminalProvider().convertClipboard(
+      [
+        { type: 'text', data: new TextEncoder().encode('α\n  before') },
+        image,
+        image,
+        { type: 'text', data: new TextEncoder().encode('after') },
+      ],
+      imageFileWriter,
+    ),
+    [
+      { text: 'α\n  before' },
+      {
+        text: 'C:\\\\Users\\\\A User\\\\image-1.png',
+        beforeDelay: 200,
+        afterDelay: 200,
+      },
+      {
+        text: 'C:\\\\Users\\\\A User\\\\image-2.png',
+        beforeDelay: 200,
+        afterDelay: 200,
+      },
+      { text: 'after' },
+    ],
+  )
+  assert.equal(imageFileWriter.data.length, 2)
+  assert.deepEqual(
+    await new ClaudeTerminalProvider().convertClipboard([image], new Writer()),
+    [{ text: '/remote path/image-1.png', beforeDelay: 200, afterDelay: 200 }],
   )
 })
 

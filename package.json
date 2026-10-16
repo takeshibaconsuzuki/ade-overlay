@@ -12,7 +12,7 @@
     "build": "npm run build:desktop && npm run build:server && npm run build:extension",
     "build:desktop": "electron-vite build",
     "build:extension": "tsx scripts/build-extension.ts",
-    "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node24 --format=cjs --main-fields=module,main --outfile=out/server/index.cjs --external:bufferutil --external:utf-8-validate --external:@aws-sdk/client-s3 && node -e \"require('node:fs').copyFileSync('scripts/report-chat.mjs', 'out/server/report-chat.mjs')\"",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node24 --format=cjs --main-fields=module,main --outfile=out/server/index.cjs --external:bufferutil --external:utf-8-validate --external:@aws-sdk/client-s3 --define:import.meta.url=__importMetaUrl \"--banner:js=const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" && node -e \"require('node:fs').copyFileSync('scripts/report-chat.mjs', 'out/server/report-chat.mjs')\"",
     "build:workbench": "tsx scripts/build-workbench.ts",
     "package": "npm run package:desktop && npm run package:server",
     "package:desktop": "npm run build:desktop && tsx scripts/package-desktop.ts",
@@ -62,6 +62,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.301",
     "@eslint/js": "10.0.1",
     "@types/html-to-text": "9.0.4",
     "@types/node": "26.6.5",

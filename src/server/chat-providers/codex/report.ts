@@ -1,8 +1,6 @@
 import { z } from 'zod'
 import type { Chat } from '../../../shared/api'
-import type { ChatReport } from '../../chat-provider'
-
-const sessionStartGraceMs = 1000
+import { isLateSessionStart, type ChatReport } from '../../chat-provider'
 
 export const CODEX_CHAT_EVENTS = [
   'SessionStart',
@@ -43,16 +41,9 @@ export class CodexChatReport implements ChatReport {
   }
 
   transformChat(previous: Readonly<Chat> | undefined): Chat | undefined {
-    // Asynchronous startup hooks can arrive after the turn has already started.
-    // Accepted tradeoff: grace is scoped to the session, so a different owner's
-    // resume within the window can be ignored. Ownership stays with the previous
-    // process until another report updates it; its end report can remove the chat.
-    if (
-      this.event === 'SessionStart' &&
-      previous?.status === 'working' &&
-      this.chat.mtime - previous.mtime < sessionStartGraceMs
-    )
-      return undefined
-    return this.chat
+    return this.event === 'SessionStart' &&
+      isLateSessionStart(this.chat, previous)
+      ? undefined
+      : this.chat
   }
 }

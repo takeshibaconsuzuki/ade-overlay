@@ -170,6 +170,8 @@ for (const { architecture, provider, executable } of scenarios) {
       await copyFile(process.execPath, ownerPath)
       const script = `
     const { spawn } = require('node:child_process');
+    // Node names its main thread, which replaces the executable name on Linux.
+    process.title = ${JSON.stringify(executable)};
     const command = process.argv[1];
     // Codex executes Windows hooks through PowerShell.
     const child = process.platform === 'win32'

@@ -54,6 +54,10 @@ export class ChatStore {
     )
     if (!provider) throw new UnknownChatProviderError(providerId)
     // Read concurrently, but merge in receipt order so omitted fields inherit preceding updates.
+    // Accepted tradeoff: providers may report asynchronously, so receipt order can differ from
+    // event order, and they may ignore start reports that closely follow a working report. A chat
+    // can then keep stale state or ownership, or reappear after ending, until its next report or
+    // owner exit.
     const pending = Promise.allSettled([
       this.pending,
       provider.readReport(value),

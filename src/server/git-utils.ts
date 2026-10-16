@@ -94,6 +94,15 @@ export class GitWorktreeDiscovery implements WorktreeDiscovery {
   }
 }
 
+// Resolves the root of the worktree containing a path, or the path itself outside Git.
+export async function findWorktreeRoot(path: string): Promise<string> {
+  try {
+    return resolve((await simpleGit(path).revparse(['--show-toplevel'])).trim())
+  } catch {
+    return resolve(path)
+  }
+}
+
 export async function listWorktrees(
   projects: Project[],
   signal?: AbortSignal,

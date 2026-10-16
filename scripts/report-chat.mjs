@@ -5,8 +5,7 @@ import { basename } from 'node:path'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
-const provider = process.argv[2] || 'codex'
-const executable = process.argv[3] || provider
+const [provider, executable] = process.argv.slice(2)
 // TODO: Take the server address from an environment variable.
 const address = 'http://127.0.0.1:4317'
 
@@ -73,6 +72,7 @@ async function findOwner() {
 }
 
 async function main() {
+  if (!provider || !executable) throw new Error('Missing reporter arguments')
   let input = ''
   process.stdin.setEncoding('utf8')
   for await (const chunk of process.stdin) {

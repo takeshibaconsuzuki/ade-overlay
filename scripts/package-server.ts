@@ -36,7 +36,14 @@ try {
     // Prefer ESM over UMD modules whose runtime require calls cannot be bundled.
     mainFields: ['module', 'main'],
     external: ['bufferutil', 'utf-8-validate', '@aws-sdk/client-s3'],
-    define: { __BUILD_VERSION__: JSON.stringify(await buildVersion(root)) },
+    // Bundled ES modules locate themselves through import.meta.url, which CommonJS lacks.
+    banner: {
+      js: "const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;",
+    },
+    define: {
+      __BUILD_VERSION__: JSON.stringify(await buildVersion(root)),
+      'import.meta.url': '__importMetaUrl',
+    },
     logLevel: 'info',
   })
   const executable = join(

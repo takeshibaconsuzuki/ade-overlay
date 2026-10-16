@@ -12,6 +12,8 @@ projects: []
 # chatProviders:
 #   codex:
 #     command: codex --model your-model
+#   claude:
+#     command: claude --model your-model
 
 # Uses the server host's standard VS Code extensions and default user settings.
 # Extensions are shared; settings sync as whole documents, with the host winning on reconnect.

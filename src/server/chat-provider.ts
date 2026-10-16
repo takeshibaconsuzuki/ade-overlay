@@ -8,6 +8,18 @@ export interface ChatReport {
   transformChat?(previous: Readonly<Chat> | undefined): Chat | undefined
 }
 
+const sessionStartGraceMs = 1000
+
+export function isLateSessionStart(
+  chat: Readonly<Chat>,
+  previous: Readonly<Chat> | undefined,
+): boolean {
+  return (
+    previous?.status === 'working' &&
+    chat.mtime - previous.mtime < sessionStartGraceMs
+  )
+}
+
 export class UnknownChatProviderError extends Error {
   constructor(providerId: string) {
     super(`Unknown chat provider: ${providerId}`)

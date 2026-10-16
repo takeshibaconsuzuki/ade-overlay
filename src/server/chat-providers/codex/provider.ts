@@ -1,34 +1,17 @@
 import { existsSync, createReadStream } from 'node:fs'
-import { access, mkdir, readFile } from 'node:fs/promises'
+import { access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { DatabaseSync } from 'node:sqlite'
 import { executePowerShell } from 'powershell-utils'
-import lockfile from 'proper-lockfile'
-import { simpleGit } from 'simple-git'
-import writeFileAtomic from 'write-file-atomic'
 import { z } from 'zod'
 import { quotePosixArgument } from '../../../shared/shell'
 import type { Chat } from '../../../shared/api'
 import type { ChatProvider, ChatReport } from '../../chat-provider'
+import { findWorktreeRoot } from '../../git-utils'
+import { HOOK_MARKER, installHooks } from '../hooks-file'
 import { CODEX_CHAT_EVENTS, CodexChatReport, codexReportSchema } from './report'
-
-const marker = ' --ade-overlay'
-const hooksSchema = z.looseObject({
-  hooks: z
-    .record(
-      z.string(),
-      z.array(
-        z.looseObject({
-          hooks: z.array(
-            z.looseObject({ type: z.string(), command: z.string().optional() }),
-          ),
-        }),
-      ),
-    )
-    .optional(),
-})
 
 const metadataSchema = z.object({
   title: z.string(),
@@ -52,64 +35,32 @@ export class CodexChatProvider implements ChatProvider {
 
   async install(): Promise<void> {
     await access(this.command[0])
-    await mkdir(this.directory, { recursive: true })
-    const path = join(this.directory, 'hooks.json')
-    const release = await lockfile.lock(path, {
-      realpath: false,
-      retries: { retries: 5, minTimeout: 50, maxTimeout: 200 },
-    })
-    try {
-      let content = '{}'
-      try {
-        content = await readFile(path, 'utf8')
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-      // Invalid user configuration is never overwritten.
-      const document = hooksSchema.parse(JSON.parse(content))
-      const hooks = (document.hooks ??= {})
-      for (const [event, groups] of Object.entries(hooks)) {
-        hooks[event] = groups.flatMap((group) => {
-          const remaining = group.hooks.filter(
-            (hook) =>
-              !(hook.type === 'command' && hook.command?.endsWith(marker)),
-          )
-          return remaining.length === group.hooks.length
-            ? [group]
-            : remaining.length
-              ? [{ ...group, hooks: remaining }]
-              : []
-        })
-      }
-      const args = [...this.command, this.id, 'codex']
-      const handler = {
-        type: 'command',
-        command: args.map(quotePosixArgument).join(' ') + marker,
-        ...(process.platform === 'win32'
-          ? // PowerShell needs the call operator to invoke a quoted executable path.
-            {
-              commandWindows:
-                '& ' +
-                args.map(executePowerShell.escapeArgument).join(' ') +
-                marker,
-            }
-          : {}),
-        timeout: 3,
-      }
-      // Accepted tradeoff: asynchronous reports can arrive out of source-event order.
-      // Late reports can restore ended chats until another end report or owner exit.
-      for (const event of CODEX_CHAT_EVENTS) {
-        // Codex requires SessionEnd hooks to finish before closing the session.
-        ;(hooks[event] ??= []).push({
-          hooks: [{ ...handler, async: event !== 'SessionEnd' }],
-        })
-      }
-      const next = JSON.stringify(document, null, 2) + '\n'
-      if (next !== content)
-        await writeFileAtomic(path, next, { encoding: 'utf8' })
-    } finally {
-      await release()
+    const args = [...this.command, this.id, 'codex']
+    const handler = {
+      type: 'command',
+      command: [...args.map(quotePosixArgument), HOOK_MARKER].join(' '),
+      ...(process.platform === 'win32'
+        ? // PowerShell needs the call operator to invoke a quoted executable path.
+          {
+            commandWindows:
+              '& ' +
+              [...args.map(executePowerShell.escapeArgument), HOOK_MARKER].join(
+                ' ',
+              ),
+          }
+        : {}),
+      timeout: 3,
     }
+    await installHooks(
+      join(this.directory, 'hooks.json'),
+      Object.fromEntries(
+        CODEX_CHAT_EVENTS.map((event) => [
+          event,
+          // Codex requires SessionEnd hooks to finish before closing the session.
+          { hooks: [{ ...handler, async: event !== 'SessionEnd' }] },
+        ]),
+      ),
+    )
   }
 
   async readReport(value: unknown): Promise<ChatReport> {
@@ -125,10 +76,7 @@ export class CodexChatProvider implements ChatProvider {
     const [title, worktreePath] = await Promise.all([
       this.readTitle(report.session_id),
       // TODO: Use an environment variable supplied by ADE for the worktree path.
-      simpleGit(report.cwd)
-        .revparse(['--show-toplevel'])
-        .then((path) => resolve(path.trim()))
-        .catch(() => resolve(report.cwd)),
+      findWorktreeRoot(report.cwd),
     ])
     const chat: Chat = {
       providerId: this.id,

@@ -12,13 +12,17 @@ import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
 import type { ChatsMessage } from '../shared/api'
 import { ChatTerminals } from './chat-terminals'
 import { connectDesktop } from './desktop'
+import { ClaudeTerminalProvider } from './providers/claude'
 import { CodexTerminalProvider } from './providers/codex'
 
 let desktop: ReturnType<typeof connectDesktop> | undefined
 let client: RpcClient<ServerMethods, ExtensionClientMethods> | undefined
 
 export function activate(context: vscode.ExtensionContext) {
-  const terminalProviders = [new CodexTerminalProvider()]
+  const terminalProviders = [
+    new CodexTerminalProvider(),
+    new ClaudeTerminalProvider(),
+  ]
   const terminals = new ChatTerminals(
     context.workspaceState,
     {

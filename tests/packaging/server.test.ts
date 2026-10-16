@@ -44,9 +44,11 @@ test(
     )
     await readFile(join(contents, 'server.config.example.yaml'), 'utf8')
     const codexHome = join(directory, 'codex')
+    const claudeHome = join(directory, 'claude')
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       CODEX_HOME: codexHome,
+      CLAUDE_CONFIG_DIR: claudeHome,
       LOG_LEVEL: 'info',
     }
     // Strip inherited module loaders and all executable search paths.
@@ -138,5 +140,18 @@ test(
     assert.equal(reporter.code, 0, reporter.stderr)
     assert.equal(reporter.stdout, '')
     assert.equal(reporter.stderr, '')
+    const claudeHook = JSON.parse(
+      await readFile(join(claudeHome, 'settings.json'), 'utf8'),
+    ).hooks.UserPromptSubmit[0].hooks[0]
+    assert.equal(claudeHook.args[0], '--report-chat')
+    // Claude Code spawns exec-form hooks directly, without a shell.
+    const claudeReporter = await launch(
+      claudeHook.command,
+      claudeHook.args,
+      'invalid JSON',
+    )
+    assert.equal(claudeReporter.code, 0, claudeReporter.stderr)
+    assert.equal(claudeReporter.stdout, '')
+    assert.equal(claudeReporter.stderr, '')
   },
 )
