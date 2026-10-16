@@ -87,6 +87,7 @@ test('partial file config receives defaults and survives YAML serialization', as
     host: '127.0.0.1',
     port: DEFAULT_SERVER_PORT,
     projects: [],
+    chatProviders: {},
     vscode: vscodeOptionsSchema.parse({}),
   })
   assert.deepEqual(serverOptionsSchema.parse(parse(serialized)), options)
@@ -151,6 +152,15 @@ test('schema rejects invalid values and unknown config keys', () => {
     { projects: [{}] },
     { projects: [{ mainWorktreePath: '  ' }] },
     { projects: [{ mainWorktreePath: 'repo', name: 'extra' }] },
+    { chatProviders: null },
+    { chatProviders: [] },
+    { chatProviders: { ' ': {} } },
+    { chatProviders: { codex: 'codex' } },
+    { chatProviders: { codex: { command: '' } } },
+    { chatProviders: { codex: { command: '   ' } } },
+    { chatProviders: { codex: { command: null } } },
+    { chatProviders: { codex: { command: ['codex'] } } },
+    { chatProviders: { codex: { executable: 'codex' } } },
     { vscode: null },
     { vscode: { extensionsDirectory: ' ' } },
     { vscode: { settingsFile: '' } },

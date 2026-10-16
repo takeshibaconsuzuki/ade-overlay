@@ -15,12 +15,14 @@ import { NodeVscodeLauncher } from '../../src/server/vscode-process'
 import { DownloadedVscodeRuntime } from '../../src/server/vscode-runtime'
 import { FetchHttpClient } from '../../src/shared/http-client'
 import type { ChatProvider } from '../../src/server/chat-provider'
+import type { ServerOptions } from '../../src/server/options'
 
 // Every case uses the pinned runtime with isolated host files and server state.
 export async function startIntegrationServer(
   directory: string,
   repos: string[],
   providers: ChatProvider[] = [],
+  chatProviders: ServerOptions['chatProviders'] = {},
 ) {
   const bundle = await build({
     entryPoints: [resolve('tests/integration/workbench.ts')],
@@ -44,6 +46,7 @@ export async function startIntegrationServer(
       host: '127.0.0.1',
       port: 0,
       projects: repos.map((mainWorktreePath) => ({ mainWorktreePath })),
+      chatProviders,
       vscode: {
         profileDatabase,
         settingsFile: join(directory, 'settings.json'),

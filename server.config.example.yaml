@@ -7,6 +7,12 @@ projects: []
 # projects:
 #   - mainWorktreePath: /path/to/project
 
+# Commands run in the selected worktree on the server host, using PowerShell syntax on Windows or /bin/sh syntax elsewhere.
+# Omitted commands use provider defaults. Reloaded commands apply to new chats.
+# chatProviders:
+#   codex:
+#     command: codex --model your-model
+
 # Uses the server host's standard VS Code extensions and default user settings.
 # Extensions are shared; settings sync as whole documents, with the host winning on reconnect.
 # Global extension enablement is imported at editor startup; workspace overrides stay local.

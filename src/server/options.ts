@@ -50,6 +50,12 @@ export const serverOptionsSchema = z.strictObject({
   // Port 0 asks the operating system to allocate an available port.
   port: z.int().min(0).max(65535).default(DEFAULT_SERVER_PORT),
   projects: z.array(projectSchema).default([]),
+  chatProviders: z
+    .record(
+      z.string().trim().min(1),
+      z.strictObject({ command: z.string().trim().min(1).optional() }),
+    )
+    .default({}),
   // Host integration paths are selected at startup; changing them requires a server restart.
   vscode: vscodeOptionsSchema.prefault({}),
 })

@@ -19,6 +19,83 @@ import type {
   ServerMethods,
 } from '../src/shared/api'
 import { createRpcPeer } from '../src/shared/rpc'
+import { TestChatProvider } from './fixtures/chat-provider'
+
+test('chat commands are isolated by provider and read from the latest configuration', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ade-chat-commands-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const config = join(directory, 'server.yaml')
+  const options = {
+    host: '127.0.0.1',
+    port: 0,
+    vscode: { settingsFile: join(directory, 'settings.json') },
+  }
+  await writeFile(config, stringify(options))
+  const vscode = new ProcessVscodeServerFactory(
+    {
+      dataDirectory: directory,
+      prepare: async () => ({ node: '', entrypoint: '' }),
+    },
+    {
+      launch: async () => {
+        throw new Error('Unexpected launch')
+      },
+    },
+  )
+  const server = await startServer(config, vscode, [
+    new TestChatProvider('codex'),
+    new TestChatProvider('example'),
+  ])
+  t.after(() => server.close())
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/rpc`)
+  t.after(() => socket.terminate())
+  const rpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(socket, {
+    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    chatsChanged() {},
+  })
+  await once(socket, 'open')
+  assert.deepEqual(await rpc.getChatProviders(), [
+    { id: 'codex', name: 'Codex' },
+    { id: 'example', name: 'Example' },
+  ])
+  assert.equal(await rpc.getChatCommand('codex'), 'codex')
+  assert.equal(await rpc.getChatCommand('example'), 'example')
+  const commands = {
+    codex: { command: 'codex --model custom-model' },
+    example: { command: 'example --flag "two words"' },
+  }
+  const waitForCommand = async (expected: string) => {
+    const deadline = Date.now() + 5000
+    while ((await rpc.getChatCommand('codex')) !== expected) {
+      assert.ok(Date.now() < deadline, 'Expected command reload')
+      await delay(25)
+    }
+  }
+  await writeFile(config, stringify({ ...options, chatProviders: commands }))
+  await waitForCommand(commands.codex.command)
+  assert.equal(await rpc.getChatCommand('example'), commands.example.command)
+  await assert.rejects(
+    rpc.getChatCommand('unconfigured'),
+    /Unknown chat provider/,
+  )
+
+  await writeFile(
+    config,
+    stringify({
+      ...options,
+      chatProviders: { ...commands, codex: { command: 'codex --resume' } },
+    }),
+  )
+  await waitForCommand('codex --resume')
+  assert.equal(await rpc.getChatCommand('example'), commands.example.command)
+
+  await writeFile(
+    config,
+    stringify({ ...options, chatProviders: { codex: {} } }),
+  )
+  await waitForCommand('codex')
+  assert.equal(await rpc.getChatCommand('example'), 'example')
+})
 
 test('startup installs hooks and accepts raw HTTP reports from any worktree', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'ade-chat-rpc-'))
@@ -215,6 +292,8 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
 
 class FailingProvider implements ChatProvider {
   readonly id = 'failing'
+  readonly name = 'Failing'
+  readonly defaultCommand = 'failing'
   async readReport(): Promise<ChatReport> {
     throw new Error('Unexpected report')
   }

@@ -20,7 +20,7 @@ import { VscodeSettingsStore, type SettingsStore } from './settings-store'
 import { ChatStore } from './chat-store'
 import { readDisabledExtensions } from './extension-enablement'
 import { NodeProcessProbe } from './process-probe'
-import type { ChatProvider } from './chat-provider'
+import { UnknownChatProviderError, type ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
 
 const log = logger.child({ component: 'server' })
@@ -139,6 +139,17 @@ export async function startServer(
     server = await startRpcServer<ClientMethods, ServerMethods>(
       {
         getChats: () => chats.snapshot,
+        getChatProviders: () => providers.map(({ id, name }) => ({ id, name })),
+        getChatCommand: (providerId) => {
+          const provider = providers.find(
+            (provider) => provider.id === providerId,
+          )
+          if (!provider) throw new UnknownChatProviderError(providerId)
+          return (
+            config.snapshot.chatProviders[providerId]?.command ??
+            provider.defaultCommand
+          )
+        },
         getServerInfo: () => ({ name: APP_NAME }),
         getDisabledExtensions: async () =>
           readDisabledExtensions(options.vscode.profileDatabase),

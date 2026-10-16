@@ -3,6 +3,7 @@ import { relative } from 'node:path'
 import * as vscode from 'vscode'
 import type {
   Chat,
+  ChatProviderInfo,
   ExtensionClientMethods,
   ServerMethods,
 } from '../../src/shared/api'
@@ -17,6 +18,7 @@ let desktop: ReturnType<typeof connectDesktop> | undefined
 let client: RpcClient<ServerMethods, ExtensionClientMethods> | undefined
 
 export function activate(context: vscode.ExtensionContext) {
+  const terminalProviders = [new CodexTerminalProvider()]
   const terminals = new ChatTerminals(
     context.workspaceState,
     {
@@ -33,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
         return desktop.rpc.readClipboard()
       },
     },
-    [new CodexTerminalProvider()],
+    terminalProviders,
   )
   const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
@@ -45,6 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
     focusChatTerminal: (id) => terminals.focus(id),
     prepareChatPaste: (processId) => terminals.preparePaste(processId),
   })
+  let providerRequest = 0
   client = connectRpc<ServerMethods, ExtensionClientMethods>(
     process.env.ADE_SERVER_URL ?? DEFAULT_SERVER_URL,
     {
@@ -57,7 +60,27 @@ export function activate(context: vscode.ExtensionContext) {
     },
     {
       onStateChange: (state) => {
-        if (state !== 'connected') sidebar.setChats(undefined)
+        const request = ++providerRequest
+        if (state !== 'connected') {
+          sidebar.setChats(undefined)
+          sidebar.setProviders([])
+          return
+        }
+        void client!.rpc
+          .getChatProviders()
+          .then((providers) => {
+            if (request !== providerRequest) return
+            sidebar.setProviders(
+              providers.filter((provider) =>
+                terminalProviders.some(
+                  (terminal) => terminal.id === provider.id,
+                ),
+              ),
+            )
+          })
+          .catch((error: unknown) => {
+            console.error('Unable to load chat providers', error)
+          })
       },
     },
   )
@@ -68,6 +91,9 @@ class SidebarViewProvider
 {
   private view: vscode.WebviewView | undefined
   private chats: Record<string, Chat> | undefined
+  private providers: ChatProviderInfo[] = []
+  // Selection survives sidebar reloads and temporary disconnects, but not extension restarts.
+  private selectedProviderId: string | undefined
   private readonly terminalChanges: vscode.Disposable
 
   constructor(
@@ -81,6 +107,16 @@ class SidebarViewProvider
 
   setChats(chats: Record<string, Chat> | undefined): void {
     this.chats = chats
+    this.sendSnapshot()
+  }
+
+  setProviders(providers: ChatProviderInfo[]): void {
+    this.providers = providers
+    if (
+      providers.length > 0 &&
+      !providers.some((provider) => provider.id === this.selectedProviderId)
+    )
+      this.selectedProviderId = providers[0].id
     this.sendSnapshot()
   }
 
@@ -100,6 +136,8 @@ class SidebarViewProvider
     const message: ChatsMessage = {
       type: 'chats',
       chats: this.chats,
+      providers: this.providers,
+      selectedProviderId: this.selectedProviderId,
       selectedChatId: selected?.[0],
     }
     void this.view?.webview.postMessage(message)
@@ -114,7 +152,11 @@ class SidebarViewProvider
     // Webview scripts restart after being hidden; each ready message gets the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'ready') this.sendSnapshot()
-      if (message?.type === 'startCodex') void this.startCodex()
+      if (
+        message?.type === 'startChat' &&
+        typeof message.providerId === 'string'
+      )
+        void this.startChat(message.providerId)
       if (message?.type === 'openChat' && typeof message.id === 'string')
         void this.openChat(message.id)
     })
@@ -153,12 +195,20 @@ class SidebarViewProvider
 </html>`
   }
 
-  private async startCodex(): Promise<void> {
+  private async startChat(providerId: string): Promise<void> {
     try {
-      await this.terminals.start('codex')
+      if (!client) throw new Error('ADE server is not connected')
+      const provider = this.providers.find(
+        (provider) => provider.id === providerId,
+      )
+      if (!provider) throw new Error('The chat provider is unavailable')
+      this.selectedProviderId = provider.id
+      this.sendSnapshot()
+      const command = await client.rpc.getChatCommand(provider.id)
+      await this.terminals.start(provider.id, command)
     } catch (error) {
       void vscode.window.showErrorMessage(
-        `Unable to start Codex: ${error instanceof Error ? error.message : String(error)}`,
+        `Unable to start chat: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

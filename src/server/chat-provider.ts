@@ -1,4 +1,4 @@
-import type { Chat } from '../shared/api'
+import type { Chat, ChatProviderInfo } from '../shared/api'
 
 export interface ChatReport {
   shouldPurge: boolean
@@ -14,9 +14,11 @@ export class UnknownChatProviderError extends Error {
   }
 }
 
-export interface ChatProvider {
+export interface ChatProvider extends ChatProviderInfo {
   // Stable namespace for session IDs and incoming reports.
   readonly id: string
+  readonly name: string
+  readonly defaultCommand: string
   install(): Promise<void>
   // Capture mtime before asynchronous work; undefined fields retain stored values.
   readReport(report: unknown): Promise<ChatReport>

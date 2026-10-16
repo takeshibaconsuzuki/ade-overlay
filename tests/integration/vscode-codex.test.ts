@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict'
-import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -9,7 +16,10 @@ import type { DesktopClientMethods, ServerMethods } from '../../src/shared/api'
 import { TestChatProvider } from '../fixtures/chat-provider'
 import { runDesktopClient, startIntegrationServer } from './harness'
 
-async function runChatScenario(phases: string[]): Promise<void> {
+async function runChatScenario(
+  phases: string[],
+  command?: string,
+): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'ade-codex-integration-'))
   console.log('Codex test data:', directory)
   const repo = join(directory, 'repo')
@@ -38,7 +48,7 @@ async function runChatScenario(phases: string[]): Promise<void> {
     `
     const fs = require('node:fs');
     const id = process.env.ADE_TERMINAL_ID;
-    fs.writeFileSync(id + '.json', JSON.stringify({ id, pid: process.pid, cwd: process.cwd() }));
+    fs.writeFileSync(id + '.json', JSON.stringify({ id, pid: process.pid, cwd: process.cwd(), args: process.argv.slice(2) }));
     process.stdin.setRawMode(true);
     process.stdin.resume();
     ${
@@ -73,8 +83,8 @@ async function runChatScenario(phases: string[]): Promise<void> {
   await writeFile(
     join(bin, process.platform === 'win32' ? 'codex.cmd' : 'codex'),
     process.platform === 'win32'
-      ? `@"${process.execPath}" "${cli}"\r\n`
-      : `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\"'\"'")}' '${cli.replaceAll("'", "'\"'\"'")}'\n`,
+      ? `@"${process.execPath}" "${cli}" %*\r\n`
+      : `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\"'\"'")}' '${cli.replaceAll("'", "'\"'\"'")}' "$@"\n`,
     { mode: 0o755 },
   )
   const previousPath = process.env.PATH
@@ -82,7 +92,8 @@ async function runChatScenario(phases: string[]): Promise<void> {
   const server = await startIntegrationServer(
     directory,
     [repo],
-    [new TestChatProvider()],
+    [new TestChatProvider(), new TestChatProvider('codex')],
+    command === undefined ? {} : { codex: { command } },
   )
   // A second desktop must not make extension actions ambiguous or receive them.
   const otherDesktop = connectRpc<ServerMethods, DesktopClientMethods>(
@@ -113,6 +124,19 @@ async function runChatScenario(phases: string[]): Promise<void> {
         },
         120_000,
       )
+      if (phase === 'launch' && command !== undefined) {
+        const sessions = (await readdir(repo)).filter((name) =>
+          name.endsWith('.json'),
+        )
+        assert.ok(sessions.length > 0)
+        for (const session of sessions) {
+          const launched = JSON.parse(
+            await readFile(join(repo, session), 'utf8'),
+          )
+          assert.deepEqual(launched.args, ['--ade-test', 'two words'])
+          assert.equal(launched.cwd, repo)
+        }
+      }
     }
     assert.equal(
       await readFile(join(directory, 'settings.json'), 'utf8'),
@@ -128,8 +152,11 @@ async function runChatScenario(phases: string[]): Promise<void> {
 test('closing the last chat releases the sole editor group', () =>
   runChatScenario(['sole-group']))
 
-test('Codex button opens locked terminals, chat rows focus them, and command exit closes them', () =>
-  runChatScenario(['launch', 'restore', 'close-restored']))
+test('configured Codex commands open locked terminals, chat rows focus them, and command exit closes them', () =>
+  runChatScenario(
+    ['launch', 'restore', 'close-restored'],
+    'codex --ade-test "two words"',
+  ))
 
 test('HTML paste preserves order in chat terminals, falls back for other terminals, and survives restoration', () =>
   runChatScenario(['paste', 'paste-restored']))

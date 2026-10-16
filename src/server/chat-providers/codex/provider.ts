@@ -40,6 +40,8 @@ const metadataSchema = z.object({
 
 export class CodexChatProvider implements ChatProvider {
   readonly id = 'codex'
+  readonly name = 'Codex'
+  readonly defaultCommand = 'codex'
 
   constructor(
     private readonly command: readonly [string, ...string[]],

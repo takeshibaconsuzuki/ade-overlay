@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { executePowerShell, powerShellPath } from 'powershell-utils'
 import * as vscode from 'vscode'
 import type { DesktopExtensionMethods } from '../../src/shared/editor-rpc'
 import type { TerminalPastePart } from '../../src/shared/clipboard'
@@ -77,13 +78,21 @@ export class ChatTerminals {
     return this.focusedTerminalId
   }
 
-  async start(providerId: string): Promise<void> {
+  async start(providerId: string, command: string): Promise<void> {
     const provider = this.providers.get(providerId)
     if (!provider) throw new Error('The chat terminal provider is unavailable')
     const worktreePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     if (!worktreePath) throw new Error('No worktree is open')
+    // Non-interactive shells exit with the command instead of leaving a shell prompt.
+    const shell =
+      process.platform === 'win32'
+        ? {
+            shellPath: powerShellPath(),
+            shellArgs: executePowerShell.createArguments(command),
+          }
+        : { shellPath: '/bin/sh', shellArgs: ['-c', command] }
     await this.desktop.openChatTerminal({
-      ...provider.getLaunchOptions(),
+      ...shell,
       worktreePath,
       terminalId: randomUUID(),
       providerId: provider.id,

@@ -40,6 +40,11 @@ export const chatTerminalLaunchSchema = z.strictObject({
 
 export type ChatTerminalLaunch = z.infer<typeof chatTerminalLaunchSchema>
 
+export interface ChatProviderInfo {
+  id: string
+  name: string
+}
+
 export interface Worktree extends WorktreeInfo {
   mainWorktreePath: string
   // Remains true through server termination and Git removal. Success removes the
@@ -66,6 +71,9 @@ export interface ExtensionIdentifier {
 export interface ServerMethods {
   // Keys are provider ID + ":" + session ID; sessions can share worktrees and processes.
   getChats(): Record<string, Chat>
+  getChatProviders(): ChatProviderInfo[]
+  // Resolves the current configured command or provider default; unknown providers reject.
+  getChatCommand(providerId: string): string
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   // Lifecycle commands acknowledge acceptance, not completion. Validation errors
