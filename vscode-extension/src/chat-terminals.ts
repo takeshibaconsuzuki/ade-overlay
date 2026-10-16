@@ -83,14 +83,24 @@ export class ChatTerminals {
     if (!provider) throw new Error('The chat terminal provider is unavailable')
     const worktreePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     if (!worktreePath) throw new Error('No worktree is open')
-    // Non-interactive shells exit with the command instead of leaving a shell prompt.
+    // A login, interactive instance of the user's shell applies their profile
+    // (environment, PATH, aliases) before running the command, and still exits
+    // with the command instead of leaving a shell prompt.
     const shell =
       process.platform === 'win32'
         ? {
             shellPath: powerShellPath(),
-            shellArgs: executePowerShell.createArguments(command),
+            shellArgs: [
+              '-ExecutionPolicy',
+              'Bypass',
+              '-EncodedCommand',
+              executePowerShell.encodeCommand(command),
+            ],
           }
-        : { shellPath: '/bin/sh', shellArgs: ['-c', command] }
+        : {
+            shellPath: process.env.SHELL || '/bin/sh',
+            shellArgs: ['-lic', command],
+          }
     await this.desktop.openChatTerminal({
       ...shell,
       worktreePath,
