@@ -198,11 +198,10 @@ void app.whenReady().then(async () => {
       await run('document.querySelectorAll(".worktree-row").length'),
       1,
     )
-    await search('repository/worktree-12')
-    await selected(12)
     await search('WORKTREE 9')
     await selected(9)
-    await search('no-match')
+    // Only the basename and branch are searched, never the path.
+    await search('repository/worktree-12')
     await wait(
       () => run('document.querySelectorAll(".worktree-row").length === 0'),
       'empty search',

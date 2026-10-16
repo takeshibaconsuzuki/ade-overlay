@@ -256,11 +256,9 @@ function WorktreePicker(): React.JSX.Element {
   const scrollToSelection = useRef(true)
   const search = query.trim().toLowerCase()
   const filteredWorktrees = worktrees.filter((worktree) =>
-    [
-      worktree.basename,
-      worktree.branchName ?? 'Detached HEAD',
-      worktree.path,
-    ].some((value) => value.toLowerCase().includes(search)),
+    [worktree.basename, worktree.branchName ?? 'Detached HEAD'].some((value) =>
+      value.toLowerCase().includes(search),
+    ),
   )
   // An open menu cannot outlive the row that owns its trigger.
   if (
