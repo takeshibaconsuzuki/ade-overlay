@@ -1,4 +1,4 @@
-import { WebContentsView } from 'electron'
+import { dialog, shell, WebContentsView } from 'electron'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { EditorPage } from '../manager'
@@ -61,7 +61,10 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
       },
     )
     this.view.webContents.once('destroyed', () => this.disconnect())
-    this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    this.view.webContents.setWindowOpenHandler(({ url }) => {
+      void this.openInBrowser(url)
+      return { action: 'deny' }
+    })
     this.view.webContents.ipc.handle(
       EDITOR_RPC_CONNECT,
       (event, session: unknown) => {
@@ -121,6 +124,24 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
         this.connection.receive(call)
       },
     )
+  }
+
+  private async openInBrowser(url: string): Promise<void> {
+    let target: URL
+    try {
+      target = new URL(url)
+    } catch {
+      return
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return
+    try {
+      await shell.openExternal(target.href)
+    } catch {
+      dialog.showErrorBox(
+        'Unable to open link',
+        'The link could not be opened in your default browser. Check your browser settings and try again.',
+      )
+    }
   }
 
   private disconnect(): void {
