@@ -151,8 +151,14 @@ export async function startServer(
           )
         },
         getServerInfo: () => ({ name: APP_NAME }),
-        getDisabledExtensions: async () =>
-          readDisabledExtensions(options.vscode.profileDatabase),
+        getDisabledExtensions: async () => {
+          try {
+            return readDisabledExtensions(options.vscode.profileDatabase)
+          } catch (error) {
+            log.warn({ err: error }, 'Failed to read host extension enablement')
+            throw error
+          }
+        },
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
         ensureVscodeServer: (path) => {

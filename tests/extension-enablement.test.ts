@@ -39,11 +39,12 @@ test('host snapshots read committed changes without changing the profile databas
       /Unable to read host extension enablement/,
     )
   }
-  assert.throws(
-    () => readDisabledExtensions(join(directory, 'missing.vscdb')),
-    /Unable to read host extension enablement/,
-  )
+  assert.deepEqual(readDisabledExtensions(join(directory, 'missing.vscdb')), [])
   await assert.rejects(readFile(join(directory, 'missing.vscdb')), {
     code: 'ENOENT',
   })
+  assert.throws(
+    () => readDisabledExtensions(directory),
+    /Unable to read host extension enablement/,
+  )
 })
