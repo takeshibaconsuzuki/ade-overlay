@@ -3,7 +3,7 @@ import type {
   ClipboardPart,
   TerminalPastePart,
 } from '../../../src/shared/clipboard'
-import type { ImageFileWriter } from '../image-file-writer'
+import type { ChatFileWriter } from '../chat-file-writer'
 
 // Codex can combine rapid pastes despite bracketed boundaries; isolate image paths on both sides.
 const IMAGE_PASTE_DELAY_MS = 200
@@ -13,7 +13,7 @@ export class CodexTerminalProvider implements TerminalChatProvider {
 
   async convertClipboard(
     parts: readonly ClipboardPart[],
-    imageFileWriter: ImageFileWriter,
+    fileWriter: ChatFileWriter,
   ): Promise<TerminalPastePart[]> {
     const result: TerminalPastePart[] = []
     for (const part of parts) {
@@ -21,14 +21,19 @@ export class CodexTerminalProvider implements TerminalChatProvider {
         result.push({
           text: new TextDecoder('utf-8', { fatal: true }).decode(part.data),
         })
-      else {
-        const path = await imageFileWriter.write(part.data)
+      else if (part.type === 'image') {
+        const path = await fileWriter.write(part.name, part.data)
         // Codex attaches an image only when its path is the entire paste event.
         result.push({
           text: `"${path}"`,
           beforeDelay: IMAGE_PASTE_DELAY_MS,
           afterDelay: IMAGE_PASTE_DELAY_MS,
         })
+      } else {
+        // Codex's own file completion quotes paths and follows them with a space, which
+        // keeps spaces unambiguous and consecutive references apart.
+        const path = await fileWriter.write(part.name, part.data)
+        result.push({ text: `"${path}" ` })
       }
     }
     return result

@@ -3,7 +3,7 @@ import type {
   ClipboardPart,
   TerminalPastePart,
 } from '../../../src/shared/clipboard'
-import type { ImageFileWriter } from '../image-file-writer'
+import type { ChatFileWriter } from '../chat-file-writer'
 
 // Claude Code attaches images asynchronously; isolate image paths so text keeps its order.
 const IMAGE_PASTE_DELAY_MS = 200
@@ -13,7 +13,7 @@ export class ClaudeTerminalProvider implements TerminalChatProvider {
 
   async convertClipboard(
     parts: readonly ClipboardPart[],
-    imageFileWriter: ImageFileWriter,
+    fileWriter: ChatFileWriter,
   ): Promise<TerminalPastePart[]> {
     const result: TerminalPastePart[] = []
     for (const part of parts) {
@@ -21,8 +21,8 @@ export class ClaudeTerminalProvider implements TerminalChatProvider {
         result.push({
           text: new TextDecoder('utf-8', { fatal: true }).decode(part.data),
         })
-      else {
-        const path = await imageFileWriter.write(part.data)
+      else if (part.type === 'image') {
+        const path = await fileWriter.write(part.name, part.data)
         // Claude Code attaches pasted image paths and rejoins any other text in
         // that paste by lines. It unescapes backslashes in paths.
         result.push({
@@ -30,6 +30,12 @@ export class ClaudeTerminalProvider implements TerminalChatProvider {
           beforeDelay: IMAGE_PASTE_DELAY_MS,
           afterDelay: IMAGE_PASTE_DELAY_MS,
         })
+      } else {
+        // A quoted @ mention attaches the file at submission and survives spaces in its
+        // path. The trailing space keeps consecutive references apart, like Claude Code's
+        // own completion.
+        const path = await fileWriter.write(part.name, part.data)
+        result.push({ text: `@"${path}" ` })
       }
     }
     return result

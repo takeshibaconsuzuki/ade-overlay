@@ -1,44 +1,31 @@
-import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import type { ClipboardImageReader } from './html'
-import type { HttpClient } from '../../shared/http-client'
+import type { ClipboardResourceReader } from './resource-reader'
 
-export class UrlClipboardImageReader implements ClipboardImageReader {
-  constructor(private readonly http: HttpClient) {}
+export interface ClipboardImageEncoder {
+  // Converts any decodable image bytes into a static PNG; rejects undecodable bytes.
+  encode(data: Uint8Array): Promise<Uint8Array>
+}
 
-  async read(source: string): Promise<Uint8Array> {
-    let url: URL
-    try {
-      url = new URL(source.startsWith('//') ? `https:${source}` : source)
-    } catch {
-      throw new Error('Clipboard image source is not an absolute URL')
-    }
-    let data: Uint8Array
-    if (url.protocol === 'file:') {
-      try {
-        data = await readFile(fileURLToPath(url))
-      } catch {
-        throw new Error('Unable to read clipboard image file')
-      }
-    } else if (['http:', 'https:', 'data:'].includes(url.protocol)) {
-      try {
-        const response = await this.http.fetch(url.href, {
-          signal: AbortSignal.timeout(5_000),
-        })
-        if (!response.ok) throw new Error('Image request failed')
-        data = new Uint8Array(await response.arrayBuffer())
-      } catch {
-        throw new Error('Unable to download clipboard image')
-      }
-    } else {
-      throw new Error('Clipboard image URL scheme is unsupported')
-    }
+export class SharpImageEncoder implements ClipboardImageEncoder {
+  async encode(data: Uint8Array): Promise<Uint8Array> {
     // Clipboard image parts are static PNGs; Sharp reads the first frame by default.
     try {
       return await sharp(data).autoOrient().png().toBuffer()
     } catch {
       throw new Error('Clipboard image cannot be decoded')
     }
+  }
+}
+
+export class UrlClipboardImageReader implements ClipboardImageReader {
+  constructor(
+    private readonly resources: ClipboardResourceReader,
+    private readonly encoder: ClipboardImageEncoder,
+  ) {}
+
+  async read(source: string): Promise<Uint8Array> {
+    const { data } = await this.resources.read(source)
+    return this.encoder.encode(data)
   }
 }

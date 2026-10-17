@@ -10,8 +10,15 @@ import {
   HtmlClipboardNormalizer,
   type ClipboardImageReader,
 } from '../src/desktop/clipboard/html'
+import type { ClipboardImageEncoder } from '../src/desktop/clipboard/image-reader'
+import { PngClipboardNormalizer } from '../src/desktop/clipboard/png'
+import type {
+  ClipboardResource,
+  ClipboardResourceReader,
+} from '../src/desktop/clipboard/resource-reader'
 import { ClipboardService } from '../src/desktop/clipboard/service'
 import { TextClipboardNormalizer } from '../src/desktop/clipboard/text'
+import { UriListClipboardNormalizer } from '../src/desktop/clipboard/uri-list'
 import { logger } from '../src/shared/logger'
 
 class Item implements ClipboardItem {
@@ -39,6 +46,7 @@ class ImageReader implements ClipboardImageReader {
 function readable(parts: ClipboardPart[]) {
   return parts.map((part) => ({
     type: part.type,
+    ...(part.type === 'text' ? {} : { name: part.name }),
     data: new TextDecoder().decode(part.data),
   }))
 }
@@ -59,9 +67,9 @@ test('HTML normalization preserves interleaved text and image order without dupl
   )
   assert.deepEqual(readable(parts), [
     { type: 'text', data: 'Before & after\n\n' },
-    { type: 'image', data: 'first' },
+    { type: 'image', name: 'image.png', data: 'first' },
     { type: 'text', data: '\n\nMiddle\n\n' },
-    { type: 'image', data: 'second' },
+    { type: 'image', name: 'image.png', data: 'second' },
     { type: 'text', data: '\n\nEnd' },
   ])
 })
@@ -74,7 +82,7 @@ test('a single HTML image prefers the accompanying PNG bytes and never downloads
   })
   assert.deepEqual(
     await new HtmlClipboardNormalizer(imageReader).normalize(item),
-    [{ type: 'image', data: new Uint8Array([0, 1, 255]) }],
+    [{ type: 'image', name: 'image.png', data: new Uint8Array([0, 1, 255]) }],
   )
   assert.deepEqual(imageReader.sources, [])
   assert.deepEqual(item.reads, ['text/html', 'image/png'])
@@ -90,9 +98,9 @@ test('images inside headings retain their markers while surrounding text uses de
   )
   assert.deepEqual(readable(parts), [
     { type: 'text', data: 'BEFORE' },
-    { type: 'image', data: 'first' },
+    { type: 'image', name: 'image.png', data: 'first' },
     { type: 'text', data: 'MIDDLE' },
-    { type: 'image', data: 'second' },
+    { type: 'image', name: 'image.png', data: 'second' },
     { type: 'text', data: 'AFTER' },
   ])
   assert.deepEqual(imageReader.sources, ['first', 'second'])
@@ -222,4 +230,132 @@ test('native image Buffers become plain byte arrays suitable for RPC', async () 
   const parts = (await service.readClipboard())!
   assert.equal(parts[0].data.constructor, Uint8Array)
   assert.deepEqual(parts[0].data, new Uint8Array(Buffer.from('image')))
+})
+
+class ResourceReader implements ClipboardResourceReader {
+  readonly sources: string[] = []
+  constructor(
+    private readonly resources: Record<
+      string,
+      { name: string; mediaType?: string; data: string }
+    >,
+  ) {}
+  async read(source: string): Promise<ClipboardResource> {
+    this.sources.push(source)
+    const resource = this.resources[source]
+    if (!resource) throw new Error(`Missing resource ${source}`)
+    return {
+      name: resource.name,
+      mediaType: resource.mediaType,
+      data: new TextEncoder().encode(resource.data),
+    }
+  }
+}
+
+class ImageEncoder implements ClipboardImageEncoder {
+  async encode(data: Uint8Array): Promise<Uint8Array> {
+    return new TextEncoder().encode(`png:${new TextDecoder().decode(data)}`)
+  }
+}
+
+test('a bare PNG representation becomes one named image part', async () => {
+  const item = new Item({
+    'image/png': new Uint8Array([137, 80]),
+    'text/plain': 'alternate',
+  })
+  assert.deepEqual(await new PngClipboardNormalizer().normalize(item), [
+    { type: 'image', name: 'image.png', data: new Uint8Array([137, 80]) },
+  ])
+  assert.deepEqual(item.reads, ['image/png'])
+})
+
+test('URI lists resolve each entry in order, attaching images and uploading other files by name', async () => {
+  const reader = new ResourceReader({
+    'file:///home/user/photo.jpg': {
+      name: 'photo.jpg',
+      mediaType: 'image/jpeg',
+      data: 'jpeg bytes',
+    },
+    'file:///home/user/notes.txt': {
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      data: 'notes',
+    },
+    'https://example.com/download': { name: 'download', data: 'blob' },
+  })
+  const parts = await new UriListClipboardNormalizer(
+    reader,
+    new ImageEncoder(),
+  ).normalize(
+    new Item({
+      'text/uri-list':
+        '# copied files\r\nfile:///home/user/photo.jpg\r\n\r\nfile:///home/user/notes.txt\nhttps://example.com/download\n',
+      'text/plain': '/home/user/photo.jpg\n/home/user/notes.txt',
+    }),
+  )
+  assert.deepEqual(parts, [
+    {
+      type: 'image',
+      name: 'photo.png',
+      data: new TextEncoder().encode('png:jpeg bytes'),
+    },
+    {
+      type: 'file',
+      name: 'notes.txt',
+      data: new TextEncoder().encode('notes'),
+    },
+    { type: 'file', name: 'download', data: new TextEncoder().encode('blob') },
+  ])
+  assert.deepEqual(reader.sources, [
+    'file:///home/user/photo.jpg',
+    'file:///home/user/notes.txt',
+    'https://example.com/download',
+  ])
+})
+
+test('URI lists reject when empty or when any entry cannot be resolved', async () => {
+  const normalizer = new UriListClipboardNormalizer(
+    new ResourceReader({
+      'file:///a': { name: 'a', data: 'a' },
+    }),
+    new ImageEncoder(),
+  )
+  await assert.rejects(
+    normalizer.normalize(new Item({ 'text/uri-list': '# only a comment\n' })),
+    /URI list is empty/,
+  )
+  await assert.rejects(
+    normalizer.normalize(
+      new Item({ 'text/uri-list': 'file:///a\nfile:///missing' }),
+    ),
+    /Missing resource file:\/\/\/missing/,
+  )
+})
+
+test('normalizer order prefers HTML, then URI lists, then PNG, before plain text', async () => {
+  const service = new ClipboardService(
+    new Source([
+      new Item({
+        'text/uri-list': 'file:///a',
+        'image/png': new Uint8Array([1]),
+        'text/plain': '/a',
+      }),
+      new Item({ 'image/png': new Uint8Array([2]), 'text/plain': 'alt' }),
+      new Item({ 'text/html': '<b>rich</b>', 'text/uri-list': 'file:///a' }),
+    ]),
+    [
+      new HtmlClipboardNormalizer(new ImageReader()),
+      new UriListClipboardNormalizer(
+        new ResourceReader({ 'file:///a': { name: 'a', data: 'file a' } }),
+        new ImageEncoder(),
+      ),
+      new PngClipboardNormalizer(),
+      new TextClipboardNormalizer(),
+    ],
+  )
+  assert.deepEqual(await service.readClipboard(), [
+    { type: 'file', name: 'a', data: new TextEncoder().encode('file a') },
+    { type: 'image', name: 'image.png', data: new Uint8Array([2]) },
+    { type: 'text', data: new TextEncoder().encode('rich') },
+  ])
 })

@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import sharp from 'sharp'
-import { UrlClipboardImageReader } from '../src/desktop/clipboard/image-reader'
+import {
+  SharpImageEncoder,
+  UrlClipboardImageReader,
+} from '../src/desktop/clipboard/image-reader'
+import { UrlClipboardResourceReader } from '../src/desktop/clipboard/resource-reader'
 import { FetchHttpClient } from '../src/shared/http-client'
 
+function reader() {
+  return new UrlClipboardImageReader(
+    new UrlClipboardResourceReader(new FetchHttpClient()),
+    new SharpImageEncoder(),
+  )
+}
+
 test('a GIF data URL is decoded to a static PNG without relying on a file extension or MIME type', async () => {
-  const reader = new UrlClipboardImageReader(new FetchHttpClient())
-  const image = await reader.read(
+  const image = await reader().read(
     'data:application/octet-stream;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
   )
   const metadata = await sharp(image).metadata()
@@ -16,14 +26,13 @@ test('a GIF data URL is decoded to a static PNG without relying on a file extens
 })
 
 test('PNG, JPEG, and WebP bytes are detected and converted through the same reader', async () => {
-  const reader = new UrlClipboardImageReader(new FetchHttpClient())
   for (const format of ['png', 'jpeg', 'webp'] as const) {
     const input = await sharp({
       create: { width: 2, height: 3, channels: 3, background: '#ffffff' },
     })
       .toFormat(format)
       .toBuffer()
-    const output = await reader.read(
+    const output = await reader().read(
       `data:application/octet-stream;base64,${input.toString('base64')}`,
     )
     const metadata = await sharp(output).metadata()
@@ -39,8 +48,7 @@ test('animated images produce only the first frame', async () => {
   })
     .gif()
     .toBuffer()
-  const reader = new UrlClipboardImageReader(new FetchHttpClient())
-  const output = await reader.read(
+  const output = await reader().read(
     `data:image/gif;base64,${input.toString('base64')}`,
   )
   const { data, info } = await sharp(output)
@@ -58,8 +66,7 @@ test('JPEG orientation is applied to pixels before PNG metadata is stripped', as
     .withMetadata({ orientation: 6 })
     .jpeg()
     .toBuffer()
-  const reader = new UrlClipboardImageReader(new FetchHttpClient())
-  const output = await reader.read(
+  const output = await reader().read(
     `data:image/jpeg;base64,${input.toString('base64')}`,
   )
   const metadata = await sharp(output).metadata()
@@ -70,9 +77,8 @@ test('JPEG orientation is applied to pixels before PNG metadata is stripped', as
 })
 
 test('invalid image bytes reject rather than producing an empty attachment', async () => {
-  const reader = new UrlClipboardImageReader(new FetchHttpClient())
   await assert.rejects(
-    reader.read('data:text/plain,invalid'),
+    reader().read('data:text/plain,invalid'),
     /Clipboard image cannot be decoded/,
   )
 })

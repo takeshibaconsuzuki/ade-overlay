@@ -6,7 +6,7 @@ import type { TerminalPastePart } from '../../src/shared/clipboard'
 import type { TerminalChatProvider } from './terminal-chat-provider'
 import { TerminalIdentities } from './terminal-identities'
 import { WorkspaceTerminalIdentityStore } from './workspace-terminal-identity-store'
-import { TemporaryImageFileWriter } from './image-file-writer'
+import { TemporaryChatFileWriter } from './chat-file-writer'
 
 export class ChatTerminals {
   private readonly identities: TerminalIdentities
@@ -14,10 +14,7 @@ export class ChatTerminals {
   private readonly chatFocusChanged = new vscode.EventEmitter<void>()
   readonly onDidChangeChatFocus = this.chatFocusChanged.event
   private readonly subscriptions: vscode.Disposable[]
-  private readonly imageFileWriters = new Map<
-    string,
-    TemporaryImageFileWriter
-  >()
+  private readonly fileWriters = new Map<string, TemporaryChatFileWriter>()
   private readonly providers: ReadonlyMap<string, TerminalChatProvider>
 
   constructor(
@@ -61,13 +58,13 @@ export class ChatTerminals {
         const identity = this.identities.get(terminal)
         this.identities.forget(terminal)
         if (identity) {
-          const imageFileWriter =
-            this.imageFileWriters.get(identity.id) ??
-            new TemporaryImageFileWriter(identity.id)
-          this.imageFileWriters.delete(identity.id)
-          void imageFileWriter
+          const fileWriter =
+            this.fileWriters.get(identity.id) ??
+            new TemporaryChatFileWriter(identity.id)
+          this.fileWriters.delete(identity.id)
+          void fileWriter
             .dispose()
-            .catch(() => console.error('Unable to remove chat paste images'))
+            .catch(() => console.error('Unable to remove chat paste files'))
         }
       }),
     ]
@@ -135,12 +132,12 @@ export class ChatTerminals {
       const parts = await this.desktop.readClipboard()
       if (this.identities.forProcess(processId) !== identity)
         throw new Error('Chat terminal closed during paste')
-      let imageFileWriter = this.imageFileWriters.get(identity.id)
-      if (!imageFileWriter) {
-        imageFileWriter = new TemporaryImageFileWriter(identity.id)
-        this.imageFileWriters.set(identity.id, imageFileWriter)
+      let fileWriter = this.fileWriters.get(identity.id)
+      if (!fileWriter) {
+        fileWriter = new TemporaryChatFileWriter(identity.id)
+        this.fileWriters.set(identity.id, fileWriter)
       }
-      const pastes = await provider.convertClipboard(parts, imageFileWriter)
+      const pastes = await provider.convertClipboard(parts, fileWriter)
       if (this.identities.forProcess(processId) !== identity)
         throw new Error('Chat terminal closed during paste')
       console.debug('Chat paste provider conversion completed', {

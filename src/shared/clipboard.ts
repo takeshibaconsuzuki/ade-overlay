@@ -1,8 +1,10 @@
-// Parts retain source order. Text is UTF-8; images are encoded PNG files.
-export interface ClipboardPart {
-  type: 'text' | 'image'
-  data: Uint8Array
-}
+// Parts retain source order. Text is UTF-8; images are encoded PNG files; files
+// are arbitrary bytes. The terminal host stores images and files under the given
+// name before referencing them.
+export type ClipboardPart =
+  | { type: 'text'; data: Uint8Array }
+  | { type: 'image'; name: string; data: Uint8Array }
+  | { type: 'file'; name: string; data: Uint8Array }
 
 // Prepared terminal input retains source order and provider-requested timing.
 export interface TerminalPastePart {
@@ -25,7 +27,7 @@ export interface ClipboardSource {
 
 export interface ClipboardNormalizer {
   readonly representation: string
-  // Produces ordered text and image parts. Formatting is defined by the normalizer.
+  // Produces ordered parts. Formatting is defined by the normalizer.
   // Rejects when a required part cannot be resolved, before any content is pasted.
   normalize(item: ClipboardItem): Promise<ClipboardPart[]>
 }

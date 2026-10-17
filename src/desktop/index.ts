@@ -28,9 +28,15 @@ import { WorktreePickerWindow } from './picker/window'
 import { WorktreeOrder } from './picker/worktree-order'
 import { ClipboardService } from './clipboard/service'
 import { ElectronClipboardSource } from './clipboard/electron'
-import { UrlClipboardImageReader } from './clipboard/image-reader'
+import {
+  SharpImageEncoder,
+  UrlClipboardImageReader,
+} from './clipboard/image-reader'
 import { HtmlClipboardNormalizer } from './clipboard/html'
+import { PngClipboardNormalizer } from './clipboard/png'
+import { UrlClipboardResourceReader } from './clipboard/resource-reader'
 import { TextClipboardNormalizer } from './clipboard/text'
+import { UriListClipboardNormalizer } from './clipboard/uri-list'
 import { FetchHttpClient } from '../shared/http-client'
 import { loadDesktopOptions } from './options'
 
@@ -69,10 +75,16 @@ async function main(): Promise<void> {
       worktreeOrder.sort(worktrees),
     )
   }
+  const clipboardResources = new UrlClipboardResourceReader(
+    new FetchHttpClient(),
+  )
+  const clipboardImages = new SharpImageEncoder()
   const clipboard = new ClipboardService(new ElectronClipboardSource(), [
     new HtmlClipboardNormalizer(
-      new UrlClipboardImageReader(new FetchHttpClient()),
+      new UrlClipboardImageReader(clipboardResources, clipboardImages),
     ),
+    new UriListClipboardNormalizer(clipboardResources, clipboardImages),
+    new PngClipboardNormalizer(),
     new TextClipboardNormalizer(),
   ])
   const editorHost = new ElectronEditorWindow(

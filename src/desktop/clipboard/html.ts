@@ -50,7 +50,11 @@ export class HtmlClipboardNormalizer implements ClipboardNormalizer {
       const before = text.slice(offset, match.index)
       if (before)
         parts.push({ type: 'text', data: new TextEncoder().encode(before) })
-      parts.push({ type: 'image', data: imageBytes[Number(match[1])] })
+      parts.push({
+        type: 'image',
+        name: 'image.png',
+        data: imageBytes[Number(match[1])],
+      })
       offset = match.index + match[0].length
     }
     const after = text.slice(offset)
