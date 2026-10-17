@@ -163,6 +163,7 @@ class SidebarViewProvider
         void this.startChat(message.providerId)
       if (message?.type === 'openChat' && typeof message.id === 'string')
         void this.openChat(message.id)
+      if (message?.type === 'openTerminal') this.openTerminal()
     })
     view.onDidDispose(() => {
       messages.dispose()
@@ -215,6 +216,16 @@ class SidebarViewProvider
         `Unable to start chat: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+  }
+
+  private openTerminal(): void {
+    // An editor opened without a target group avoids the locked chat terminal group.
+    vscode.window
+      .createTerminal({
+        cwd: vscode.workspace.workspaceFolders?.[0]?.uri,
+        location: vscode.TerminalLocation.Editor,
+      })
+      .show()
   }
 
   private async openChat(id: string): Promise<void> {

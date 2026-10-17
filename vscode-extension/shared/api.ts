@@ -4,6 +4,7 @@ export type SidebarMessage =
   | { type: 'ready' }
   | { type: 'startChat'; providerId: string }
   | { type: 'openChat'; id: string }
+  | { type: 'openTerminal' }
 
 export interface ChatsMessage {
   type: 'chats'
