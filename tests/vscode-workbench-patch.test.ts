@@ -138,6 +138,13 @@ test('layout defaults are supplied before configuration services initialize', as
       ],
       'hidden',
     )
+    assert.deepEqual(
+      options.configurationDefaults!['terminal.integrated.commandsToSkipShell'],
+      [
+        '-workbench.action.terminal.scrollUpPage',
+        '-workbench.action.terminal.scrollDownPage',
+      ],
+    )
     return initialize.call(this)
   }
   await context.browserMain.open()

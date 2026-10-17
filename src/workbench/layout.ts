@@ -10,5 +10,11 @@ export function configureWorkbench(options: WorkbenchOptions): void {
     ...options.configurationDefaults,
     'workbench.sideBar.location': 'left',
     'workbench.secondarySideBar.defaultVisibility': 'hidden',
+    // Page Up and Page Down reach the shell on every platform (macOS binds them to viewport
+    // paging otherwise); Shift+Page Up/Down still pages the viewport, handled by xterm.
+    'terminal.integrated.commandsToSkipShell': [
+      '-workbench.action.terminal.scrollUpPage',
+      '-workbench.action.terminal.scrollDownPage',
+    ],
   }
 }

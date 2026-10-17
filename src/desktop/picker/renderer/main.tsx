@@ -296,6 +296,7 @@ function WorktreePicker(): React.JSX.Element {
         setSelectedPath(null)
         scrollToSelection.current = true
       })
+      pointerPosition.current = null
       if (resultsRef.current) resultsRef.current.scrollTop = 0
       if (visible) searchRef.current?.focus({ preventScroll: true })
     })
@@ -356,8 +357,14 @@ function WorktreePicker(): React.JSX.Element {
   const highlightUnderPointer = (event: React.PointerEvent<HTMLElement>) => {
     const previous = pointerPosition.current
     pointerPosition.current = { x: event.clientX, y: event.clientY }
-    // Scrolling a keyboard selection beneath a stationary pointer must not select it.
-    if (previous?.x === event.clientX && previous.y === event.clientY) return
+    // Only movement observed within the session selects a row. The first event of a session
+    // merely records the pointer: showing the picker beneath it dispatches a move without the
+    // mouse moving, as does scrolling a keyboard selection under a stationary pointer.
+    if (
+      !previous ||
+      (previous.x === event.clientX && previous.y === event.clientY)
+    )
+      return
     const row = (event.target as HTMLElement).closest<HTMLElement>(
       '.worktree-row',
     )

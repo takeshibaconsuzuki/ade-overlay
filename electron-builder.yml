@@ -16,6 +16,9 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
+  extendInfo:
+    # Banners disappear after a few seconds; alerts stay on screen until dismissed.
+    NSUserNotificationAlertStyle: alert
 linux:
   target: AppImage
   category: Development

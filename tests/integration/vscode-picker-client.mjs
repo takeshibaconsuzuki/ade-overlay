@@ -178,6 +178,10 @@ void app.whenReady().then(async () => {
       true,
       'arrow navigation preserves typing focus',
     )
+    // The first pointer event of a session only records the pointer: showing the picker
+    // beneath a stationary pointer dispatches a move that must not select a row.
+    await pointer(4, 99)
+    await selected(1)
     await pointer(4)
     await selected(4)
     await key('ArrowDown')
@@ -478,7 +482,9 @@ void app.whenReady().then(async () => {
       await search('')
       await selected(0)
       if (index) {
+        // A reopened picker starts a session, so movement needs a prior position.
         await pointer(index, 104)
+        await pointer(index, 105)
         await selected(index)
       }
       await run(
