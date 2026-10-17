@@ -354,6 +354,11 @@ function WorktreePicker(): React.JSX.Element {
     }
   }
 
+  // A pointer that left the picker must move within it again before it selects a row.
+  const forgetPointer = () => {
+    pointerPosition.current = null
+  }
+
   const highlightUnderPointer = (event: React.PointerEvent<HTMLElement>) => {
     const previous = pointerPosition.current
     pointerPosition.current = { x: event.clientX, y: event.clientY }
@@ -393,6 +398,7 @@ function WorktreePicker(): React.JSX.Element {
       className="worktree-picker"
       onKeyDown={navigate}
       onPointerMove={highlightUnderPointer}
+      onPointerLeave={forgetPointer}
     >
       <Flex asChild align="center" gap="3">
         <header className="picker-toolbar">

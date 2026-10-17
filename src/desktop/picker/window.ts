@@ -10,6 +10,12 @@ import { WORKTREE_PICKER_VISIBILITY_CHANGED } from './api'
 export class WorktreePickerWindow {
   readonly window: BrowserWindow
   private visible = true
+  // Set from ordering the window out until Electron reports the hide, which on macOS follows
+  // an asynchronous occlusion change. A window ordered back in before that report stays on
+  // screen without pointer events reaching its page until the pointer leaves and re-enters
+  // it, so a show that arrives in between waits for the report.
+  private hidePending = false
+  private pendingShow: NodeJS.Timeout | undefined
 
   constructor() {
     this.window = new BrowserWindow({
@@ -47,6 +53,11 @@ export class WorktreePickerWindow {
     })
     // Minimizing ends the session like any focus loss; restoring from the Dock starts one.
     this.window.on('restore', () => this.startSession())
+    this.window.on('show', () => this.refreshPointer())
+    this.window.on('hide', () => {
+      this.hidePending = false
+      this.completeShow()
+    })
     const devServerUrl = process.env.ELECTRON_RENDERER_URL
 
     if (devServerUrl) {
@@ -75,8 +86,43 @@ export class WorktreePickerWindow {
   show(): void {
     if (this.visible) return
     this.startSession()
+    if (this.hidePending) {
+      // The hide is normally reported within a few hundred milliseconds; the window is shown
+      // regardless once that has clearly not happened.
+      this.pendingShow ??= setTimeout(() => {
+        this.hidePending = false
+        this.completeShow()
+      }, 500)
+      return
+    }
+    this.showWindow()
+  }
+
+  private completeShow(): void {
+    if (this.pendingShow) {
+      clearTimeout(this.pendingShow)
+      this.pendingShow = undefined
+    }
+    // The session may have ended while the show waited.
+    if (!this.visible) return
+    this.showWindow()
+  }
+
+  private showWindow(): void {
     if (this.window.isMinimized()) this.window.restore()
     this.window.show()
+  }
+
+  // Once the window is on screen the pointer leaves the page, clearing hover state left from
+  // before the window was hidden and making the page request the default cursor: Chromium
+  // applies a cursor only when it differs from the one it last applied, and a cursor applied
+  // while the window was being ordered in does not survive the ordering, so without this the
+  // system cursor would stay stale until the pointer reached an element with a different
+  // cursor. The first real movement then requests the cursor of the element beneath it.
+  private refreshPointer(): void {
+    if (!this.visible) return
+    this.window.webContents.sendInputEvent({ type: 'mouseMove', x: -1, y: -1 })
+    this.window.webContents.sendInputEvent({ type: 'mouseLeave', x: -1, y: -1 })
   }
 
   // Dismisses the picker; focus returns to where it was before the picker was shown.
@@ -91,6 +137,7 @@ export class WorktreePickerWindow {
 
   private hideWindow(): void {
     if (this.visible || this.window.isDestroyed()) return
+    this.hidePending = true
     this.window.hide()
   }
 
