@@ -18,12 +18,18 @@ export async function prepareVscodeRemoteSettings(
   }
   if (!isVscodeSettingsDocument(content))
     throw new Error(`Invalid VS Code remote settings: ${path}`)
-  const next = applyEdits(
-    content,
-    modify(content, ['terminal.integrated.enablePersistentSessions'], true, {
-      formattingOptions: { insertSpaces: true, tabSize: 2 },
-    }),
-  )
+  let next = content
+  for (const [key, value] of Object.entries({
+    'terminal.integrated.enablePersistentSessions': true,
+    'files.autoSave': 'off',
+  })) {
+    next = applyEdits(
+      next,
+      modify(next, [key], value, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      }),
+    )
+  }
   if (next === content) return
   await mkdir(dirname(path), { recursive: true })
   await writeFileAtomic(path, next, { encoding: 'utf8' })

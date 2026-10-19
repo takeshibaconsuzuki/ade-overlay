@@ -15,11 +15,12 @@ async function fixture(t: TestContext) {
   }
 }
 
-test('remote settings enable persistence before the first connection', async (t) => {
+test('remote settings enable persistence and disable autosave before the first connection', async (t) => {
   const { directory, path } = await fixture(t)
   await prepareVscodeRemoteSettings(directory)
   assert.deepEqual(parse(await readFile(path, 'utf8')), {
     'terminal.integrated.enablePersistentSessions': true,
+    'files.autoSave': 'off',
   })
 })
 
@@ -27,11 +28,14 @@ test('preparation preserves other remote settings and JSONC comments across rest
   const { directory, path } = await fixture(t)
   await mkdir(dirname(path), { recursive: true })
   const content =
-    '\uFEFF{\n  // Keep remote preferences.\n  "editor.fontSize": 18,\n  "terminal.integrated.enablePersistentSessions": false,\n}\n'
+    '\uFEFF{\n  // Keep remote preferences.\n  "editor.fontSize": 18,\n  "terminal.integrated.enablePersistentSessions": false,\n  "files.autoSave": "afterDelay",\n}\n'
   await writeFile(path, content)
   await prepareVscodeRemoteSettings(directory)
   const prepared = await readFile(path, 'utf8')
-  assert.equal(prepared, content.replace('false', 'true'))
+  assert.equal(
+    prepared,
+    content.replace('false', 'true').replace('"afterDelay"', '"off"'),
+  )
   await prepareVscodeRemoteSettings(directory)
   assert.equal(await readFile(path, 'utf8'), prepared)
 })
