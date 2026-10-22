@@ -63,6 +63,18 @@ test('environment overrides the desktop config and applies when the file is miss
   assert.deepEqual(await loadDesktopOptions(missing), { serverUrl })
 })
 
+test('desktop config accepts a start command and preserves it with an endpoint override', async (t) => {
+  const startCommand = 'ssh -N -L 4317:localhost:4317 ade-server'
+  const path = await configFile(t, stringify({ startCommand }))
+  assert.deepEqual(await loadDesktopOptions(path), {
+    serverUrl: DEFAULT_SERVER_URL,
+    startCommand,
+  })
+  const serverUrl = 'wss://ade.example.com/rpc'
+  process.env.ADE_SERVER_URL = serverUrl
+  assert.deepEqual(await loadDesktopOptions(path), { serverUrl, startCommand })
+})
+
 test('invalid YAML reports the config path and cause, even with an environment override', async (t) => {
   const path = await configFile(t, 'serverUrl: [\n')
   process.env.ADE_SERVER_URL = DEFAULT_SERVER_URL
@@ -80,6 +92,7 @@ test('desktop config rejects unknown keys, invalid shapes and invalid endpoints'
     [],
     'config',
     { serverURL: DEFAULT_SERVER_URL },
+    ...[null, 123, '', '   ', [], {}].map((startCommand) => ({ startCommand })),
     ...[
       null,
       123,

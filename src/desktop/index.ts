@@ -39,13 +39,15 @@ import { TextClipboardNormalizer } from './clipboard/text'
 import { UriListClipboardNormalizer } from './clipboard/uri-list'
 import { FetchHttpClient } from '../shared/http-client'
 import { loadDesktopOptions } from './options'
+import { DesktopStartCommand } from './start-command'
 
 const log = logger.child({ component: 'desktop' })
 const notifications = new NotificationRetention(100)
 let worktreePicker: WorktreePickerWindow | undefined
+let startupProcess: DesktopStartCommand | undefined
 
 async function main(): Promise<void> {
-  const { serverUrl } = await loadDesktopOptions()
+  const { serverUrl, startCommand } = await loadDesktopOptions()
   if (process.platform === 'win32') app.setAppUserModelId(APP_NAME)
   const pickerShortcut = 'CommandOrControl+Shift+Space'
   if (
@@ -67,6 +69,33 @@ async function main(): Promise<void> {
   app.once('will-quit', () => {
     globalShortcut.unregister(pickerShortcut)
   })
+  let closeDesktop: (() => Promise<void>) | undefined = undefined
+  let quitting: Promise<void> | undefined
+  let readyToQuit = false
+  app.on('before-quit', (event) => {
+    if (readyToQuit) return
+    event.preventDefault()
+    quitting ??= (async () => {
+      try {
+        try {
+          await closeDesktop?.()
+        } finally {
+          await startupProcess?.stop()
+        }
+      } catch (error) {
+        log.error({ err: error }, 'Desktop shutdown failed')
+      } finally {
+        readyToQuit = true
+        app.quit()
+      }
+    })()
+  })
+  if (startCommand !== undefined) {
+    log.info('Running desktop startCommand')
+    startupProcess = new DesktopStartCommand(startCommand)
+    await startupProcess.started
+    if (quitting) return
+  }
   let worktrees: Worktree[] = []
   const worktreeOrder = new WorktreeOrder()
   const publishWorktrees = () => {
@@ -172,6 +201,14 @@ async function main(): Promise<void> {
       },
     },
   )
+  closeDesktop = async () => {
+    chats.disconnect()
+    try {
+      await editor.close()
+    } finally {
+      await server.close()
+    }
+  }
   ipcMain.on(EDITOR_INITIALIZE, (event) => {
     if (!editorHost.isAdeSender(event.sender)) return
     editorHost.sendShellState()
@@ -252,24 +289,6 @@ async function main(): Promise<void> {
       else await server.rpc.deleteWorktree(path, branchName)
     },
   )
-  let quitting: Promise<void> | undefined
-  let readyToQuit = false
-  app.on('before-quit', (event) => {
-    if (readyToQuit) return
-    event.preventDefault()
-    quitting ??= (async () => {
-      try {
-        chats.disconnect()
-        await editor.close()
-        await server.close()
-      } catch (error) {
-        log.error({ err: error }, 'Desktop shutdown failed')
-      } finally {
-        readyToQuit = true
-        app.quit()
-      }
-    })()
-  })
   worktreePicker = new WorktreePickerWindow()
   worktreePicker.window.once('closed', () => {
     worktreePicker = undefined
@@ -280,7 +299,13 @@ async function main(): Promise<void> {
 void app
   .whenReady()
   .then(main)
-  .catch((error: unknown) => {
+  .catch(async (error: unknown) => {
     log.fatal({ err: error }, 'Desktop startup failed')
-    app.exit(1)
+    try {
+      await startupProcess?.stop()
+    } catch (error) {
+      log.error({ err: error }, 'Failed to stop desktop startCommand')
+    } finally {
+      app.exit(1)
+    }
   })

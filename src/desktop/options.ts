@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { DEFAULT_SERVER_URL } from '../shared/constants'
 
 export const desktopOptionsSchema = z.strictObject({
+  startCommand: z.string().trim().min(1).optional(),
   serverUrl: z
     .url({ protocol: /^wss?$/ })
     .refine(
