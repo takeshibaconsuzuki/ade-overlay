@@ -31,7 +31,22 @@ export const VSCODE_SERVER_STOP = 'vscode:stop'
 // Renderer → main: confirms deletion, then requests it from the server. Resolves on cancellation or accepted deletion; rejects invalid requests. Progress and failures arrive through worktree updates. Pages follow server broadcasts.
 export const WORKTREE_DELETE = 'worktree:delete'
 
+// The desktop owns the terminal; renderer initialization replays recent output.
+export const START_COMMAND_INITIALIZE = 'startCommand:initialize'
+export const START_COMMAND_DATA = 'startCommand:data'
+export const START_COMMAND_WRITE = 'startCommand:write'
+export const START_COMMAND_RESIZE = 'startCommand:resize'
+
 export interface PickerApi {
+  initializeStartCommand(): void
+  setOnStartCommandInitializedListener(
+    listener: ((history: string | null) => void) | undefined,
+  ): void
+  setOnStartCommandDataListener(
+    listener: ((data: string) => void) | undefined,
+  ): void
+  writeStartCommand(data: string): void
+  resizeStartCommand(cols: number, rows: number): void
   setOnVisibilityChangedListener(
     listener: ((visible: boolean) => void) | undefined,
   ): void

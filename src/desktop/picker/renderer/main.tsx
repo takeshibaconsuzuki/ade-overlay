@@ -21,6 +21,7 @@ import {
 import type { ConnectionState, Worktree } from '../../../shared/api'
 import { AppTheme } from '../../../ui/AppTheme'
 import { ErrorMessage } from '../../../ui/Feedback'
+import { StartCommandTerminal } from './start-command-terminal'
 import './style.css'
 
 function worktreeRowId(path: string): string {
@@ -239,6 +240,12 @@ function WorktreeRow({
 function WorktreePicker(): React.JSX.Element {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
+  const [startCommandEnabled, setStartCommandEnabled] = useState<
+    boolean | null
+  >(null)
+  const [visible, setVisible] = useState(false)
+  const showTerminal =
+    startCommandEnabled === true && connectionState !== 'connected'
   const [worktrees, setWorktrees] = useState<Worktree[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -278,6 +285,11 @@ function WorktreePicker(): React.JSX.Element {
     connectionState === 'connected' && filteredWorktrees.length > 0
 
   useLayoutEffect(() => {
+    if (visible && !showTerminal)
+      searchRef.current?.focus({ preventScroll: true })
+  }, [visible, showTerminal])
+
+  useLayoutEffect(() => {
     if (scrollToSelection.current) {
       listRef.current
         ?.querySelector('[data-highlighted="true"]')
@@ -291,6 +303,7 @@ function WorktreePicker(): React.JSX.Element {
       // Each picker session starts with an empty search and the first row at the top.
       // Release menu focus synchronously so it cannot block search focus.
       flushSync(() => {
+        setVisible(visible)
         setMenu({ path: null, closedByReset: true })
         setQuery('')
         setSelectedPath(null)
@@ -298,7 +311,6 @@ function WorktreePicker(): React.JSX.Element {
       })
       pointerPosition.current = null
       if (resultsRef.current) resultsRef.current.scrollTop = 0
-      if (visible) searchRef.current?.focus({ preventScroll: true })
     })
     window.picker.setOnConnectionStateChangedListener(setConnectionState)
     window.picker.setOnWorktreesChangedListener((worktrees) => {
@@ -318,6 +330,7 @@ function WorktreePicker(): React.JSX.Element {
 
   const navigate = (event: React.KeyboardEvent<HTMLElement>) => {
     if (
+      showTerminal ||
       event.defaultPrevented ||
       event.nativeEvent.isComposing ||
       event.altKey ||
@@ -400,108 +413,124 @@ function WorktreePicker(): React.JSX.Element {
       onPointerMove={highlightUnderPointer}
       onPointerLeave={forgetPointer}
     >
-      <Flex asChild align="center" gap="3">
-        <header className="picker-toolbar">
-          <TextField.Root
-            ref={searchRef}
-            className="worktree-search"
-            type="search"
-            role="combobox"
-            aria-label="Search worktrees"
-            aria-autocomplete="list"
-            aria-haspopup="grid"
-            aria-expanded={hasResults}
-            aria-controls={hasResults ? 'worktree-list' : undefined}
-            aria-activedescendant={
-              hasResults ? worktreeRowId(highlightedPath!) : undefined
-            }
-            placeholder="Search worktrees…"
-            autoFocus
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              setSelectedPath(null)
-              scrollToSelection.current = true
-            }}
-          >
-            <TextField.Slot>
-              <MagnifyingGlassIcon />
-            </TextField.Slot>
-          </TextField.Root>
-          <Button
-            type="button"
-            variant="soft"
-            onClick={() => void refresh()}
-            disabled={refreshing || connectionState !== 'connected'}
-            aria-busy={refreshing}
-          >
-            <Spinner loading={refreshing} aria-hidden="true">
-              <ReloadIcon />
-            </Spinner>
-            Refresh
-          </Button>
-        </header>
-      </Flex>
-      <ScrollArea
-        ref={resultsRef}
-        className="picker-results"
-        type="auto"
-        scrollbars="vertical"
-        size="2"
-      >
-        <Flex direction="column" gap="4">
-          {error && <ErrorMessage>{error}</ErrorMessage>}
-          {connectionState !== 'connected' ? (
-            <Flex align="center" justify="center" gap="3" py="6" role="status">
-              <Spinner aria-hidden="true" />
-              <Text size="2" color="gray">
-                Connecting to server
-              </Text>
-            </Flex>
-          ) : filteredWorktrees.length === 0 ? (
-            <Text as="p" size="2" color="gray">
-              {worktrees.length === 0
-                ? 'No worktrees found.'
-                : 'No matching worktrees.'}
-            </Text>
-          ) : (
-            <Flex asChild direction="column">
-              <ul
-                className="worktrees"
-                id="worktree-list"
-                role="grid"
-                ref={listRef}
-                aria-label="Worktrees"
+      <StartCommandTerminal
+        active={showTerminal}
+        visible={visible}
+        onInitialized={setStartCommandEnabled}
+      />
+      {!showTerminal && (
+        <>
+          <Flex asChild align="center" gap="3">
+            <header className="picker-toolbar">
+              <TextField.Root
+                ref={searchRef}
+                className="worktree-search"
+                type="search"
+                role="combobox"
+                aria-label="Search worktrees"
+                aria-autocomplete="list"
+                aria-haspopup="grid"
+                aria-expanded={hasResults}
+                aria-controls={hasResults ? 'worktree-list' : undefined}
+                aria-activedescendant={
+                  hasResults ? worktreeRowId(highlightedPath!) : undefined
+                }
+                placeholder="Search worktrees…"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setSelectedPath(null)
+                  scrollToSelection.current = true
+                }}
+              >
+                <TextField.Slot>
+                  <MagnifyingGlassIcon />
+                </TextField.Slot>
+              </TextField.Root>
+              <Button
+                type="button"
+                variant="soft"
+                onClick={() => void refresh()}
+                disabled={refreshing || connectionState !== 'connected'}
                 aria-busy={refreshing}
               >
-                {filteredWorktrees.map((worktree) => (
-                  <WorktreeRow
-                    key={worktree.path}
-                    worktree={worktree}
-                    highlighted={worktree.path === highlightedPath}
-                    onHighlight={() => setSelectedPath(worktree.path)}
-                    menuOpen={menu.path === worktree.path}
-                    onMenuOpenChange={(open) =>
-                      setMenu({
-                        path: open ? worktree.path : null,
-                        closedByReset: false,
-                      })
-                    }
-                    onCloseAutoFocus={(event) => {
-                      // Session resets return focus to search after the menu releases it.
-                      if (menu.closedByReset) {
-                        event.preventDefault()
-                        if (pickerVisible.current)
-                          searchRef.current?.focus({ preventScroll: true })
-                      }
-                    }}
-                  />
-                ))}
-              </ul>
+                <Spinner loading={refreshing} aria-hidden="true">
+                  <ReloadIcon />
+                </Spinner>
+                Refresh
+              </Button>
+            </header>
+          </Flex>
+          <ScrollArea
+            ref={resultsRef}
+            className="picker-results"
+            type="auto"
+            scrollbars="vertical"
+            size="2"
+          >
+            <Flex direction="column" gap="4">
+              {error && <ErrorMessage>{error}</ErrorMessage>}
+              {connectionState !== 'connected' ? (
+                startCommandEnabled === false && (
+                  <Flex
+                    align="center"
+                    justify="center"
+                    gap="3"
+                    py="6"
+                    role="status"
+                  >
+                    <Spinner aria-hidden="true" />
+                    <Text size="2" color="gray">
+                      Connecting to server
+                    </Text>
+                  </Flex>
+                )
+              ) : filteredWorktrees.length === 0 ? (
+                <Text as="p" size="2" color="gray">
+                  {worktrees.length === 0
+                    ? 'No worktrees found.'
+                    : 'No matching worktrees.'}
+                </Text>
+              ) : (
+                <Flex asChild direction="column">
+                  <ul
+                    className="worktrees"
+                    id="worktree-list"
+                    role="grid"
+                    ref={listRef}
+                    aria-label="Worktrees"
+                    aria-busy={refreshing}
+                  >
+                    {filteredWorktrees.map((worktree) => (
+                      <WorktreeRow
+                        key={worktree.path}
+                        worktree={worktree}
+                        highlighted={worktree.path === highlightedPath}
+                        onHighlight={() => setSelectedPath(worktree.path)}
+                        menuOpen={menu.path === worktree.path}
+                        onMenuOpenChange={(open) =>
+                          setMenu({
+                            path: open ? worktree.path : null,
+                            closedByReset: false,
+                          })
+                        }
+                        onCloseAutoFocus={(event) => {
+                          // Session resets return focus to search after the menu releases it.
+                          if (menu.closedByReset) {
+                            event.preventDefault()
+                            if (pickerVisible.current)
+                              searchRef.current?.focus({ preventScroll: true })
+                          }
+                        }}
+                      />
+                    ))}
+                  </ul>
+                </Flex>
+              )}
             </Flex>
-          )}
-        </Flex>
-      </ScrollArea>
+          </ScrollArea>
+        </>
+      )}
     </main>
   )
 }

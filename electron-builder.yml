@@ -6,6 +6,9 @@ files:
   - out/preload/**
   - out/renderer/**
   - package.json
+# PTY helpers are executable files and must live outside the archive.
+asarUnpack:
+  - node_modules/node-pty/**
 win:
   target: nsis
 mac:

@@ -25,7 +25,7 @@
     "format": "prettier . --write",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p vscode-extension/tsconfig.json --noEmit && tsc -p vscode-extension/tsconfig.webview.json --noEmit",
     "upgrade": "tsx scripts/upgrade.ts",
-    "postinstall": "install-electron",
+    "postinstall": "install-electron && node scripts/install-terminal.mjs",
     "prebuild:server": "npm run build:workbench",
     "prepackage:server": "npm run build:workbench",
     "predev:server": "npm run build:workbench",
@@ -35,6 +35,8 @@
   "dependencies": {
     "@radix-ui/react-icons": "1.3.2",
     "@radix-ui/themes": "3.3.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "birpc": "4.2.0",
     "chokidar": "5.0.0",
     "commander": "15.0.0",
@@ -44,6 +46,7 @@
     "httpxy": "0.5.5",
     "jsonc-parser": "3.3.1",
     "mime": "4.1.1",
+    "node-pty": "1.1.0",
     "p-retry": "8.0.1",
     "pino": "10.4.0",
     "powershell-utils": "0.2.1",
@@ -92,5 +95,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "7.3.7"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }

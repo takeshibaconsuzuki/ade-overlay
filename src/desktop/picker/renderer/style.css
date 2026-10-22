@@ -89,3 +89,18 @@
 .worktree-row {
   flex-shrink: 0;
 }
+
+.worktree-picker:has(.start-command-terminal:not([hidden])) {
+  max-width: none;
+  padding: 0;
+}
+
+.start-command-terminal {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.start-command-terminal[hidden] {
+  display: none;
+}

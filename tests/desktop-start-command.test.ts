@@ -1,125 +1,191 @@
 import assert from 'node:assert/strict'
-import {
-  mkdtemp,
-  readFile,
-  readdir,
-  rmdir,
-  unlink,
-  writeFile,
-} from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { setImmediate } from 'node:timers/promises'
 import { test, type TestContext } from 'node:test'
-import pRetry from 'p-retry'
 import { DesktopStartCommand } from '../src/desktop/start-command'
+import type {
+  TerminalProcess,
+  TerminalProcessFactory,
+} from '../src/desktop/terminal-process'
 
-async function commandDirectory(t: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'ade-start-command-'))
-  t.after(async () => {
-    for (const file of await readdir(directory))
-      await unlink(join(directory, file))
-    await rmdir(directory)
+class TestTerminal implements TerminalProcess {
+  private resolveExit!: (event: { exitCode: number }) => void
+  readonly exited = new Promise<{ exitCode: number }>((resolve) => {
+    this.resolveExit = resolve
   })
-  return directory
+  stops = 0
+  input = ''
+  size: number[] = []
+  termination: Promise<void> = Promise.resolve()
+
+  finish(code = 0): void {
+    this.resolveExit({ exitCode: code })
+  }
+
+  write(data: string): void {
+    this.input += data
+  }
+
+  resize(cols: number, rows: number): void {
+    this.size = [cols, rows]
+  }
+
+  stop(): Promise<void> {
+    this.stops++
+    this.finish()
+    return this.termination
+  }
 }
 
-test(
-  'start command returns while running and stop terminates its process tree',
-  { timeout: 10_000 },
-  async (t) => {
-    const directory = await commandDirectory(t)
-    const script = join(directory, 'setup command.cjs')
-    const marker = join(directory, 'ready')
-    await writeFile(
-      script,
-      `const fs = require('node:fs');
-const { spawn } = require('node:child_process');
-const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true, stdio: 'ignore' });
-fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify([process.pid, descendant.pid]));
-setInterval(() => {}, 1000);`,
-    )
-    const command = new DesktopStartCommand(`"${process.execPath}" "${script}"`)
-    try {
-      await command.started
-      const pids: number[] = await pRetry(
-        async () => JSON.parse(await readFile(marker, 'utf8')),
-        {
-          minTimeout: 20,
-          maxTimeout: 100,
-          retries: 50,
-        },
-      )
-      for (const pid of pids) assert.doesNotThrow(() => process.kill(pid, 0))
-      const stopped = command.stop()
-      assert.equal(command.stop(), stopped)
-      await stopped
-      await pRetry(
-        () => {
-          for (const pid of pids) assert.throws(() => process.kill(pid, 0))
-        },
-        { minTimeout: 20, maxTimeout: 100, retries: 50 },
-      )
-      assert.equal(command.stop(), stopped)
-    } finally {
-      await command.stop()
-    }
-  },
-)
+class TestFactory implements TerminalProcessFactory {
+  readonly terminals: TestTerminal[] = []
+  onData: (data: string) => void = () => {}
+  fail = false
 
-test('completed setup commands support shell composition and remain safe to stop', async (t) => {
-  const directory = await commandDirectory(t)
-  const script = join(directory, 'setup command.cjs')
-  const marker = join(directory, 'ready')
-  await writeFile(
-    script,
-    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ready')`,
-  )
-  const command = new DesktopStartCommand(
-    `"${process.execPath}" "${script}" && echo complete`,
-  )
-  try {
-    await command.started
-    assert.equal((await command.exited).code, 0)
-    assert.equal(await readFile(marker, 'utf8'), 'ready')
-  } finally {
-    await command.stop()
+  start(
+    _command: string,
+    cols: number,
+    rows: number,
+    onData: (data: string) => void,
+  ): TerminalProcess {
+    if (this.fail) throw new Error('spawn failed')
+    this.onData = onData
+    const terminal = new TestTerminal()
+    terminal.resize(cols, rows)
+    this.terminals.push(terminal)
+    return terminal
   }
+}
+
+function setup(t: TestContext) {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const factory = new TestFactory()
+  const output: string[] = []
+  const command = new DesktopStartCommand('test', factory, (data) =>
+    output.push(data),
+  )
+  t.after(() => command.close())
+  const restart = async () => {
+    await setImmediate()
+    t.mock.timers.tick(1000)
+    await setImmediate()
+  }
+  return { factory, command, output, restart }
+}
+
+test('only connected-to-disconnected transitions kill the command; retries and connects leave it running', async (t) => {
+  const { factory, command, restart } = setup(t)
+  const first = factory.terminals[0]
+  for (const state of [
+    'connecting',
+    'retrying',
+    'connecting',
+    'retrying',
+    'connected',
+    'connected',
+  ] as const)
+    command.connectionChanged(state)
+  assert.equal(first.stops, 0)
+  command.connectionChanged('retrying')
+  command.connectionChanged('connecting')
+  command.connectionChanged('retrying')
+  assert.equal(first.stops, 1)
+  await restart()
+  const second = factory.terminals[1]
+  assert.ok(second)
+  command.connectionChanged('connecting')
+  command.connectionChanged('retrying')
+  assert.equal(second.stops, 0)
+  command.connectionChanged('connected')
+  command.connectionChanged('retrying')
+  assert.equal(second.stops, 1)
 })
 
-test('start command exposes a nonzero exit status without rejecting after launch', async (t) => {
-  const directory = await commandDirectory(t)
-  const script = join(directory, 'fail.cjs')
-  await writeFile(script, 'process.exit(23)')
-  const command = new DesktopStartCommand(`"${process.execPath}" "${script}"`)
-  try {
-    await command.started
-    assert.equal((await command.exited).code, 23)
-  } finally {
-    await command.stop()
+test('normal and failed exits restart while connected without killing either command', async (t) => {
+  const { factory, command, restart } = setup(t)
+  command.connectionChanged('connected')
+  for (const code of [0, 23]) {
+    const terminal = factory.terminals.at(-1)!
+    terminal.finish(code)
+    await restart()
+    assert.equal(terminal.stops, 0)
   }
+  assert.equal(factory.terminals.length, 3)
 })
 
-test('a missing executable is reported through the shell exit status', async () => {
-  const command = new DesktopStartCommand(
-    'ade-nonexistent-start-command-5c09e5b2',
-  )
-  try {
-    await command.started
-    assert.notEqual((await command.exited).code, 0)
-  } finally {
-    await command.stop()
-  }
+test('each launch displays the command before its output and retains it for initialization', async (t) => {
+  const { factory, command, output, restart } = setup(t)
+  assert.equal(output[0], '[startCommand] Running: test\r\n')
+  factory.onData('Password: ')
+  assert.match(command.history, /Running: test\r\nPassword: /)
+  factory.terminals[0].finish()
+  await restart()
+  factory.onData('Password: ')
+  assert.match(output.at(-2)!, /Running: test/)
+  assert.equal(output.at(-1), 'Password: ')
+  assert.equal(command.history.match(/Running: test/g)?.length, 2)
 })
 
-test(
-  'shutdown can stop a command immediately after launch',
-  { timeout: 5000 },
-  async (t) => {
-    const directory = await commandDirectory(t)
-    const script = join(directory, 'pending.cjs')
-    await writeFile(script, 'setInterval(() => {}, 1000)')
-    const command = new DesktopStartCommand(`"${process.execPath}" "${script}"`)
-    await Promise.all([command.started, command.stop()])
-    await command.exited
-  },
-)
+test('restart waits for termination and quit prevents a replacement', async (t) => {
+  const { factory, command, restart } = setup(t)
+  const terminal = factory.terminals[0]
+  let finishTermination!: () => void
+  terminal.termination = new Promise((resolve) => {
+    finishTermination = resolve
+  })
+  command.connectionChanged('connected')
+  command.connectionChanged('retrying')
+  await restart()
+  assert.equal(factory.terminals.length, 1)
+  const closed = command.close()
+  finishTermination()
+  await closed
+  await restart()
+  assert.equal(factory.terminals.length, 1)
+})
+
+test('quit cancels pending retries and connection changes cannot revive the loop', async (t) => {
+  const { factory, command, restart } = setup(t)
+  factory.terminals[0].finish()
+  await setImmediate()
+  await command.close()
+  command.connectionChanged('connected')
+  command.connectionChanged('retrying')
+  await restart()
+  assert.equal(factory.terminals.length, 1)
+  assert.equal(factory.terminals[0].stops, 0)
+})
+
+test('quit terminates a running command and never restarts it', async (t) => {
+  const { factory, command, restart } = setup(t)
+  await command.close()
+  await restart()
+  assert.equal(factory.terminals[0].stops, 1)
+  assert.equal(factory.terminals.length, 1)
+})
+
+test('spawn failures are displayed and retried', async (t) => {
+  const { factory, command, restart } = setup(t)
+  factory.fail = true
+  factory.terminals[0].finish()
+  await restart()
+  assert.match(command.history, /spawn failed/)
+  factory.fail = false
+  await restart()
+  assert.equal(factory.terminals.length, 2)
+})
+
+test('input and size follow the current process and history is bounded', async (t) => {
+  const { factory, command, output, restart } = setup(t)
+  command.write('password\r')
+  command.resize(120, 35)
+  assert.equal(factory.terminals[0].input, 'password\r')
+  assert.deepEqual(factory.terminals[0].size, [120, 35])
+  factory.onData('x'.repeat(300_000))
+  factory.onData('prompt')
+  assert.equal(command.history.length, 256_000)
+  assert.ok(command.history.endsWith('prompt'))
+  assert.equal(output.at(-1), 'prompt')
+  factory.terminals[0].finish()
+  await restart()
+  assert.deepEqual(factory.terminals[1].size, [120, 35])
+})

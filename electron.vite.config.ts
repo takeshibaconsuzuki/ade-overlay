@@ -9,7 +9,13 @@ export default defineConfig({
       target: 'node24.15',
       externalizeDeps: true,
       rollupOptions: {
-        input: resolve(import.meta.dirname, 'src/desktop/index.ts'),
+        input: {
+          index: resolve(import.meta.dirname, 'src/desktop/index.ts'),
+          'terminal-host': resolve(
+            import.meta.dirname,
+            'src/desktop/terminal-host.ts',
+          ),
+        },
       },
     },
   },

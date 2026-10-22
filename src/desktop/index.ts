@@ -6,6 +6,10 @@ import type {
 } from '../shared/api'
 import {
   CONNECTION_STATE_CHANGED,
+  START_COMMAND_INITIALIZE,
+  START_COMMAND_DATA,
+  START_COMMAND_WRITE,
+  START_COMMAND_RESIZE,
   WORKTREE_PICKER_INITIALIZE,
   WORKTREE_PICKER_HIDE,
   WORKTREE_PICKER_VISIBILITY_CHANGED,
@@ -40,6 +44,8 @@ import { UriListClipboardNormalizer } from './clipboard/uri-list'
 import { FetchHttpClient } from '../shared/http-client'
 import { loadDesktopOptions } from './options'
 import { DesktopStartCommand } from './start-command'
+import { NodeTerminalProcessFactory } from './terminal-process'
+import { join } from 'node:path'
 
 const log = logger.child({ component: 'desktop' })
 const notifications = new NotificationRetention(100)
@@ -78,9 +84,9 @@ async function main(): Promise<void> {
     quitting ??= (async () => {
       try {
         try {
-          await closeDesktop?.()
+          await startupProcess?.close()
         } finally {
-          await startupProcess?.stop()
+          await closeDesktop?.()
         }
       } catch (error) {
         log.error({ err: error }, 'Desktop shutdown failed')
@@ -92,9 +98,14 @@ async function main(): Promise<void> {
   })
   if (startCommand !== undefined) {
     log.info('Running desktop startCommand')
-    startupProcess = new DesktopStartCommand(startCommand)
-    await startupProcess.started
-    if (quitting) return
+    startupProcess = new DesktopStartCommand(
+      startCommand,
+      new NodeTerminalProcessFactory(
+        join(import.meta.dirname, 'terminal-host.js'),
+      ),
+      (data) =>
+        worktreePicker?.window.webContents.send(START_COMMAND_DATA, data),
+    )
   }
   let worktrees: Worktree[] = []
   const worktreeOrder = new WorktreeOrder()
@@ -189,6 +200,7 @@ async function main(): Promise<void> {
     },
     {
       onStateChange: (state) => {
+        startupProcess?.connectionChanged(state)
         editorHost.receiveVscodeSettings(null)
         if (state !== 'connected') {
           chats.disconnect()
@@ -209,6 +221,33 @@ async function main(): Promise<void> {
       await server.close()
     }
   }
+  ipcMain.on(START_COMMAND_INITIALIZE, (event) => {
+    if (event.sender !== worktreePicker?.window.webContents) return
+    event.sender.send(START_COMMAND_INITIALIZE, startupProcess?.history ?? null)
+  })
+  ipcMain.on(START_COMMAND_WRITE, (event, data: unknown) => {
+    if (
+      event.sender !== worktreePicker?.window.webContents ||
+      typeof data !== 'string'
+    )
+      return
+    startupProcess?.write(data)
+  })
+  ipcMain.on(START_COMMAND_RESIZE, (event, cols: unknown, rows: unknown) => {
+    if (event.sender !== worktreePicker?.window.webContents) return
+    if (
+      typeof cols !== 'number' ||
+      typeof rows !== 'number' ||
+      !Number.isInteger(cols) ||
+      !Number.isInteger(rows) ||
+      cols < 1 ||
+      rows < 1 ||
+      cols > 1000 ||
+      rows > 1000
+    )
+      return
+    startupProcess?.resize(cols, rows)
+  })
   ipcMain.on(EDITOR_INITIALIZE, (event) => {
     if (!editorHost.isAdeSender(event.sender)) return
     editorHost.sendShellState()
@@ -302,7 +341,7 @@ void app
   .catch(async (error: unknown) => {
     log.fatal({ err: error }, 'Desktop startup failed')
     try {
-      await startupProcess?.stop()
+      await startupProcess?.close()
     } catch (error) {
       log.error({ err: error }, 'Failed to stop desktop startCommand')
     } finally {

@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { ConnectionState, Worktree } from '../../shared/api'
 import {
   type PickerApi,
+  START_COMMAND_INITIALIZE,
+  START_COMMAND_DATA,
+  START_COMMAND_WRITE,
+  START_COMMAND_RESIZE,
   CONNECTION_STATE_CHANGED,
   WORKTREE_PICKER_INITIALIZE,
   WORKTREE_PICKER_HIDE,
@@ -39,7 +43,26 @@ ipcRenderer.on(
   },
 )
 
+let onStartCommandInitialized: ((history: string | null) => void) | undefined
+let onStartCommandData: ((data: string) => void) | undefined
+ipcRenderer.on(START_COMMAND_INITIALIZE, (_event, history: string | null) => {
+  onStartCommandInitialized?.(history)
+})
+ipcRenderer.on(START_COMMAND_DATA, (_event, data: string) => {
+  onStartCommandData?.(data)
+})
+
 const api: PickerApi = {
+  initializeStartCommand: () => ipcRenderer.send(START_COMMAND_INITIALIZE),
+  setOnStartCommandInitializedListener(listener) {
+    onStartCommandInitialized = listener
+  },
+  setOnStartCommandDataListener(listener) {
+    onStartCommandData = listener
+  },
+  writeStartCommand: (data) => ipcRenderer.send(START_COMMAND_WRITE, data),
+  resizeStartCommand: (cols, rows) =>
+    ipcRenderer.send(START_COMMAND_RESIZE, cols, rows),
   setOnVisibilityChangedListener(listener) {
     onVisibilityChangedListener = listener
   },

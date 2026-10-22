@@ -3,8 +3,8 @@
 # ADE_SERVER_URL overrides serverUrl.
 serverUrl: ws://127.0.0.1:4317/rpc
 
-# Optional shell command, run once per desktop startup before any connection attempts.
-# Connections retry while the command runs. Command exits are logged; reconnects do not rerun it.
-# Uses the desktop's working directory and environment, with no interactive input.
-# Keep helpers in the foreground; the desktop terminates their process trees when it exits.
-# startCommand: ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -L 4317:127.0.0.1:4317 ade-server
+# Optional shell command, continuously rerun in an interactive terminal.
+# The picker shows the terminal while disconnected; connection attempts run independently.
+# Uses the desktop's working directory and your interactive login shell on macOS/Linux. Keep helpers in the foreground.
+# The desktop kills the command's process tree only on connection loss or desktop quit.
+# startCommand: ssh -N -o ExitOnForwardFailure=yes -L 4317:127.0.0.1:4317 ade-server

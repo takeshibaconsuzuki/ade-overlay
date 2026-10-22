@@ -9,6 +9,8 @@ test('picker search, visibility, scrolling and mixed input preserve one selectio
   const server = await startIntegrationServer(directory, [])
   try {
     await runDesktopClient('picker', {
+      HOME: directory,
+      USERPROFILE: directory,
       ADE_SERVER_URL: `ws://127.0.0.1:${server.port}/rpc`,
       ADE_PICKER_DATA: directory,
     })

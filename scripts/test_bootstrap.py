@@ -99,9 +99,10 @@ class BootstrapTests(unittest.TestCase):
 
     def test_changed_inputs_trigger_install_even_with_same_size_and_mtime(self):
         self.install()
-        for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc"):
+        for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc", "scripts/install-terminal.mjs"):
             with self.subTest(name=name):
                 path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("aaa", encoding="utf-8")
                 self.install()
                 previous_stat = path.stat()

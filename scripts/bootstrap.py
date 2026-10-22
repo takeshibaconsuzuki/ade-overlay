@@ -261,6 +261,7 @@ def dependency_state(node_dir: Path) -> dict:
                 "package-lock.json",
                 "npm-shrinkwrap.json",
                 ".npmrc",
+                "scripts/install-terminal.mjs",
             )
         },
         "installed_lock": file_signature(
