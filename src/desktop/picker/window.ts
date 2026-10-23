@@ -3,6 +3,12 @@ import { join } from 'node:path'
 import { APP_DISPLAY_NAME } from '../../shared/constants'
 import { WORKTREE_PICKER_VISIBILITY_CHANGED } from './api'
 
+const CLIPBOARD_SHORTCUTS: Record<string, 'cut' | 'copy' | 'paste'> = {
+  x: 'cut',
+  c: 'copy',
+  v: 'paste',
+}
+
 // A picker session starts when the picker is shown and ends when it is dismissed or loses
 // focus. Its state is tracked here rather than read from Electron: on macOS isVisible, focus
 // and blur treat a window whose occlusion state is exactly "visible" as not visible, so they
@@ -51,6 +57,25 @@ export class WorktreePickerWindow {
       this.endSession()
       setImmediate(() => this.hideWindow())
     })
+    // Clipboard shortcuts reach a page through the Edit menu's key equivalents. The menu bar
+    // belongs to the active app, which the panel never is while it is key, so the panel
+    // dispatches them itself. Shortcuts the page handles on its own keydown, such as select
+    // all in the terminal, are left to it.
+    if (process.platform === 'darwin') {
+      this.window.webContents.on('before-input-event', (event, input) => {
+        if (
+          input.type !== 'keyDown' ||
+          !input.meta ||
+          input.control ||
+          input.alt
+        )
+          return
+        const command = CLIPBOARD_SHORTCUTS[input.key.toLowerCase()]
+        if (!command) return
+        event.preventDefault()
+        this.window.webContents[command]()
+      })
+    }
     // Minimizing ends the session like any focus loss; restoring from the Dock starts one.
     this.window.on('restore', () => this.startSession())
     this.window.on('show', () => this.refreshPointer())
