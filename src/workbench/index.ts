@@ -2,6 +2,7 @@ import type { BirpcReturn } from 'birpc'
 import { createMessageRpc } from '../shared/message-rpc'
 import {
   DESKTOP_RPC_COMMAND,
+  DOWNLOAD_RESOURCE_COMMAND,
   EXTENSION_RPC_COMMAND,
   isExtensionMessage,
   type DesktopBridge,
@@ -9,6 +10,7 @@ import {
   type WorkbenchMethods,
 } from '../shared/editor-rpc'
 import { createChatTerminals } from './chat-terminals'
+import { downloadResource } from './download'
 import { installChatPaste } from './chat-paste'
 import { createSettings } from './settings'
 import { persistVscodeSession } from './session'
@@ -99,11 +101,17 @@ class WorkbenchConnection {
 
   attach(services: WorkbenchServices): Promise<void> {
     this.services = services
-    const command = services.registerCommand(
-      DESKTOP_RPC_COMMAND,
-      this.forwardExtension,
+    const commands = [
+      services.registerCommand(DESKTOP_RPC_COMMAND, this.forwardExtension),
+      services.registerCommand(DOWNLOAD_RESOURCE_COMMAND, (resource) =>
+        downloadResource(services, resource),
+      ),
+    ]
+    window.addEventListener(
+      'pagehide',
+      () => commands.forEach((command) => command.dispose()),
+      { once: true },
     )
-    window.addEventListener('pagehide', () => command.dispose(), { once: true })
     return (async () => {
       this.terminals = await createChatTerminals(services)
       installChatPaste(services, this.terminals, this.desktop)

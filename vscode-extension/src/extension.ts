@@ -12,6 +12,7 @@ import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
 import type { ChatsMessage } from '../shared/api'
 import { ChatTerminals } from './chat-terminals'
 import { connectDesktop } from './desktop'
+import { registerDownload } from './download'
 import { ClaudeTerminalProvider } from './providers/claude'
 import { CodexTerminalProvider } from './providers/codex'
 
@@ -46,6 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
     sidebar,
     terminals,
+    registerDownload(),
   )
   desktop = connectDesktop({
     focusChatTerminal: (id) => terminals.focus(id),

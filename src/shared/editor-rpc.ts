@@ -3,6 +3,8 @@ import type { ClipboardPart, TerminalPastePart } from './clipboard'
 
 export const DESKTOP_RPC_COMMAND = 'ade.desktopRpc'
 export const EXTENSION_RPC_COMMAND = 'ade.extensionRpc'
+// Workbench command: saves one remote file resource through the page's download.
+export const DOWNLOAD_RESOURCE_COMMAND = 'ade.downloadResource'
 export const EDITOR_RPC_CONNECT = 'ade:rpc:connect'
 export const EDITOR_RPC_MESSAGE = 'ade:rpc:message'
 

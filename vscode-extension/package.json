@@ -36,6 +36,35 @@
           "name": "ADE"
         }
       ]
+    },
+    "commands": [
+      {
+        "command": "ade.downloadEditor",
+        "title": "Download...",
+        "category": "ADE"
+      }
+    ],
+    "menus": {
+      "editor/title/context": [
+        {
+          "command": "ade.downloadEditor",
+          "when": "resourceScheme == vscode-remote",
+          "group": "2_files@20"
+        }
+      ],
+      "openEditors/context": [
+        {
+          "command": "ade.downloadEditor",
+          "when": "resourceScheme == vscode-remote",
+          "group": "2_files@20"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ade.downloadEditor",
+          "when": "resourceScheme == vscode-remote"
+        }
+      ]
     }
   }
 }
