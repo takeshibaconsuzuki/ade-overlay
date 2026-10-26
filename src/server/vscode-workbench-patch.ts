@@ -10,24 +10,24 @@ import {
 
 // Minified identifiers belong to the pinned distribution and are checked on upgrades.
 const anchor =
-  'let C;return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}'
+  'let C;return{commands:{executeCommand:(k,..._)=>r.executeCommand(k,..._)}'
 const bridge = `let C;
 adeWorkbench.attachWorkbench({
   get(id) {
-    const serviceId = cK.serviceIds.get(id);
+    const serviceId = Rq.serviceIds.get(id);
     if (serviceId) return g.invokeFunction(accessor => accessor.get(serviceId));
-    return RIe.INSTANCE.getWorkbenchContribution(id);
+    return cke.INSTANCE.getWorkbenchContribution(id);
   },
   executeCommand: (id, ...args) => r.executeCommand(id, ...args),
-  registerCommand: (id, handler) => Ge.registerCommand(id, (_accessor, ...args) => handler(...args)),
+  registerCommand: (id, handler) => qe.registerCommand(id, (_accessor, ...args) => handler(...args)),
 });
-return{commands:{executeCommand:(k,...D)=>r.executeCommand(k,...D)}`
+return{commands:{executeCommand:(k,..._)=>r.executeCommand(k,..._)}`
 const startupAnchor =
-  'async open(){let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
+  'async open(){let[e]=await Promise.all([this.initServices(),BVo(Ee(this.domElement))]),t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);'
 const startupBridge = `async open(){
 adeWorkbench.configureWorkbench(this.configuration);
-let[e]=await Promise.all([this.initServices(),TLo(ke(this.domElement))]);
-await adeWorkbench.initializeExtensions(e.serviceCollection.get(me));
+let[e]=await Promise.all([this.initServices(),BVo(Ee(this.domElement))]);
+await adeWorkbench.initializeExtensions(e.serviceCollection.get(fe));
 let t=this.createWorkbench(this.domElement,e.serviceCollection,e.logService);`
 const marker = '/* ADE workbench RPC */'
 

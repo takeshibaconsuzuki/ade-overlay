@@ -296,6 +296,27 @@ void app.whenReady().then(async () => {
           'native paste is intercepted exactly once',
         )
 
+        const sendControlBackspace = () => {
+          page.sendInputEvent({
+            type: 'keyDown',
+            keyCode: 'Backspace',
+            modifiers: ['control'],
+          })
+          page.sendInputEvent({
+            type: 'keyUp',
+            keyCode: 'Backspace',
+            modifiers: ['control'],
+          })
+        }
+        // Shortcut encoding depends on the platform and keybindings. Deferring
+        // it must preserve the same bytes that reach the PTY without a paste.
+        const beforeShortcut = await input()
+        sendControlBackspace()
+        await wait(
+          async () => (await input()).length > beforeShortcut.length,
+          'Control-Backspace reaches the PTY without a paste',
+        )
+        const deletion = (await input()).slice(beforeShortcut.length)
         const beforeTyping = await input()
         await page.executeJavaScript(
           "void adeTest.get('commandService').executeCommand('workbench.action.terminal.paste')",
@@ -307,19 +328,7 @@ void app.whenReady().then(async () => {
         )
         page.sendInputEvent({ type: 'char', keyCode: 'k' })
         await delay(25)
-        const deletion = await page.executeJavaScript(
-          "adeTest.get('terminalService').activeInstance.shellType === 'cmd' ? '\\b' : '\\x17'",
-        )
-        page.sendInputEvent({
-          type: 'keyDown',
-          keyCode: 'Backspace',
-          modifiers: ['control'],
-        })
-        page.sendInputEvent({
-          type: 'keyUp',
-          keyCode: 'Backspace',
-          modifiers: ['control'],
-        })
+        sendControlBackspace()
         await delay(25)
         await command('workbench.action.terminal.sendSequence', {
           text: '[sequence]',

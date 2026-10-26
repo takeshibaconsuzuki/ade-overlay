@@ -81,7 +81,7 @@ test('patching is idempotent and rejects incompatible or partial bundles', () =>
   )
   assert.throws(
     () =>
-      patchVscodeWorkbench(patched.replace('cK.serviceIds.get(id)', 'null')),
+      patchVscodeWorkbench(patched.replace('Rq.serviceIds.get(id)', 'null')),
     /incomplete/,
   )
 })

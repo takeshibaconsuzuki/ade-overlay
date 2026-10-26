@@ -17,9 +17,9 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-NODE_VERSION = "24.21.0"
 NODE_BASE_URL = "https://nodejs.org/dist"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+NODE_VERSION = (PROJECT_ROOT / ".node-version").read_text(encoding="utf-8").strip()
 
 logger = logging.getLogger(__name__)
 

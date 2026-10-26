@@ -130,6 +130,15 @@ void app.whenReady().then(async () => {
         'file opened',
       )
       await command('workbench.action.splitEditorRight')
+      await wait(
+        () =>
+          page.executeJavaScript(`(() => {
+            const groups = adeTest.get('editorGroupsService');
+            const editor = adeTest.get('editorService').activeTextEditorControl;
+            return groups.groups.length === 2 && editor?.hasTextFocus();
+          })()`),
+        'split editor focused',
+      )
       await command('cursorMove', { to: 'down', by: 'line', value: 1 })
       await wait(
         async () =>

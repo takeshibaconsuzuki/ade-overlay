@@ -39,6 +39,7 @@ eval "$(python scripts/bootstrap.py)"
 - `npm run lint`: check lint rules; pass `-- --fix` to apply auto-fixes.
 - `npm test`: run all test suites.
 - `npm run format`: format files.
+- `npm run upgrade`: update dependencies and runtime pins. Reactivate with `scripts/bootstrap.py` afterward to install the updated dependencies.
 
 See `package.json` for other commands.
 
