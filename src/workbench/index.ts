@@ -10,6 +10,7 @@ import {
   type WorkbenchMethods,
 } from '../shared/editor-rpc'
 import { createChatTerminals } from './chat-terminals'
+import { installClipboard } from './clipboard'
 import { downloadResource } from './download'
 import { installChatPaste } from './chat-paste'
 import { createSettings } from './settings'
@@ -101,7 +102,8 @@ class WorkbenchConnection {
 
   attach(services: WorkbenchServices): Promise<void> {
     this.services = services
-    const commands = [
+    const disposables = [
+      installClipboard(services),
       services.registerCommand(DESKTOP_RPC_COMMAND, this.forwardExtension),
       services.registerCommand(DOWNLOAD_RESOURCE_COMMAND, (resource) =>
         downloadResource(services, resource),
@@ -109,7 +111,7 @@ class WorkbenchConnection {
     ]
     window.addEventListener(
       'pagehide',
-      () => commands.forEach((command) => command.dispose()),
+      () => disposables.forEach((disposable) => disposable.dispose()),
       { once: true },
     )
     return (async () => {
