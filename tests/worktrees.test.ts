@@ -7,11 +7,15 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { simpleGit } from 'simple-git'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
-import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
+import {
+  ProcessVscodeServerFactory,
+  type VscodeServerFactory,
+} from '../src/server/vscode-server'
 import {
   GitWorktreeDiscovery,
   listWorktrees,
   parseWorktrees,
+  type WorktreeDiscovery,
 } from '../src/server/git-utils'
 import type {
   DesktopClientMethods,
@@ -288,6 +292,63 @@ test('failed deletion preserves a dirty worktree and external disappearance reje
   await repo.git.raw(['worktree', 'remove', '--force', linked])
   await assert.rejects(store.queueRefresh(), /disappeared outside ADE/)
   assert.deepEqual(store.snapshot, before)
+})
+
+test('deletions are accepted together but remove worktrees one at a time', async (t) => {
+  const main = '/projects/main'
+  const linked = ['/projects/first', '/projects/second']
+  const removals: { path: string; finish: () => void }[] = []
+  const discovery: WorktreeDiscovery = {
+    scan: async () =>
+      [main, ...linked].map((path) => ({
+        path,
+        basename: basename(path),
+        branchName: null,
+        mainWorktreePath: main,
+        projectPath: main,
+      })),
+    remove: async (_mainWorktreePath, path, signal) => {
+      signal.throwIfAborted()
+      await new Promise<void>((resolve, reject) => {
+        removals.push({ path, finish: () => resolve() })
+        signal.addEventListener('abort', () => reject(signal.reason), {
+          once: true,
+        })
+      })
+    },
+    removeBranch: async () => {},
+  }
+  const servers: VscodeServerFactory = {
+    prepare: async () => {},
+    create: () => {
+      throw new Error('Unexpected server')
+    },
+    close: async () => {},
+  }
+  const { WorktreeStore } = await import('../src/server/worktree-store')
+  const store = new WorktreeStore(
+    [{ mainWorktreePath: main }],
+    servers,
+    discovery,
+  )
+  t.after(() => store.close())
+  await store.queueRefresh()
+  for (const path of linked) store.deleteWorktree(path)
+  assert.deepEqual(
+    store.snapshot.filter((entry) => entry.deleting).map((entry) => entry.path),
+    linked,
+  )
+  await waitFor(() => removals.length > 0)
+  await delay(50)
+  assert.deepEqual(
+    removals.map((removal) => removal.path),
+    [linked[0]],
+  )
+  removals[0].finish()
+  await waitFor(() => removals.length === 2)
+  removals[1].finish()
+  await waitFor(() => store.snapshot.length === 1)
+  assert.equal(store.snapshot[0].path, main)
 })
 
 test('combined Git deletion rejects stale branches and dirty worktrees without deleting either', async (t) => {

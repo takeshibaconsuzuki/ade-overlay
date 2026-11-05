@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import pLimit from 'p-limit'
 import type { Worktree } from '../shared/api'
 import { logger } from '../shared/logger'
 import type { Project } from './options'
@@ -33,6 +34,9 @@ export class WorktreeStore implements VscodeProxyTargets {
   private refreshRequested = false
   private refreshing: Promise<void> | undefined
   private closing: Promise<void> | undefined
+  // Worktree removal is disk-bound. Removing several at once saturates the disk and
+  // degrades everything else on the machine, so removals run one at a time.
+  private readonly removals = pLimit(1)
 
   constructor(
     projects: Project[],
@@ -78,7 +82,7 @@ export class WorktreeStore implements VscodeProxyTargets {
   }
 
   // Only configuration changes and discovery are serialized. Worktree starts, stops,
-  // and deletions run independently of this queue and of other worktrees.
+  // and deletions run independently of this queue.
   private enqueue(operation: () => Promise<void>): Promise<void> {
     if (this.controller.signal.aborted)
       return Promise.reject(this.controller.signal.reason)
@@ -239,8 +243,9 @@ export class WorktreeStore implements VscodeProxyTargets {
     void entry.server?.stop().catch(() => {})
   }
 
-  // Deletion is independent per worktree. Repeated requests are idempotent; starting
-  // this worktree is rejected until deletion fails or removes it from the snapshot.
+  // Deletion is accepted immediately and fails independently per worktree, but removals
+  // wait for one another. Repeated requests are idempotent; starting this worktree is
+  // rejected until deletion fails or removes it from the snapshot.
   deleteWorktree(path: string, branchName?: string): void {
     const entry = this.entry(path)
     if (
@@ -259,11 +264,13 @@ export class WorktreeStore implements VscodeProxyTargets {
       .then(async () => {
         await entry.server?.stop()
         this.controller.signal.throwIfAborted()
-        await this.discovery.remove(
-          entry.metadata.mainWorktreePath,
-          entry.metadata.path,
-          this.controller.signal,
-          branchName,
+        await this.removals(() =>
+          this.discovery.remove(
+            entry.metadata.mainWorktreePath,
+            entry.metadata.path,
+            this.controller.signal,
+            branchName,
+          ),
         )
         if (branchName !== undefined) {
           try {
