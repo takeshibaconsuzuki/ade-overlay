@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises'
+import { access, realpath } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { simpleGit } from 'simple-git'
 import type { WorktreeInfo } from '../shared/api'
@@ -36,11 +36,16 @@ export interface DiscoveredWorktree extends WorktreeInfo {
 
 export interface WorktreeDiscovery {
   scan(projects: Project[], signal: AbortSignal): Promise<DiscoveredWorktree[]>
+  // Uncommitted changes, including untracked files, that removal would discard, as Git
+  // short-status lines.
+  changes(path: string, signal: AbortSignal): Promise<string[]>
+  // Forced removal discards uncommitted changes; otherwise only clean worktrees are removed.
   remove(
     mainWorktreePath: string,
     path: string,
     signal: AbortSignal,
     branchName?: string,
+    force?: boolean,
   ): Promise<void>
   removeBranch(
     mainWorktreePath: string,
@@ -57,11 +62,34 @@ export class GitWorktreeDiscovery implements WorktreeDiscovery {
     return listWorktrees(projects, signal)
   }
 
+  async changes(path: string, signal: AbortSignal): Promise<string[]> {
+    signal.throwIfAborted()
+    try {
+      await access(path)
+    } catch (error) {
+      // A directory removed outside ADE has nothing left to discard; Git can still remove
+      // its registration.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+    // Git's own pre-removal check, except that untracked files are always listed because
+    // removal deletes them regardless. Untracked directories are listed, not their files.
+    const { files } = await simpleGit({ baseDir: path, abort: signal }).status([
+      '--untracked-files=normal',
+      '--ignore-submodules=none',
+    ])
+    return files.map(
+      (file) =>
+        `${file.index}${file.working_dir} ${file.from === undefined ? '' : `${file.from} -> `}${file.path}`,
+    )
+  }
+
   async remove(
     mainWorktreePath: string,
     path: string,
     signal: AbortSignal,
     branchName?: string,
+    force?: boolean,
   ): Promise<void> {
     signal.throwIfAborted()
     const git = simpleGit({ baseDir: mainWorktreePath, abort: signal })
@@ -76,7 +104,13 @@ export class GitWorktreeDiscovery implements WorktreeDiscovery {
         throw new Error('Worktree branch changed; refresh and try again')
     }
     signal.throwIfAborted()
-    await git.raw(['worktree', 'remove', '--', path])
+    await git.raw([
+      'worktree',
+      'remove',
+      ...(force ? ['--force'] : []),
+      '--',
+      path,
+    ])
   }
 
   async removeBranch(
@@ -87,7 +121,7 @@ export class GitWorktreeDiscovery implements WorktreeDiscovery {
     signal.throwIfAborted()
     await simpleGit({ baseDir: mainWorktreePath, abort: signal }).raw([
       'branch',
-      '-d',
+      '-D',
       '--',
       branchName,
     ])

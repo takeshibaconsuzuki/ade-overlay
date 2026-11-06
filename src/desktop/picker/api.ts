@@ -28,7 +28,10 @@ export const WORKTREE_CLEAR_ERROR = 'worktree:clearError'
 // Renderer → main: requests server termination and resolves when accepted. Progress and failures arrive through worktree updates. Pages persist and dispose independently in response to server broadcasts.
 export const VSCODE_SERVER_STOP = 'vscode:stop'
 
-// Renderer → main: confirms deletion, then requests it from the server. Resolves on cancellation or accepted deletion; rejects invalid requests. Progress and failures arrive through worktree updates. Pages follow server broadcasts.
+// Renderer → main: reads the uncommitted changes a deletion would discard, for its confirmation.
+export const WORKTREE_CHANGES = 'worktree:changes'
+
+// Renderer → main: requests a deletion the renderer has confirmed. Resolves on accepted deletion; rejects invalid requests. Progress and failures arrive through worktree updates. Pages follow server broadcasts.
 export const WORKTREE_DELETE = 'worktree:delete'
 
 // The desktop owns the terminal; renderer initialization replays recent output.
@@ -62,5 +65,10 @@ export interface PickerApi {
   openWorktree(path: string): Promise<void>
   clearWorktreeError(path: string, errorId: string): Promise<void>
   stopVscodeServer(path: string): Promise<void>
-  deleteWorktree(path: string, branchName?: string): Promise<void>
+  getWorktreeChanges(path: string): Promise<string[]>
+  deleteWorktree(
+    path: string,
+    branchName?: string,
+    force?: boolean,
+  ): Promise<void>
 }

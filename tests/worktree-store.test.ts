@@ -101,8 +101,12 @@ class Discovery implements WorktreeDiscovery {
     if (this.branchRemovalError) throw this.branchRemovalError
     this.removedBranches.push(branchName)
   }
+  async changes(): Promise<string[]> {
+    return ['?? untracked.txt']
+  }
   removed: string[] = []
   removing: string[] = []
+  forced = new Map<string, boolean | undefined>()
   pendingRemovals = new Map<string, ReturnType<typeof deferred<void>>>()
   removalError: Error | undefined
   pending: ReturnType<typeof deferred<DiscoveredWorktree[]>> | undefined
@@ -117,8 +121,15 @@ class Discovery implements WorktreeDiscovery {
     if (this.failure) throw this.failure
     return this.found
   }
-  async remove(_main: string, path: string): Promise<void> {
+  async remove(
+    _main: string,
+    path: string,
+    _signal: AbortSignal,
+    _branchName?: string,
+    force?: boolean,
+  ): Promise<void> {
     this.removing.push(path)
+    this.forced.set(path, force)
     await this.pendingRemovals.get(path)?.promise
     if (this.removalError) throw this.removalError
     this.removed.push(path)
@@ -382,7 +393,7 @@ test('shutdown cancels discovery, waits for cleanup, and prevents queued work', 
   )
 })
 
-test('a slow stop or deletion does not block other worktrees or discovery', async (t) => {
+test('a slow stop or deletion does not block other servers or discovery', async (t) => {
   const { store, servers, discovery } = fixture(t)
   const another = metadata('/another')
   discovery.found = [first, linked, another]
@@ -419,18 +430,23 @@ test('a slow stop or deletion does not block other worktrees or discovery', asyn
   )
   store.stopVscodeServer(first.path)
   store.deleteWorktree(another.path)
+  // Another deletion is accepted and stops its server, but its removal waits for the slow one.
   await waitFor(
     () =>
-      store.snapshot.length === 2 &&
-      store.snapshot[0].vscode.state === 'stopped',
+      store.snapshot[0].vscode.state === 'stopped' &&
+      store.snapshot[2].vscode.state === 'stopped',
   )
   await store.queueRefresh()
-  assert.equal(store.snapshot[1].deleting, true)
+  assert.deepEqual(
+    store.snapshot.map((worktree) => worktree.deleting),
+    [false, true, true],
+  )
   store.ensureVscodeServer(first.path, 'ws://127.0.0.1:4317/rpc')
   assert.equal(store.snapshot[0].vscode.state, 'running')
-  assert.deepEqual(discovery.removing, [linked.path, another.path])
+  assert.deepEqual(discovery.removing, [linked.path])
   removed.resolve()
   await waitFor(() => store.snapshot.length === 1)
+  assert.deepEqual(discovery.removed, [linked.path, another.path])
 })
 
 for (const scanIncludesDeleted of [true, false]) {
@@ -741,4 +757,16 @@ test('combined deletion rejects main worktrees, detached HEADs and changed branc
     /branch changed/,
   )
   assert.deepEqual(discovery.removing, [])
+})
+
+test('deletion reads uncommitted changes and forwards forced removal', async (t) => {
+  const { store, discovery } = fixture(t)
+  await store.queueRefresh()
+  assert.deepEqual(await store.getWorktreeChanges(linked.path), [
+    '?? untracked.txt',
+  ])
+  await assert.rejects(store.getWorktreeChanges('/unknown'), /Unknown worktree/)
+  store.deleteWorktree(linked.path, undefined, true)
+  await waitFor(() => store.snapshot.length === 1)
+  assert.equal(discovery.forced.get(linked.path), true)
 })

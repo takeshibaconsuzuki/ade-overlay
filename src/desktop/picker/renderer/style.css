@@ -52,6 +52,23 @@
     calc(-1 * var(--space-3)) 0;
 }
 
+/* Long change lists scroll within the confirmation, keeping its actions in view. */
+.worktree-changes {
+  box-sizing: border-box;
+  max-height: 240px;
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-2);
+}
+
+.worktree-changes pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--code-font-family);
+  font-size: var(--font-size-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .worktree-status-tooltip {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

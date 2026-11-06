@@ -161,6 +161,7 @@ export async function startServer(
         },
         writeSettings: (content) => settings!.write(content),
         refreshWorktrees: () => worktrees.queueRefresh(),
+        getWorktreeChanges: (path) => worktrees.getWorktreeChanges(path),
         ensureVscodeServer: (path) => {
           const host =
             options.host === '0.0.0.0'
@@ -175,8 +176,8 @@ export async function startServer(
           )
         },
         stopVscodeServer: (path) => worktrees.stopVscodeServer(path),
-        deleteWorktree: (path, branchName) =>
-          worktrees.deleteWorktree(path, branchName),
+        deleteWorktree: (path, branchName, force) =>
+          worktrees.deleteWorktree(path, branchName, force),
         clearWorktreeError: (path, errorId) =>
           worktrees.clearWorktreeError(path, errorId),
       },

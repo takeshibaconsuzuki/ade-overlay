@@ -243,10 +243,15 @@ export class WorktreeStore implements VscodeProxyTargets {
     void entry.server?.stop().catch(() => {})
   }
 
+  async getWorktreeChanges(path: string): Promise<string[]> {
+    const entry = this.entry(path)
+    return this.discovery.changes(entry.metadata.path, this.controller.signal)
+  }
+
   // Deletion is accepted immediately and fails independently per worktree, but removals
   // wait for one another. Repeated requests are idempotent; starting this worktree is
   // rejected until deletion fails or removes it from the snapshot.
-  deleteWorktree(path: string, branchName?: string): void {
+  deleteWorktree(path: string, branchName?: string, force?: boolean): void {
     const entry = this.entry(path)
     if (
       pathKey(entry.metadata.path) === pathKey(entry.metadata.mainWorktreePath)
@@ -270,6 +275,7 @@ export class WorktreeStore implements VscodeProxyTargets {
             entry.metadata.path,
             this.controller.signal,
             branchName,
+            force,
           ),
         )
         if (branchName !== undefined) {

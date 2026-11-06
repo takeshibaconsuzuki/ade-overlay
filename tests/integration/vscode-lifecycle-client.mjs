@@ -1,21 +1,12 @@
-import { app, BrowserWindow, webContents, dialog } from 'electron'
+import { app, BrowserWindow, webContents } from 'electron'
 import assert from 'node:assert/strict'
-import { access, writeFile, rm } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const directory = process.env.ADE_LIFECYCLE_DATA
 const worktree = process.env.ADE_LIFECYCLE_WORKTREE
 app.setPath('userData', join(directory, 'electron-data'))
-let response = 0
-let confirmations = 0
-// Keep the real IPC path, while answering the native confirmation deterministically.
-dialog.showMessageBox = async (_window, options) => {
-  assert.match(options.message, /Delete worktree linked/)
-  assert.equal(options.defaultId, 0)
-  confirmations++
-  return { response, checkboxChecked: false }
-}
 await import('./index.js')
 const wait = async (condition, label) => {
   const deadline = Date.now() + 20000
@@ -193,14 +184,44 @@ void app.whenReady().then(async () => {
     assert.notEqual(third.id, second.id)
     await restored(third)
     console.log('PASS local and remote stops preserve unsaved text')
-    await run(`window.picker.deleteWorktree(${JSON.stringify(worktree)})`)
-    assert.equal(confirmations, 1)
+    const deletion = 'document.querySelector("[role=alertdialog]")'
+    // Requests deletion through the row's menu and reads the confirmation it opens.
+    const confirmDeletion = async () => {
+      await menuItem('Delete worktree', 'click')
+      // The action is enabled once the confirmation has read the worktree's changes.
+      await wait(
+        () =>
+          run(
+            `!!${deletion} && ![...${deletion}.querySelectorAll('button')].at(-1).disabled`,
+          ),
+        'deletion confirmation',
+      )
+      return run(
+        `({ title: document.getElementById(${deletion}.getAttribute('aria-labelledby')).textContent, changes: ${deletion}.querySelector('pre')?.textContent ?? null })`,
+      )
+    }
+    const answer = async (label) => {
+      await run(
+        `[...${deletion}.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(label)}).click()`,
+      )
+      await wait(() => run(`!${deletion}`), 'deletion confirmation closed')
+    }
+    assert.deepEqual(await confirmDeletion(), {
+      title: 'Delete worktree linked?',
+      changes: null,
+    })
+    await answer('Cancel')
+    await wait(
+      () => run('document.activeElement === document.querySelector("input")'),
+      'search regains focus for keyboard navigation',
+    )
     assert.equal(pages().length, 1, 'cancel leaves the editor running')
     await access(worktree)
-    response = 1
+    await confirmDeletion()
+    // Changes made after the confirmation listed none still block an unforced deletion.
     const dirty = join(worktree, 'untracked.txt')
     await writeFile(dirty, 'keep me')
-    await run(`window.picker.deleteWorktree(${JSON.stringify(worktree)})`)
+    await answer('Delete worktree')
     await wait(
       async () =>
         pages().length === 0 &&
@@ -225,8 +246,11 @@ void app.whenReady().then(async () => {
         ),
       'deletion error dismissed',
     )
-    await rm(dirty)
-    await run(`window.picker.deleteWorktree(${JSON.stringify(worktree)})`)
+    assert.deepEqual(await confirmDeletion(), {
+      title: 'Force delete worktree linked?',
+      changes: '?? untracked.txt',
+    })
+    await answer('Force delete worktree')
     await wait(
       async () =>
         pages().length === 0 &&
@@ -234,7 +258,6 @@ void app.whenReady().then(async () => {
       'deleted worktree',
     )
     await assert.rejects(access(worktree), { code: 'ENOENT' })
-    assert.equal(confirmations, 3)
     const shell = BrowserWindow.getAllWindows().find(
       (window) => window !== picker,
     )
@@ -251,7 +274,7 @@ void app.whenReady().then(async () => {
       1,
     )
     console.log(
-      'PASS picker stop, restart, cancelled deletion, deletion failure and confirmed deletion',
+      'PASS picker stop, restart, cancelled deletion, deletion failure and forced deletion',
     )
     app.quit()
   } catch (error) {

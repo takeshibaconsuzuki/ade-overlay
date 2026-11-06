@@ -13,6 +13,7 @@ import {
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVER_STOP,
+  WORKTREE_CHANGES,
   WORKTREE_DELETE,
   WORKTREE_OPEN,
   WORKTREE_CLEAR_ERROR,
@@ -79,8 +80,9 @@ const api: PickerApi = {
   clearWorktreeError: (path, errorId) =>
     ipcRenderer.invoke(WORKTREE_CLEAR_ERROR, path, errorId),
   stopVscodeServer: (path) => ipcRenderer.invoke(VSCODE_SERVER_STOP, path),
-  deleteWorktree: (path, branchName) =>
-    ipcRenderer.invoke(WORKTREE_DELETE, path, branchName),
+  getWorktreeChanges: (path) => ipcRenderer.invoke(WORKTREE_CHANGES, path),
+  deleteWorktree: (path, branchName, force) =>
+    ipcRenderer.invoke(WORKTREE_DELETE, path, branchName, force),
 }
 
 contextBridge.exposeInMainWorld('picker', api)

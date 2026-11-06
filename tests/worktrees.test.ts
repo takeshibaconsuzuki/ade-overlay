@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { test, type TestContext } from 'node:test'
@@ -208,7 +208,10 @@ test(
     const linked = b
       .latest()!
       .find((worktree) => worktree.basename === 'new tree')!
-    await b.client.rpc.deleteWorktree(linked.path)
+    await writeFile(join(linked.path, 'untracked.txt'), 'discard me')
+    const changes = await b.client.rpc.getWorktreeChanges(linked.path)
+    assert.deepEqual(changes, ['?? untracked.txt'])
+    await b.client.rpc.deleteWorktree(linked.path, undefined, true)
     await b.client.rpc.refreshWorktrees()
     await waitFor(() => a.latest()?.length === 1 && b.latest()?.length === 1)
     assert.equal(a.latest()?.[0].basename, 'first')
@@ -316,6 +319,7 @@ test('deletions are accepted together but remove worktrees one at a time', async
         })
       })
     },
+    changes: async () => [],
     removeBranch: async () => {},
   }
   const servers: VscodeServerFactory = {
@@ -374,7 +378,71 @@ test('combined Git deletion rejects stale branches and dirty worktrees without d
   )
 })
 
-test('safe branch deletion preserves unmerged commits after worktree removal', async (t) => {
+test('Git deletion lists uncommitted changes and discards them only when forced', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  await writeFile(join(repo.path, 'tracked.txt'), 'original')
+  await writeFile(join(repo.path, 'old.txt'), 'renamed')
+  await repo.git.add(['tracked.txt', 'old.txt'])
+  await repo.git.raw([
+    '-c',
+    'user.name=ADE Test',
+    '-c',
+    'user.email=test@example.com',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-m',
+    'Add tracked files',
+  ])
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'feature/topic', linked])
+  const discovery = new GitWorktreeDiscovery()
+  const signal = new AbortController().signal
+  assert.deepEqual(await discovery.changes(linked, signal), [])
+  await writeFile(join(linked, 'tracked.txt'), 'modified')
+  await simpleGit(linked).mv('old.txt', 'new.txt')
+  await mkdir(join(linked, 'build'))
+  await writeFile(join(linked, 'build', 'first.txt'), '')
+  await writeFile(join(linked, 'build', 'second.txt'), '')
+  assert.deepEqual(await discovery.changes(linked, signal), [
+    'R  old.txt -> new.txt',
+    ' M tracked.txt',
+    '?? build/',
+  ])
+  await assert.rejects(
+    discovery.remove(repo.path, linked, signal),
+    /untracked|modified/,
+  )
+  await discovery.remove(repo.path, linked, signal, undefined, true)
+  await assert.rejects(access(linked), { code: 'ENOENT' })
+  assert.equal(
+    (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
+    1,
+  )
+})
+
+test('Git deletion removes worktrees whose directories are already missing', async (t) => {
+  const directory = await fixture(t)
+  const repo = await repository(directory, 'main')
+  const linked = join(directory, 'linked')
+  await repo.git.raw(['worktree', 'add', '-b', 'feature/gone', linked])
+  await rm(linked, { recursive: true })
+  const discovery = new GitWorktreeDiscovery()
+  const signal = new AbortController().signal
+  assert.equal(
+    (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
+    2,
+  )
+  assert.deepEqual(await discovery.changes(linked, signal), [])
+  await discovery.remove(repo.path, linked, signal, 'feature/gone')
+  assert.equal(
+    (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
+    1,
+  )
+})
+
+test('branch deletion removes unmerged branches after worktree removal', async (t) => {
   const directory = await fixture(t)
   const repo = await repository(directory, 'main')
   const linked = join(directory, 'linked')
@@ -394,11 +462,8 @@ test('safe branch deletion preserves unmerged commits after worktree removal', a
   const discovery = new GitWorktreeDiscovery()
   const signal = new AbortController().signal
   await discovery.remove(repo.path, linked, signal, 'feature/unmerged')
-  await assert.rejects(
-    discovery.removeBranch(repo.path, 'feature/unmerged', signal),
-    /not fully merged/,
-  )
-  assert.ok((await repo.git.branchLocal()).all.includes('feature/unmerged'))
+  await discovery.removeBranch(repo.path, 'feature/unmerged', signal)
+  assert.ok(!(await repo.git.branchLocal()).all.includes('feature/unmerged'))
   assert.equal(
     (await listWorktrees([{ mainWorktreePath: repo.path }])).length,
     1,

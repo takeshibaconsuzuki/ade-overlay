@@ -76,15 +76,20 @@ export interface ServerMethods {
   getChatCommand(providerId: string): string
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
+  // Uncommitted changes, including untracked files, that deletion would discard, as Git
+  // short-status lines.
+  getWorktreeChanges(path: string): Promise<string[]>
   // Lifecycle commands acknowledge acceptance, not completion. Validation errors
   // reject the call; subsequent progress and failures arrive in worktreesChanged.
   // Different worktrees run independently. Repeated requests are idempotent;
   // starting a stopping server or a deleting worktree is rejected.
   ensureVscodeServer(path: string): void
   stopVscodeServer(path: string): void
-  // Supplying the expected branch also requests its safe local deletion. If only
-  // branch deletion fails, the worktree is removed and its main worktree reports the error.
-  deleteWorktree(path: string, branchName?: string): void
+  // Supplying the expected branch also requests deletion of that local branch, even if
+  // unmerged. If only branch deletion fails, the worktree is removed and its main worktree
+  // reports the error. Forced deletion discards uncommitted changes; otherwise worktrees
+  // with changes are not deleted.
+  deleteWorktree(path: string, branchName?: string, force?: boolean): void
   clearWorktreeError(path: string, errorId: string): void
   // Fresh host profile snapshot for each editor startup. Rejects when unavailable.
   getDisabledExtensions(): Promise<ExtensionIdentifier[]>

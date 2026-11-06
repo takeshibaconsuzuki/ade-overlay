@@ -1,4 +1,4 @@
-import { app, globalShortcut, ipcMain, dialog, Notification } from 'electron'
+import { app, globalShortcut, ipcMain, Notification } from 'electron'
 import type {
   DesktopClientMethods,
   ServerMethods,
@@ -16,6 +16,7 @@ import {
   WORKTREES_CHANGED,
   WORKTREES_REFRESH,
   VSCODE_SERVER_STOP,
+  WORKTREE_CHANGES,
   WORKTREE_DELETE,
   WORKTREE_OPEN,
   WORKTREE_CLEAR_ERROR,
@@ -292,40 +293,21 @@ async function main(): Promise<void> {
       throw new Error('Invalid sender')
     return server.rpc.stopVscodeServer(path)
   })
+  ipcMain.handle(WORKTREE_CHANGES, (event, path: string) => {
+    if (event.sender !== worktreePicker?.window.webContents)
+      throw new Error('Invalid sender')
+    return server.rpc.getWorktreeChanges(path)
+  })
   ipcMain.handle(
     WORKTREE_DELETE,
-    async (event, path: string, branchName?: string) => {
-      const picker = worktreePicker?.window
-      if (!picker || event.sender !== picker.webContents)
+    (event, path: string, branchName?: string, force?: boolean) => {
+      if (event.sender !== worktreePicker?.window.webContents)
         throw new Error('Invalid sender')
       const worktree = worktrees.find((worktree) => worktree.path === path)
       if (!worktree) throw new Error('Unknown worktree')
       if (branchName !== undefined && branchName !== worktree.branchName)
         throw new Error('Worktree branch changed; refresh and try again')
-      const action =
-        branchName === undefined
-          ? 'Delete worktree'
-          : 'Delete worktree and branch'
-      // Attached to the picker so the confirmation does not take focus away from it and hide it.
-      const { response } = await dialog.showMessageBox(picker, {
-        type: 'warning',
-        message:
-          branchName === undefined
-            ? `Delete worktree ${worktree.basename}?`
-            : `Delete worktree ${worktree.basename} and branch ${branchName}?`,
-        detail:
-          'Its VS Code server will stop and its directory will be removed. Worktrees with uncommitted changes will not be deleted.' +
-          (branchName === undefined
-            ? ''
-            : ' Its local branch will then be deleted if Git considers it safely merged. If branch deletion fails, the worktree will still be removed and the error will appear on the main worktree.'),
-        buttons: ['Cancel', action],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      })
-      if (response !== 1) return
-      if (branchName === undefined) await server.rpc.deleteWorktree(path)
-      else await server.rpc.deleteWorktree(path, branchName)
+      return server.rpc.deleteWorktree(path, branchName, force)
     },
   )
   worktreePicker = new WorktreePickerWindow()
