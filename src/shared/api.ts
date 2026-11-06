@@ -13,6 +13,7 @@ export const chatSchema = z.strictObject({
   sessionId: z.string().trim().min(1),
   // Present for chats launched in an ADE terminal; inherited across session changes.
   terminalId: z.uuid().optional(),
+  // The worktree hosting the reporting process, not the agent's working directory.
   worktreePath: z.string().min(1),
   title: z.string(),
   description: z.string().optional(),

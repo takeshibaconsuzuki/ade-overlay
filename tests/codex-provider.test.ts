@@ -12,7 +12,7 @@ test('Codex transforms startup using stored status and report receipt times', as
   const provider = new CodexChatProvider(['unused'], directory)
   let now = 0
   t.mock.method(Date, 'now', () => now)
-  const raw = { session_id: 'session', cwd: directory, pid: 123 }
+  const raw = { session_id: 'session', worktreePath: directory, pid: 123 }
   const { chat: previous } = await provider.readReport({
     ...raw,
     hook_event_name: 'UserPromptSubmit',
@@ -106,7 +106,7 @@ test('Codex metadata matches resume names and previews, including saved renames'
     const result = await provider.readReport({
       session_id,
       hook_event_name: 'SessionStart',
-      cwd: directory,
+      worktreePath: directory,
       pid: 123,
       terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
     })
@@ -140,7 +140,7 @@ test('Codex provider reads the saved title and derives other metadata from the h
   const report = {
     session_id: 'session',
     hook_event_name: 'SessionStart',
-    cwd: directory,
+    worktreePath: directory,
     pid: 123,
     terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
   }

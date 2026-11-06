@@ -4,22 +4,32 @@ import childProcess, {
 } from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import { NodeVscodeLauncher } from '../src/server/vscode-process'
 import { vscodeBasePath } from '../src/server/vscode-route'
 
-async function fixture(t: TestContext, code: string) {
+async function fixture(t: TestContext, code: string, { link = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-vscode-process-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const entrypoint = join(directory, 'server.cjs')
   await writeFile(entrypoint, code)
+  // A linked path models a configured worktree path that differs from its resolved path.
+  const path = link ? join(directory, 'link') : directory
+  if (link) await symlink(directory, path, 'junction')
   const controller = new AbortController()
   const child = await new NodeVscodeLauncher().launch(
     { node: process.execPath, entrypoint },
-    directory,
+    path,
     join(directory, 'data'),
     controller.signal,
     join(directory, 'host extensions'),
@@ -29,8 +39,48 @@ async function fixture(t: TestContext, code: string) {
     controller.abort()
     await child.stop()
   })
-  return { directory, child, controller }
+  return { directory, path, child, controller }
 }
+
+test(
+  'terminals receive the configured worktree path rather than the resolved path',
+  { timeout: 10_000 },
+  async (t) => {
+    const f = await fixture(
+      t,
+      `
+    const http = require('node:http');
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    fs.writeFileSync('arguments.json', JSON.stringify(args));
+    fs.writeFileSync('ade-worktree-path', process.env.ADE_WORKTREE_PATH);
+    const token = fs.readFileSync(args[args.indexOf('--connection-token-file') + 1], 'utf8');
+    const server = http.createServer((request, response) => {
+      response.writeHead(request.url === '/version?tkn=' + token ? 200 : 403);
+      response.end('ready');
+    });
+    server.listen(0, '127.0.0.1', () => console.log('Extension host agent listening on ' + server.address().port));
+  `,
+      { link: true },
+    )
+    await f.child.ready
+    assert.equal(
+      await readFile(join(f.directory, 'ade-worktree-path'), 'utf8'),
+      f.path,
+    )
+    const args: string[] = JSON.parse(
+      await readFile(join(f.directory, 'arguments.json'), 'utf8'),
+    )
+    assert.equal(
+      args[args.indexOf('--default-folder') + 1],
+      await realpath(f.directory),
+    )
+    assert.equal(
+      args[args.indexOf('--server-base-path') + 1],
+      vscodeBasePath(f.path),
+    )
+  },
+)
 
 test(
   'readiness probes HTTP and shutdown terminates descendant processes',

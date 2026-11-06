@@ -45,7 +45,7 @@ async function fixture(t: TestContext) {
     store.report('codex', {
       session_id: sessionId,
       hook_event_name: event,
-      cwd: directory,
+      worktreePath: directory,
       pid: 123,
       ...fields,
     })

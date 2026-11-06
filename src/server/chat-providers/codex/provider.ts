@@ -9,7 +9,6 @@ import { z } from 'zod'
 import { quotePosixArgument } from '../../../shared/shell'
 import type { Chat } from '../../../shared/api'
 import type { ChatProvider, ChatReport } from '../../chat-provider'
-import { findWorktreeRoot } from '../../git-utils'
 import { HOOK_MARKER, installHooks } from '../hooks-file'
 import { CODEX_CHAT_EVENTS, CodexChatReport, codexReportSchema } from './report'
 
@@ -73,11 +72,7 @@ export class CodexChatProvider implements ChatProvider {
       report.hook_event_name === 'PermissionRequest' ||
       (report.hook_event_name === 'SessionStart' && report.source !== 'compact')
     )
-    const [title, worktreePath] = await Promise.all([
-      this.readTitle(report.session_id),
-      // TODO: Use an environment variable supplied by ADE for the worktree path.
-      findWorktreeRoot(report.cwd),
-    ])
+    const title = await this.readTitle(report.session_id)
     const chat: Chat = {
       providerId: this.id,
       sessionId: report.session_id,
@@ -91,7 +86,7 @@ export class CodexChatProvider implements ChatProvider {
           : undefined,
       title,
       description: report.prompt ?? report.last_assistant_message ?? undefined,
-      worktreePath,
+      worktreePath: report.worktreePath,
       pid: report.pid,
       status: working ? 'working' : 'idle',
     }

@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path'
 import { getSessionInfo } from '@anthropic-ai/claude-agent-sdk'
 import type { Chat } from '../../../shared/api'
 import type { ChatProvider, ChatReport } from '../../chat-provider'
-import { findWorktreeRoot } from '../../git-utils'
 import { HOOK_MARKER, installHooks } from '../hooks-file'
 import {
   CLAUDE_CHAT_EVENTS,
@@ -60,11 +59,7 @@ export class ClaudeChatProvider implements ChatProvider {
       report.hook_event_name === 'PreToolUse' ||
       report.hook_event_name === 'PostToolUse' ||
       report.hook_event_name === 'PostToolUseFailure'
-    const [info, worktreePath] = await Promise.all([
-      getSessionInfo(report.session_id),
-      // TODO: Use an environment variable supplied by ADE for the worktree path.
-      findWorktreeRoot(report.cwd),
-    ])
+    const info = await getSessionInfo(report.session_id)
     const chat: Chat = {
       providerId: this.id,
       sessionId: report.session_id,
@@ -79,7 +74,7 @@ export class ClaudeChatProvider implements ChatProvider {
       // The SDK's display title prefers saved or generated titles over prompts.
       title: info?.summary || '(no message yet)',
       description: report.prompt ?? report.last_assistant_message ?? undefined,
-      worktreePath,
+      worktreePath: report.worktreePath,
       pid: report.pid,
       status: working ? 'working' : 'idle',
     }

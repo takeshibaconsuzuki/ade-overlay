@@ -50,7 +50,7 @@ test('Claude Code titles prefer saved and generated titles over prompts', async 
     const result = await provider.readReport({
       session_id,
       hook_event_name: 'SessionStart',
-      cwd: directory,
+      worktreePath: directory,
       pid: 123,
     })
     return result.chat.title
@@ -74,7 +74,7 @@ test('Claude Code hook payloads determine status, activity, and description', as
   const provider = new ClaudeChatProvider(['unused'], directory)
   const report = {
     session_id: randomUUID(),
-    cwd: directory,
+    worktreePath: directory,
     pid: 123,
     terminalId: 'bcf08308-3214-4d40-8a47-ea183fa95752',
   }
@@ -118,7 +118,7 @@ test('Claude Code hook payloads determine status, activity, and description', as
 
 test('Claude Code subagent reports leave the parent chat unchanged', async () => {
   const provider = new ClaudeChatProvider(['unused'], directory)
-  const raw = { session_id: randomUUID(), cwd: directory, pid: 123 }
+  const raw = { session_id: randomUUID(), worktreePath: directory, pid: 123 }
   const { chat: working } = await provider.readReport({
     ...raw,
     hook_event_name: 'UserPromptSubmit',
@@ -144,7 +144,7 @@ test('Claude Code startup yields to a recent turn and compaction keeps the statu
   const provider = new ClaudeChatProvider(['unused'], directory)
   let now = 0
   t.mock.method(Date, 'now', () => now)
-  const raw = { session_id: randomUUID(), cwd: directory, pid: 123 }
+  const raw = { session_id: randomUUID(), worktreePath: directory, pid: 123 }
   const { chat: working } = await provider.readReport({
     ...raw,
     hook_event_name: 'UserPromptSubmit',

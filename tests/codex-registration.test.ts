@@ -173,6 +173,7 @@ for (const { architecture, provider, executable } of scenarios) {
         ...process.env,
         ADE_CHAT_REPORT_URL: `http://127.0.0.1:${port}/chats/report`,
         ADE_TERMINAL_ID: 'bcf08308-3214-4d40-8a47-ea183fa95752',
+        ADE_WORKTREE_PATH: join(directory, 'terminal-worktree'),
       }
       if (architecture !== process.arch) {
         // Exercise architecture selection on x64 CI; this does not emulate ARM hardware.
@@ -206,6 +207,7 @@ for (const { architecture, provider, executable } of scenarios) {
         custom: { nested: [1, true, null] },
         pid: 1,
         terminalId: 'payload-cannot-override-terminal',
+        worktreePath: 'payload-cannot-override-worktree',
       }
       owner.stdin.end(JSON.stringify(payload))
       const [code] = await once(owner, 'exit')
@@ -216,7 +218,12 @@ for (const { architecture, provider, executable } of scenarios) {
       assert.equal(stdout, '')
       assert.equal(stderr, '')
       assert.deepEqual(received, [
-        { ...payload, pid: owner.pid, terminalId: env.ADE_TERMINAL_ID },
+        {
+          ...payload,
+          pid: owner.pid,
+          terminalId: env.ADE_TERMINAL_ID,
+          worktreePath: env.ADE_WORKTREE_PATH,
+        },
       ])
     },
   )

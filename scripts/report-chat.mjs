@@ -90,6 +90,7 @@ async function main() {
       ...payload,
       pid,
       terminalId: process.env.ADE_TERMINAL_ID || undefined,
+      worktreePath: process.env.ADE_WORKTREE_PATH,
     }),
     signal: AbortSignal.timeout(1000),
   })

@@ -151,6 +151,7 @@ test(
       ...process.env,
       ADE_CHAT_REPORT_URL: `http://127.0.0.1:${port}/chats/report`,
       ADE_TERMINAL_ID: 'bcf08308-3214-4d40-8a47-ea183fa95752',
+      ADE_WORKTREE_PATH: join(directory, 'terminal-worktree'),
     }
     const owner = spawn(
       ownerPath,
@@ -172,7 +173,12 @@ test(
     assert.equal(code, 0, output)
     assert.equal(output, '')
     assert.deepEqual(received, [
-      { ...payload, pid: owner.pid, terminalId: env.ADE_TERMINAL_ID },
+      {
+        ...payload,
+        pid: owner.pid,
+        terminalId: env.ADE_TERMINAL_ID,
+        worktreePath: env.ADE_WORKTREE_PATH,
+      },
     ])
   },
 )

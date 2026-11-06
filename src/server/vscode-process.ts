@@ -100,7 +100,7 @@ export class NodeVscodeProcess implements VscodeProcess {
       tokenFile,
       token,
       signal,
-      vscodeBasePath(path),
+      path,
       extensionsDirectory,
       serverUrl,
     )
@@ -113,7 +113,8 @@ export class NodeVscodeProcess implements VscodeProcess {
     tokenFile: string,
     private readonly token: string,
     private readonly signal: AbortSignal,
-    basePath: string,
+    // As configured, unlike the resolved path; clients identify worktrees by this path.
+    worktreePath: string,
     extensionsDirectory: string,
     serverUrl: string,
   ) {
@@ -138,7 +139,7 @@ export class NodeVscodeProcess implements VscodeProcess {
         '--default-folder',
         path,
         '--server-base-path',
-        basePath,
+        vscodeBasePath(worktreePath),
       ],
       {
         cwd: path,
@@ -149,6 +150,8 @@ export class NodeVscodeProcess implements VscodeProcess {
           ADE_SERVER_URL: serverUrl,
           // Terminals inherit this; chat hooks report only when it is set.
           ADE_CHAT_REPORT_URL: chatReportUrl.href,
+          // Chats belong to the worktree hosting their terminal, wherever their agent works.
+          ADE_WORKTREE_PATH: worktreePath,
         },
       },
     )

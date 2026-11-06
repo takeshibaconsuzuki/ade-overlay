@@ -19,8 +19,8 @@ export const CLAUDE_CHAT_EVENTS = [
 export const claudeReportSchema = z.object({
   session_id: z.string().trim().min(1),
   hook_event_name: z.enum(CLAUDE_CHAT_EVENTS),
-  cwd: z.string().min(1),
   terminalId: z.uuid().optional(),
+  worktreePath: z.string().min(1),
   pid: z
     .int()
     .positive()

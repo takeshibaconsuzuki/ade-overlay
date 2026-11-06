@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
-import { simpleGit } from 'simple-git'
 import WebSocket from 'ws'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
@@ -160,13 +159,11 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   assert.deepEqual(await rpc.getChats(), {})
   await waitFor(() => snapshots.length === 1)
   assert.deepEqual(snapshots, [{}])
-  const repo = join(directory, 'repo')
-  const subdirectory = join(repo, 'nested')
-  await mkdir(subdirectory, { recursive: true })
-  await simpleGit(repo).init()
+  // The reporter's worktree identifies the chat, wherever the agent works.
   const event = {
     session_id: 'first',
-    cwd: subdirectory,
+    cwd: join(directory, 'agent-worktree'),
+    worktreePath: join(directory, 'terminal-worktree'),
     hook_event_name: 'UserPromptSubmit',
     prompt: 'Fix startup\nDetails',
     pid: process.pid,
@@ -200,7 +197,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   assert.deepEqual(chats['codex:first'], {
     providerId: 'codex',
     sessionId: 'first',
-    worktreePath: resolve(repo),
+    worktreePath: event.worktreePath,
     title: 'Saved Codex name',
     description: 'Fix startup\nDetails',
     status: 'working',
@@ -210,10 +207,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
     terminalId: undefined,
   })
   assert.ok(chats['codex:first'].mtime >= receivedAfter)
-  assert.equal(
-    (await post({ ...event, session_id: 'second', cwd: directory })).status,
-    204,
-  )
+  assert.equal((await post({ ...event, session_id: 'second' })).status, 204)
   await post({
     ...event,
     hook_event_name: 'Stop',
