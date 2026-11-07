@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
+import pRetry from 'p-retry'
 import { NodeVscodeLauncher } from '../src/server/vscode-process'
 import { vscodeBasePath } from '../src/server/vscode-route'
 
@@ -139,7 +140,12 @@ test(
     )
     await f.child.stop()
     await f.child.exited
-    assert.throws(() => process.kill(descendant, 0))
+    // Descendants are killed with the server, but an orphan can remain until the system reaps it.
+    await pRetry(() => assert.throws(() => process.kill(descendant, 0)), {
+      minTimeout: 20,
+      maxTimeout: 100,
+      retries: 50,
+    })
   },
 )
 
