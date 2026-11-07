@@ -45,7 +45,10 @@ export function activate(context: vscode.ExtensionContext) {
   )
   const sidebar = new SidebarViewProvider(context.extensionUri, terminals)
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar),
+    // Hidden views keep their page and continue to receive updates.
+    vscode.window.registerWebviewViewProvider('ade.sidebar', sidebar, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     sidebar,
     terminals,
     registerDownload(),
@@ -186,7 +189,7 @@ class SidebarViewProvider
 
   resolveWebviewView(view: vscode.WebviewView) {
     this.view = view
-    // Webview scripts restart after being hidden; each ready message gets the latest snapshot.
+    // Each page load reports ready and receives the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'ready') {
         this.sendSnapshot()
