@@ -243,6 +243,14 @@ export class WorktreeStore implements VscodeProxyTargets {
     void entry.server?.stop().catch(() => {})
   }
 
+  // The discovered worktrees that share the worktree's main worktree, itself included.
+  repositoryWorktreePaths(path: string): string[] {
+    const main = pathKey(this.entry(path).metadata.mainWorktreePath)
+    return [...this.entries.values()]
+      .filter((entry) => pathKey(entry.metadata.mainWorktreePath) === main)
+      .map((entry) => entry.metadata.path)
+  }
+
   async getWorktreeChanges(path: string): Promise<string[]> {
     const entry = this.entry(path)
     return this.discovery.changes(entry.metadata.path, this.controller.signal)

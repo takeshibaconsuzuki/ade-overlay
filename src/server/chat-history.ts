@@ -1,7 +1,10 @@
+import { isAbsolute } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import isPathInside from 'is-path-inside'
 import type { ChatHistoryEntry, ChatHistoryResults } from '../shared/api'
 import { logger } from '../shared/logger'
 import type { ChatProvider, ChatSession } from './chat-provider'
+import { pathKey } from './path-key'
 
 const log = logger.child({ component: 'chat-history' })
 
@@ -45,6 +48,7 @@ const LATEST_SQL = `
 SELECT s.provider_id, s.session_id, s.title, s.cwd, s.modified_at, m.text
 FROM sessions s
 JOIN messages m ON m.id = (SELECT MAX(id) FROM messages WHERE session = s.id)
+WHERE s.cwd IN (SELECT value FROM json_each(?))
 ORDER BY s.modified_at DESC
 LIMIT ?`
 
@@ -53,7 +57,10 @@ function matchingSql(terms: number): string {
 WITH hits AS (
   SELECT m.session, MAX(m.id) AS id
   FROM messages_fts f JOIN messages m ON m.id = f.rowid
-  WHERE ${Array.from({ length: terms }, () => 'f.text LIKE ?').join(' AND ')}
+  WHERE m.session IN (
+    SELECT id FROM sessions WHERE cwd IN (SELECT value FROM json_each(?))
+  )
+  AND ${Array.from({ length: terms }, () => 'f.text LIKE ?').join(' AND ')}
   GROUP BY m.session
 )
 SELECT s.provider_id, s.session_id, s.title, s.cwd, s.modified_at, m.text
@@ -77,6 +84,14 @@ interface ChangedSession {
   // The session's row in the index.
   id: number
   modifiedAt: number
+}
+
+// A session without an absolute working directory is in no directory.
+function within(cwd: string, directory: string): boolean {
+  return (
+    isAbsolute(cwd) &&
+    (pathKey(cwd) === pathKey(directory) || isPathInside(cwd, directory))
+  )
 }
 
 // One line around the earliest literal term, or the start of the message.
@@ -121,15 +136,17 @@ PRAGMA user_version = ${INDEX_VERSION};`),
       )
   }
 
-  search(query: string): ChatHistoryEntry[] {
+  // Chats whose working directory is one of the directories or inside one.
+  search(directories: readonly string[], query: string): ChatHistoryEntry[] {
     const terms = query.split(/\s+/).filter(Boolean)
+    const cwds = JSON.stringify(this.cwdsWithin(directories))
     const rows = (terms.length
       ? this.database
           .prepare(matchingSql(terms.length))
-          .all(...terms.map((term) => `%${term}%`), MAX_RESULTS)
+          .all(cwds, ...terms.map((term) => `%${term}%`), MAX_RESULTS)
       : this.database
           .prepare(LATEST_SQL)
-          .all(MAX_RESULTS)) as unknown as ResultRow[]
+          .all(cwds, MAX_RESULTS)) as unknown as ResultRow[]
     return rows.map((row) => ({
       providerId: row.provider_id,
       sessionId: row.session_id,
@@ -172,6 +189,16 @@ PRAGMA user_version = ${INDEX_VERSION};`),
 
   close(): void {
     this.database.close()
+  }
+
+  // Sessions share few working directories, so each distinct one is compared once.
+  private cwdsWithin(directories: readonly string[]): string[] {
+    const rows = this.database
+      .prepare('SELECT DISTINCT cwd FROM sessions')
+      .all() as { cwd: string }[]
+    return rows
+      .map(({ cwd }) => cwd)
+      .filter((cwd) => directories.some((directory) => within(cwd, directory)))
   }
 
   // Stores the listed sessions, removes the provider's other sessions, and returns the
@@ -321,12 +348,12 @@ export class ChatHistory {
     return this.refreshing
   }
 
-  search(query: string): ChatHistoryResults {
+  search(directories: readonly string[], query: string): ChatHistoryResults {
     if (this.closed) throw new Error('Chat history closed')
     if (Date.now() - this.refreshedAt >= REFRESH_INTERVAL_MS)
       void this.refresh()
     return {
-      chats: this.index.search(query),
+      chats: this.index.search(directories, query),
       indexing: this.refreshing !== undefined,
     }
   }

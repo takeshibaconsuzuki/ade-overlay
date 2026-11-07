@@ -202,14 +202,18 @@ class SidebarViewProvider
       const message: HistoryMessage = { type: 'history', query, results }
       void this.view?.webview.postMessage(message)
     }
-    if (client?.state !== 'connected') {
+    // Searches cover this window's repository, whose worktree the VS Code server identifies.
+    const worktreePath = process.env.ADE_WORKTREE_PATH
+    if (client?.state !== 'connected' || worktreePath === undefined) {
       send(undefined)
       return
     }
-    client.rpc.searchChatHistory(query).then(send, (error: unknown) => {
-      console.error('Unable to search chat history', error)
-      send(undefined)
-    })
+    client.rpc
+      .searchChatHistory(worktreePath, query)
+      .then(send, (error: unknown) => {
+        console.error('Unable to search chat history', error)
+        send(undefined)
+      })
   }
 
   dispose(): void {

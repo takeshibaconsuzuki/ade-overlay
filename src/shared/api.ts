@@ -96,12 +96,13 @@ export interface ServerMethods {
   // Resolves the current configured command or provider default; unknown providers reject.
   // A session ID, which must be a UUID, extends the command to resume that session.
   getChatCommand(providerId: string, resumeSessionId?: string): string
-  // Sessions the providers list for resumption, from every directory, most recently
-  // modified first and limited in number. Each whitespace-separated term of a
+  // Sessions the providers list for resumption whose working directory is in a discovered
+  // worktree of the given worktree's repository, most recently modified first and limited
+  // in number; unknown worktrees reject. Each whitespace-separated term of a
   // non-empty query must appear, ignoring ASCII case, in one user prompt or agent message;
   // in a term, % matches any run of characters and _ any one character. Searching a
   // stale index also starts an update.
-  searchChatHistory(query: string): ChatHistoryResults
+  searchChatHistory(worktreePath: string, query: string): ChatHistoryResults
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   // Uncommitted changes, including untracked files, that deletion would discard, as Git

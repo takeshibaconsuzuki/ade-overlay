@@ -12,6 +12,8 @@ async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-chat-history-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const path = join(directory, 'index.sqlite')
+  // Every session's working directory is inside it.
+  const worktrees = [join(directory, 'worktrees')]
   const provider = new TestChatProvider()
   const session = (
     sessionId: string,
@@ -28,7 +30,7 @@ async function fixture(t: TestContext) {
     t.after(() => index.close())
     return index
   }
-  return { path, provider, session, open }
+  return { directory, path, worktrees, provider, session, open }
 }
 
 test('updates read only sessions modified since their last read and replace their messages', async (t) => {
@@ -49,10 +51,10 @@ test('updates read only sessions modified since their last read and replace thei
   f.provider.sessions = [f.session('one', 2), f.session('two', 1)]
   await index.update([f.provider])
   assert.deepEqual(reads.mock.calls.at(-1)?.arguments[0], ['one'])
-  assert.deepEqual(index.search('first'), [])
+  assert.deepEqual(index.search(f.worktrees, 'first'), [])
   assert.deepEqual(
     index
-      .search('second')
+      .search(f.worktrees, 'second')
       .map(({ sessionId, excerpt }) => [sessionId, excerpt]),
     [['one', 'second answer']],
   )
@@ -61,7 +63,7 @@ test('updates read only sessions modified since their last read and replace thei
   const reopened = f.open()
   await reopened.update([f.provider])
   assert.equal(reads.mock.callCount(), 2)
-  assert.equal(reopened.search('second').length, 1)
+  assert.equal(reopened.search(f.worktrees, 'second').length, 1)
 })
 
 test('an interrupted read keeps previous messages and repeats only unfinished sessions', async (t) => {
@@ -96,7 +98,9 @@ test('an interrupted read keeps previous messages and repeats only unfinished se
   f.provider.messages.set('two', ['b3', 'b4'])
   await index.update([f.provider])
   assert.deepEqual(
-    index.search('').map(({ sessionId, excerpt }) => [sessionId, excerpt]),
+    index
+      .search(f.worktrees, '')
+      .map(({ sessionId, excerpt }) => [sessionId, excerpt]),
     [
       ['one', 'a3'],
       ['two', 'b2'],
@@ -114,7 +118,7 @@ test('an interrupted read keeps previous messages and repeats only unfinished se
     ],
   )
   assert.deepEqual(
-    index.search('b').map(({ excerpt }) => excerpt),
+    index.search(f.worktrees, 'b').map(({ excerpt }) => excerpt),
     ['b4'],
   )
 })
@@ -134,7 +138,7 @@ test('queries match every term in one message, ignoring case, and order chats by
   const index = f.open()
   await index.update([f.provider])
 
-  assert.deepEqual(index.search('  '), [
+  assert.deepEqual(index.search(f.worktrees, '  '), [
     {
       providerId: 'test',
       sessionId: 'newer',
@@ -154,22 +158,22 @@ test('queries match every term in one message, ignoring case, and order chats by
   ])
   assert.deepEqual(
     index
-      .search('SNOWFLAKE')
+      .search(f.worktrees, 'SNOWFLAKE')
       .map(({ sessionId, excerpt }) => [sessionId, excerpt]),
     [
       ['newer', 'Rotate snowflake credentials'],
       ['older', 'Add Snowflake semantic views'],
     ],
   )
-  const [match] = index.search('views semantic')
+  const [match] = index.search(f.worktrees, 'views semantic')
   assert.equal(match.sessionId, 'older')
   // The latest matching message is excerpted around its earliest term, on one line.
   assert.match(match.excerpt, /^…(word )+The semantic views load now\. /)
   assert.ok(match.excerpt.endsWith('…'))
-  assert.deepEqual(index.search('semantic credentials'), [])
+  assert.deepEqual(index.search(f.worktrees, 'semantic credentials'), [])
   // Terms too short for the trigram index still match.
   assert.deepEqual(
-    index.search('Do').map(({ sessionId }) => sessionId),
+    index.search(f.worktrees, 'Do').map(({ sessionId }) => sessionId),
     ['newer'],
   )
 
@@ -181,9 +185,43 @@ test('queries match every term in one message, ignoring case, and order chats by
     f.provider.messages.set(sessionId, ['common text'])
   await index.update([f.provider])
   assert.deepEqual(
-    index.search('common').map(({ sessionId }) => sessionId),
+    index.search(f.worktrees, 'common').map(({ sessionId }) => sessionId),
     Array.from({ length: 10 }, (_, index) => `many${11 - index}`),
   )
+})
+
+test('searches find only chats whose working directory is in one of the directories', async (t) => {
+  const f = await fixture(t)
+  const main = join(f.directory, 'main')
+  const linked = join(f.directory, 'linked')
+  const session = (
+    sessionId: string,
+    cwd: string,
+    modifiedAt: number,
+  ): ChatSession => ({ sessionId, title: sessionId, cwd, modifiedAt })
+  f.provider.sessions = [
+    session('main', main, 1),
+    session('nested', join(main, 'packages', 'app'), 2),
+    session('linked', linked, 3),
+    session('prefixed', `${main}-copy`, 4),
+    session('unrecorded', '', 5),
+    // Newer than the chats in the directories, and more than one search returns.
+    ...Array.from({ length: 12 }, (_, index) =>
+      session(`other${index}`, join(f.directory, 'other'), 10 + index),
+    ),
+  ]
+  for (const { sessionId } of f.provider.sessions)
+    f.provider.messages.set(sessionId, ['common text'])
+  // An unrecorded directory must not resolve to a directory being searched.
+  t.mock.method(process, 'cwd', () => main)
+  const index = f.open()
+  await index.update([f.provider])
+  for (const query of ['', 'common'])
+    assert.deepEqual(
+      index.search([main, linked], query).map(({ sessionId }) => sessionId),
+      ['linked', 'nested', 'main'],
+    )
+  assert.deepEqual(index.search([], ''), [])
 })
 
 test('updates follow the listing', async (t) => {
@@ -197,7 +235,7 @@ test('updates follow the listing', async (t) => {
   f.provider.sessions = [{ ...f.session('one', 1), title: 'Renamed' }]
   await index.update([f.provider])
   assert.deepEqual(
-    index.search('question').map(({ title }) => title),
+    index.search(f.worktrees, 'question').map(({ title }) => title),
     ['Renamed'],
   )
 
@@ -206,7 +244,7 @@ test('updates follow the listing', async (t) => {
     throw new Error('Unavailable')
   })
   await index.update([f.provider])
-  assert.equal(index.search('').length, 1)
+  assert.equal(index.search(f.worktrees, '').length, 1)
 })
 
 test('searches start one update at a time once the index is stale', async (t) => {
@@ -222,35 +260,41 @@ test('searches start one update at a time once the index is stale', async (t) =>
   let refreshes = 0
   history.setOnRefreshedListener(() => refreshes++)
 
-  assert.deepEqual(history.search('first'), { chats: [], indexing: true })
-  assert.equal(history.search('first').indexing, true)
+  assert.deepEqual(history.search(f.worktrees, 'first'), {
+    chats: [],
+    indexing: true,
+  })
+  assert.equal(history.search(f.worktrees, 'first').indexing, true)
   await history.refresh()
   assert.equal(updates.mock.callCount(), 1)
   assert.equal(refreshes, 1)
-  assert.equal(history.search('first').chats.length, 1)
+  assert.equal(history.search(f.worktrees, 'first').chats.length, 1)
 
   f.provider.messages.set('one', ['first prompt', 'appended prompt'])
   f.provider.sessions = [f.session('one', 2)]
   now = 9_999
-  assert.deepEqual(history.search('appended'), { chats: [], indexing: false })
+  assert.deepEqual(history.search(f.worktrees, 'appended'), {
+    chats: [],
+    indexing: false,
+  })
   now = 10_000
-  assert.equal(history.search('appended').indexing, true)
+  assert.equal(history.search(f.worktrees, 'appended').indexing, true)
   await history.refresh()
   assert.equal(updates.mock.callCount(), 2)
-  assert.equal(history.search('appended').chats.length, 1)
+  assert.equal(history.search(f.worktrees, 'appended').chats.length, 1)
 
   // A failed update is logged and still lets searches continue.
   updates.mock.mockImplementation(async () => {
     throw new Error('Update failed')
   })
   now = 20_000
-  history.search('')
+  history.search(f.worktrees, '')
   await history.refresh()
   assert.equal(refreshes, 3)
-  assert.equal(history.search('appended').chats.length, 1)
+  assert.equal(history.search(f.worktrees, 'appended').chats.length, 1)
 
   const closing = t.mock.method(indexer, 'close')
   await history.close()
   assert.equal(closing.mock.callCount(), 1)
-  assert.throws(() => history.search(''), /closed/)
+  assert.throws(() => history.search(f.worktrees, ''), /closed/)
 })

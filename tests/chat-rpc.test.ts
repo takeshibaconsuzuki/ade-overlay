@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
+import { simpleGit } from 'simple-git'
 import WebSocket from 'ws'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
@@ -309,15 +310,37 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   await assert.rejects(post(event))
 })
 
-test('extensions search chat history and hear when updates finish', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'ade-chat-history-rpc-'))
+test('extensions search the chat history of their repository and hear when updates finish', async (t) => {
+  // Git reports worktrees by their real paths.
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), 'ade-chat-history-rpc-')),
+  )
   t.after(() => rm(directory, { recursive: true, force: true }))
+  const repo = join(directory, 'repo')
+  await mkdir(repo)
+  const git = simpleGit(repo)
+  await git.init(['--initial-branch=main'])
+  await git.raw([
+    '-c',
+    'user.name=ADE Test',
+    '-c',
+    'user.email=test@example.com',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--allow-empty',
+    '-m',
+    'Initial commit',
+  ])
+  const linked = join(directory, 'linked')
+  await git.raw(['worktree', 'add', '-b', 'linked', linked])
   const config = join(directory, 'server.yaml')
   await writeFile(
     config,
     stringify({
       host: '127.0.0.1',
       port: 0,
+      projects: [{ mainWorktreePath: repo }],
       vscode: { settingsFile: join(directory, 'settings.json') },
     }),
   )
@@ -358,25 +381,35 @@ test('extensions search chat history and hear when updates finish', async (t) =>
   await once(socket, 'open')
   // The startup update finds no sessions.
   const deadline = Date.now() + 5000
-  while ((await rpc.searchChatHistory('')).indexing) {
+  while ((await rpc.searchChatHistory(linked, '')).indexing) {
     assert.ok(Date.now() < deadline, 'Expected the startup update to finish')
     await delay(25)
   }
   provider.sessions = [
-    { sessionId: 'one', title: 'One', cwd: directory, modifiedAt: 1 },
+    { sessionId: 'one', title: 'One', cwd: repo, modifiedAt: 1 },
+    {
+      sessionId: 'two',
+      title: 'Two',
+      cwd: join(linked, 'src'),
+      modifiedAt: 2,
+    },
+    { sessionId: 'other', title: 'Other', cwd: directory, modifiedAt: 3 },
   ]
   provider.messages.set('one', ['Find the bug'])
+  provider.messages.set('two', ['Fix the bug'])
+  provider.messages.set('other', ['Another bug'])
   const now = Date.now()
   // A search once the index is stale starts an update.
   const clock = t.mock.method(Date, 'now', () => now + 10_000)
   const before = changes
-  assert.deepEqual(await rpc.searchChatHistory('bug'), {
+  assert.deepEqual(await rpc.searchChatHistory(linked, 'bug'), {
     chats: [],
     indexing: true,
   })
   clock.mock.restore()
   await waitFor(() => changes > before)
-  const { chats } = await rpc.searchChatHistory('bug')
+  // Chats from any of the repository's worktrees match, but not chats outside them.
+  const { chats } = await rpc.searchChatHistory(linked, 'bug')
   assert.deepEqual(
     chats.map(({ providerId, sessionId, title, excerpt }) => ({
       providerId,
@@ -387,12 +420,25 @@ test('extensions search chat history and hear when updates finish', async (t) =>
     [
       {
         providerId: 'test',
+        sessionId: 'two',
+        title: 'Two',
+        excerpt: 'Fix the bug',
+      },
+      {
+        providerId: 'test',
         sessionId: 'one',
         title: 'One',
         excerpt: 'Find the bug',
       },
     ],
   )
+  assert.deepEqual(
+    (await rpc.searchChatHistory(repo, '')).chats.map(
+      ({ sessionId }) => sessionId,
+    ),
+    ['two', 'one'],
+  )
+  await assert.rejects(rpc.searchChatHistory(directory, ''), /Unknown worktree/)
 })
 
 class FailingProvider implements ChatProvider {

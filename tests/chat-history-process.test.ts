@@ -64,7 +64,7 @@ test('the server command updates the index in its own process', async () => {
   ]).update()
   assert.deepEqual(
     index
-      .search('prompt')
+      .search(['/work'], 'prompt')
       .map(({ providerId, excerpt }) => [providerId, excerpt])
       .sort(),
     [

@@ -166,7 +166,11 @@ export async function startServer(
             ? command
             : provider.resumeCommand(command, z.uuid().parse(resumeSessionId))
         },
-        searchChatHistory: (query) => history.search(query),
+        searchChatHistory: (worktreePath, query) =>
+          history.search(
+            worktrees.repositoryWorktreePaths(worktreePath),
+            query,
+          ),
         getServerInfo: () => ({ name: APP_NAME }),
         getDisabledExtensions: async () => {
           try {

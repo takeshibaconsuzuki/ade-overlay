@@ -321,6 +321,24 @@ test('stopping keeps the entry restartable; deletion waits for stopping and only
   )
 })
 
+test('repository worktrees are the worktrees sharing a main worktree', async (t) => {
+  const { store, discovery } = fixture(t, [
+    { mainWorktreePath: first.path },
+    { mainWorktreePath: second.path },
+  ])
+  discovery.found = [first, linked, second]
+  await store.queueRefresh()
+  assert.deepEqual(store.repositoryWorktreePaths(linked.path), [
+    first.path,
+    linked.path,
+  ])
+  assert.deepEqual(store.repositoryWorktreePaths(second.path), [second.path])
+  assert.throws(
+    () => store.repositoryWorktreePaths('/unknown'),
+    /Unknown worktree/,
+  )
+})
+
 test('refresh requests coalesce while a scan is running', async (t) => {
   const { store, discovery } = fixture(t)
   discovery.pending = deferred<DiscoveredWorktree[]>()
