@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDownIcon } from '@radix-ui/react-icons'
 import {
   Box,
@@ -51,6 +51,10 @@ export function App() {
   const [tab, setTab] = useState('live')
   const [query, setQuery] = useState('')
   const [history, setHistory] = useState<HistoryMessage>()
+  const historySearch = useRef<HTMLInputElement>(null)
+  // The browser focuses a clicked trigger after its mouse down has already shown the
+  // history, so the search takes focus on click rather than when it mounts.
+  const focusHistorySearch = () => historySearch.current?.focus()
   useEffect(() => {
     const receive = (
       event: MessageEvent<ChatsMessage | WorktreesMessage | HistoryMessage>,
@@ -147,7 +151,9 @@ export function App() {
       <Tabs.Root value={tab} onValueChange={setTab}>
         <Tabs.List size="1" className="chat-tabs">
           <Tabs.Trigger value="live">Live</Tabs.Trigger>
-          <Tabs.Trigger value="history">History</Tabs.Trigger>
+          <Tabs.Trigger value="history" onClick={focusHistorySearch}>
+            History
+          </Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="live">
           <ChatList
@@ -158,6 +164,7 @@ export function App() {
         </Tabs.Content>
         <Tabs.Content value="history">
           <HistoryList
+            searchRef={historySearch}
             query={query}
             onQueryChange={setQuery}
             history={history}

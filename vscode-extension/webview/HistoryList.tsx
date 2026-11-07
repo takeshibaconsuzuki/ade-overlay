@@ -1,3 +1,4 @@
+import type { Ref } from 'react'
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
 import { Box, Spinner, TextField } from '@radix-ui/themes'
 import type { Chat, ChatHistoryEntry } from '../../src/shared/api'
@@ -7,12 +8,14 @@ import { basename, ChatNotice, ChatRow, loadingRows } from './ChatList'
 const dates = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
 export function HistoryList({
+  searchRef,
   query,
   onQueryChange,
   history,
   liveChats,
   onResume,
 }: {
+  searchRef: Ref<HTMLInputElement>
   query: string
   onQueryChange: (query: string) => void
   // Results for an earlier query remain until the current query's arrive.
@@ -25,6 +28,7 @@ export function HistoryList({
     <main aria-label="Chat history" aria-busy={results === undefined}>
       <Box px="4" pt="3" pb="1">
         <TextField.Root
+          ref={searchRef}
           type="search"
           placeholder="Search chats"
           aria-label="Search chat history"
