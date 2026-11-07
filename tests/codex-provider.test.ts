@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { test } from 'node:test'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
@@ -189,5 +190,116 @@ test('Codex provider reads the saved title and derives other metadata from the h
   await assert.rejects(provider.readReport({ ...report, pid: -1 }))
   await assert.rejects(
     provider.readReport({ ...report, hook_event_name: 'Unknown' }),
+  )
+})
+
+test('Codex history lists unarchived user threads with rollouts, including exec runs', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ade-codex-history-'))
+  const db = createCodexMetadata(directory)
+  t.after(async () => {
+    db.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const rollout = (id: string) => join(directory, `${id}.jsonl`)
+  const insert = db.prepare(
+    'INSERT INTO threads (id, rollout_path, cwd, thread_source, archived, title, first_user_message) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  )
+  for (const [id, cwd, source, archived, title] of [
+    ['cli', '/work/a', 'user', 0, 'Saved'],
+    ['vscode', '/work/b', 'user', 0, 'Ask'],
+    ['exec', '/work/a', 'user', 0, 'Exec'],
+    ['review', '/work/a', 'subagent', 0, 'Review'],
+    ['archived', '/work/a', 'user', 1, 'Old'],
+    ['missing', '/work/a', 'user', 0, 'Gone'],
+  ] as const) {
+    insert.run(id, rollout(id), cwd, source, archived, title, 'Ask')
+    if (id !== 'missing') await writeFile(rollout(id), '')
+  }
+  const modified = new Date('2026-02-03T04:05:06.000Z')
+  await utimes(rollout('cli'), modified, modified)
+  await writeFile(
+    join(directory, 'session_index.jsonl'),
+    JSON.stringify({ id: 'vscode', thread_name: 'Indexed name' }) + '\n',
+  )
+  const provider = new CodexChatProvider(['unused'], directory)
+  const sessions = (await provider.listSessions()).sort((a, b) =>
+    a.sessionId.localeCompare(b.sessionId),
+  )
+  assert.deepEqual(
+    sessions.map(({ sessionId, title, cwd }) => ({ sessionId, title, cwd })),
+    [
+      { sessionId: 'cli', title: 'Saved', cwd: '/work/a' },
+      { sessionId: 'exec', title: 'Exec', cwd: '/work/a' },
+      { sessionId: 'vscode', title: 'Indexed name', cwd: '/work/b' },
+    ],
+  )
+  assert.equal(sessions[0].modifiedAt, modified.getTime())
+  assert.deepEqual(
+    await new CodexChatProvider(
+      ['unused'],
+      join(directory, 'missing'),
+    ).listSessions(),
+    [],
+  )
+  assert.equal(
+    provider.resumeCommand('codex --model custom', 'id'),
+    'codex --model custom resume --cd . id',
+  )
+})
+
+test('Codex history reads completed user and agent messages', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ade-codex-messages-'))
+  const db = createCodexMetadata(directory)
+  t.after(async () => {
+    db.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const item = (type: string, content: unknown[]) => ({
+    type: 'event_msg',
+    payload: { type: 'item_completed', item: { type, content } },
+  })
+  const write = async (id: string, records: object[]) => {
+    const path = join(directory, `${id}.jsonl`)
+    db.prepare('INSERT INTO threads (id, rollout_path) VALUES (?, ?)').run(
+      id,
+      path,
+    )
+    await writeFile(
+      path,
+      records.map((record) => JSON.stringify(record) + '\n').join(''),
+    )
+  }
+  await write('first', [
+    // Model input repeats prompts beside instructions Codex injects.
+    {
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '# AGENTS.md instructions' }],
+      },
+    },
+    item('UserMessage', [
+      { type: 'text', text: 'First line' },
+      { type: 'image', image_url: 'data:' },
+      { type: 'text', text: 'Second line' },
+    ]),
+    item('Reasoning', [{ text: 'Thinking' }]),
+    item('UserMessage', [{ type: 'image' }]),
+    item('AgentMessage', [{ type: 'Text', text: 'Reply' }]),
+  ])
+  await write('second', [
+    item('UserMessage', [{ type: 'text', text: 'Another' }]),
+  ])
+  const provider = new CodexChatProvider(['unused'], directory)
+  assert.deepEqual(
+    await Readable.from(
+      provider.readMessages(['first', 'unknown', 'second']),
+    ).toArray(),
+    [
+      { sessionId: 'first', text: 'First line\nSecond line' },
+      { sessionId: 'first', text: 'Reply' },
+      { sessionId: 'second', text: 'Another' },
+    ],
   )
 })

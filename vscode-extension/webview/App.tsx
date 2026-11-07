@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import { ChevronDownIcon } from '@radix-ui/react-icons'
-import { Box, Button, DropdownMenu, Flex, IconButton } from '@radix-ui/themes'
+import {
+  Box,
+  Button,
+  DropdownMenu,
+  Flex,
+  IconButton,
+  Tabs,
+} from '@radix-ui/themes'
 import type {
   ChatsMessage,
+  HistoryMessage,
   SidebarMessage,
   WorktreesMessage,
 } from '../shared/api'
 import { ChatList } from './ChatList'
+import { HistoryList } from './HistoryList'
 import { WorktreeList } from './WorktreeList'
 
 declare function acquireVsCodeApi(): {
@@ -14,6 +23,8 @@ declare function acquireVsCodeApi(): {
 }
 
 const vscode = acquireVsCodeApi()
+// Searches wait until typing pauses.
+const SEARCH_DELAY_MS = 150
 
 function TerminalIcon() {
   return (
@@ -37,15 +48,32 @@ function TerminalIcon() {
 export function App() {
   const [snapshot, setSnapshot] = useState<ChatsMessage>()
   const [worktrees, setWorktrees] = useState<WorktreesMessage>()
+  const [tab, setTab] = useState('live')
+  const [query, setQuery] = useState('')
+  const [history, setHistory] = useState<HistoryMessage>()
   useEffect(() => {
-    const receive = (event: MessageEvent<ChatsMessage | WorktreesMessage>) => {
+    const receive = (
+      event: MessageEvent<ChatsMessage | WorktreesMessage | HistoryMessage>,
+    ) => {
       if (event.data.type === 'chats') setSnapshot(event.data)
       if (event.data.type === 'worktrees') setWorktrees(event.data)
+      if (event.data.type === 'history') setHistory(event.data)
     }
     window.addEventListener('message', receive)
     vscode.postMessage({ type: 'ready' })
     return () => window.removeEventListener('message', receive)
   }, [])
+  useEffect(() => {
+    if (tab !== 'history') {
+      vscode.postMessage({ type: 'searchHistory', query: undefined })
+      return
+    }
+    const timer = setTimeout(
+      () => vscode.postMessage({ type: 'searchHistory', query }),
+      SEARCH_DELAY_MS,
+    )
+    return () => clearTimeout(timer)
+  }, [tab, query])
   const selectedProvider = snapshot?.providers.find(
     (provider) => provider.id === snapshot.selectedProviderId,
   )
@@ -116,11 +144,30 @@ export function App() {
           </DropdownMenu.Root>
         </Flex>
       </Box>
-      <ChatList
-        chats={snapshot?.chats}
-        selectedChatId={snapshot?.selectedChatId}
-        onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
-      />
+      <Tabs.Root value={tab} onValueChange={setTab}>
+        <Tabs.List size="1" className="chat-tabs">
+          <Tabs.Trigger value="live">Live</Tabs.Trigger>
+          <Tabs.Trigger value="history">History</Tabs.Trigger>
+        </Tabs.List>
+        <Tabs.Content value="live">
+          <ChatList
+            chats={snapshot?.chats}
+            selectedChatId={snapshot?.selectedChatId}
+            onOpenChat={(id) => vscode.postMessage({ type: 'openChat', id })}
+          />
+        </Tabs.Content>
+        <Tabs.Content value="history">
+          <HistoryList
+            query={query}
+            onQueryChange={setQuery}
+            history={history}
+            liveChats={snapshot?.chats}
+            onResume={({ providerId, sessionId }) =>
+              vscode.postMessage({ type: 'resumeChat', providerId, sessionId })
+            }
+          />
+        </Tabs.Content>
+      </Tabs.Root>
     </>
   )
 }

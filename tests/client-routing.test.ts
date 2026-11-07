@@ -20,6 +20,7 @@ import type {
 import { MAX_RPC_PAYLOAD_BYTES, RPC_TIMEOUT_MS } from '../src/shared/constants'
 import { createRpcPeer } from '../src/shared/rpc'
 import { TestChatProvider } from './fixtures/chat-provider'
+import { emptyChatHistory } from './fixtures/chat-history'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -62,7 +63,12 @@ async function fixture(t: TestContext) {
       },
     },
   )
-  const server = await startServer(config, vscode, [new TestChatProvider()])
+  const server = await startServer(
+    config,
+    vscode,
+    [new TestChatProvider()],
+    emptyChatHistory(),
+  )
   t.after(() => server.close())
   const url = `ws://127.0.0.1:${server.port}/rpc`
   const connect = async (methods: object) => {
@@ -181,6 +187,7 @@ test('descriptions are stored as previews and sent unchanged to extensions', asy
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
+    chatHistoryChanged() {},
   }
   const extension = await f.connect(methods)
   await waitFor(() => snapshots.length === 1)
@@ -268,6 +275,7 @@ test('chat snapshots reach both kinds while worktree and settings snapshots reac
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
+    chatHistoryChanged() {},
   }
   const desktop = await f.connect(desktopMethods)
   const extension = await f.connect(extensionMethods)

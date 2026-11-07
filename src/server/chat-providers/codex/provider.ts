@@ -1,15 +1,24 @@
-import { existsSync, createReadStream } from 'node:fs'
-import { access } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { createInterface } from 'node:readline'
-import { DatabaseSync } from 'node:sqlite'
+import {
+  DatabaseSync,
+  type SQLInputValue,
+  type SQLOutputValue,
+} from 'node:sqlite'
 import { executePowerShell } from 'powershell-utils'
 import { z } from 'zod'
 import { quotePosixArgument } from '../../../shared/shell'
 import type { Chat } from '../../../shared/api'
-import type { ChatProvider, ChatReport } from '../../chat-provider'
+import type {
+  ChatMessage,
+  ChatProvider,
+  ChatReport,
+  ChatSession,
+} from '../../chat-provider'
 import { HOOK_MARKER, installHooks } from '../hooks-file'
+import { readJsonLines } from '../utils'
 import { CODEX_CHAT_EVENTS, CodexChatReport, codexReportSchema } from './report'
 
 const metadataSchema = z.object({
@@ -19,6 +28,35 @@ const metadataSchema = z.object({
   first_user_message: z.string(),
   history_mode: z.enum(['legacy', 'paginated']),
 })
+const sessionSchema = metadataSchema.extend({
+  id: z.string(),
+  rollout_path: z.string(),
+  cwd: z.string(),
+})
+// Completed items carry the user prompts and agent messages as Codex displays them.
+const transcriptRecordSchema = z.object({
+  type: z.literal('event_msg'),
+  payload: z.object({
+    type: z.literal('item_completed'),
+    item: z.object({
+      type: z.enum(['UserMessage', 'AgentMessage']),
+      content: z.array(z.unknown()),
+    }),
+  }),
+})
+const textPartSchema = z.object({ text: z.string() })
+const indexEntrySchema = z.object({ id: z.string(), thread_name: z.string() })
+
+// The text of a user prompt or agent message; undefined for any other record.
+function messageText(record: unknown): string | undefined {
+  const result = transcriptRecordSchema.safeParse(record)
+  if (!result.success) return undefined
+  const texts = result.data.payload.item.content.flatMap((part) => {
+    const text = textPartSchema.safeParse(part)
+    return text.success ? [text.data.text] : []
+  })
+  return texts.length ? texts.join('\n') : undefined
+}
 
 export class CodexChatProvider implements ChatProvider {
   readonly id = 'codex'
@@ -93,22 +131,95 @@ export class CodexChatProvider implements ChatProvider {
     return new CodexChatReport(chat, report.hook_event_name)
   }
 
-  private async readTitle(sessionId: string): Promise<string> {
-    const path = join(this.directory, 'state_5.sqlite')
-    let row: z.infer<typeof metadataSchema> | undefined
-    if (existsSync(path)) {
-      const database = new DatabaseSync(path, { readOnly: true })
-      try {
-        const value = database
-          .prepare(
-            'SELECT title, name, preview, first_user_message, history_mode FROM threads WHERE id = ?',
-          )
-          .get(sessionId)
-        if (value) row = metadataSchema.parse(value)
-      } finally {
-        database.close()
+  async listSessions(): Promise<ChatSession[]> {
+    // Every unarchived thread a user started, including persisted exec runs.
+    const rows = z
+      .array(sessionSchema)
+      .parse(
+        this.queryThreads(
+          "SELECT id, rollout_path, cwd, title, name, preview, first_user_message, history_mode FROM threads WHERE archived = 0 AND thread_source = 'user'",
+        ),
+      )
+    let names: Promise<Map<string, string>> | undefined
+    const sessions = await Promise.all(
+      rows.map(async (row) => {
+        // A thread without its rollout cannot be resumed.
+        const rollout = await stat(row.rollout_path).catch(() => undefined)
+        if (!rollout) return []
+        return [
+          {
+            sessionId: row.id,
+            title: await this.title(
+              row,
+              row.id,
+              () => (names ??= this.indexedNames()),
+            ),
+            cwd: row.cwd,
+            modifiedAt: Math.trunc(rollout.mtimeMs),
+          },
+        ]
+      }),
+    )
+    return sessions.flat()
+  }
+
+  async *readMessages(
+    sessionIds: readonly string[],
+  ): AsyncGenerator<ChatMessage> {
+    const rollouts = new Map(
+      z
+        .array(z.object({ id: z.string(), rollout_path: z.string() }))
+        .parse(this.queryThreads('SELECT id, rollout_path FROM threads'))
+        .map((row) => [row.id, row.rollout_path]),
+    )
+    for (const sessionId of sessionIds) {
+      const path = rollouts.get(sessionId)
+      if (!path) continue
+      for await (const record of readJsonLines(path)) {
+        const text = messageText(record)
+        if (text !== undefined) yield { sessionId, text }
       }
     }
+  }
+
+  resumeCommand(command: string, sessionId: string): string {
+    // Codex can otherwise return to the session's recorded directory (tui.resume_cwd).
+    return `${command} resume --cd . ${sessionId}`
+  }
+
+  // Rows of Codex's thread metadata; none before Codex creates its database.
+  private queryThreads(
+    sql: string,
+    ...parameters: SQLInputValue[]
+  ): Record<string, SQLOutputValue>[] {
+    const path = join(this.directory, 'state_5.sqlite')
+    if (!existsSync(path)) return []
+    const database = new DatabaseSync(path, { readOnly: true })
+    try {
+      return database.prepare(sql).all(...parameters)
+    } finally {
+      database.close()
+    }
+  }
+
+  private async readTitle(sessionId: string): Promise<string> {
+    const [row] = this.queryThreads(
+      'SELECT title, name, preview, first_user_message, history_mode FROM threads WHERE id = ?',
+      sessionId,
+    )
+    return this.title(
+      row === undefined ? undefined : metadataSchema.parse(row),
+      sessionId,
+      () => this.indexedNames(),
+    )
+  }
+
+  // Matches the resume picker's saved-name / preview / empty-session ordering.
+  private async title(
+    row: z.infer<typeof metadataSchema> | undefined,
+    sessionId: string,
+    readNames: () => Promise<Map<string, string>>,
+  ): Promise<string> {
     const description = (row?.preview || row?.first_user_message || '').trim()
     let name: string | undefined
     if (row?.history_mode === 'paginated') {
@@ -118,34 +229,21 @@ export class CodexChatProvider implements ChatProvider {
       name =
         title && title !== row?.first_user_message.trim()
           ? title
-          : await this.indexedName(sessionId)
+          : (await readNames()).get(sessionId)
     }
-    // Match the resume picker's saved-name / preview / empty-session ordering.
     return name || description || '(no message yet)'
   }
 
-  private async indexedName(sessionId: string): Promise<string | undefined> {
-    const path = join(this.directory, 'session_index.jsonl')
-    if (!existsSync(path)) return undefined
-    const input = createReadStream(path, { encoding: 'utf8' })
-    const lines = createInterface({ input, crlfDelay: Infinity })
-    let name: string | undefined
-    try {
-      for await (const line of lines) {
-        try {
-          const entry = z
-            .object({ id: z.string(), thread_name: z.string() })
-            .parse(JSON.parse(line))
-          if (entry.id === sessionId && entry.thread_name.trim())
-            name = entry.thread_name.trim()
-        } catch {
-          // An append in progress may leave an incomplete final line.
-        }
-      }
-    } finally {
-      lines.close()
-      input.destroy()
+  // The latest non-empty saved name of each session in the legacy name index.
+  private async indexedNames(): Promise<Map<string, string>> {
+    const names = new Map<string, string>()
+    for await (const record of readJsonLines(
+      join(this.directory, 'session_index.jsonl'),
+    )) {
+      const entry = indexEntrySchema.safeParse(record)
+      if (entry.success && entry.data.thread_name.trim())
+        names.set(entry.data.id, entry.data.thread_name.trim())
     }
-    return name
+    return names
   }
 }

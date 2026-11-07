@@ -16,6 +16,7 @@ import type {
 } from '../src/shared/api'
 import { connectRpc } from '../src/shared/rpc-client'
 import { RPC_PATH } from '../src/shared/constants'
+import { emptyChatHistory } from './fixtures/chat-history'
 
 async function waitFor(predicate: () => boolean) {
   const deadline = Date.now() + 5000
@@ -100,7 +101,7 @@ test(
         },
       },
     )
-    const server = await startServer(config, vscode, [])
+    const server = await startServer(config, vscode, [], emptyChatHistory())
     t.after(() => server.close())
     const connect = () => {
       let latest: VscodeServerStatus[] = []
@@ -273,7 +274,10 @@ test('runtime preparation failure rejects startup and closes the manager', async
       },
     },
   )
-  await assert.rejects(startServer(config, vscode, []), /Download unavailable/)
+  await assert.rejects(
+    startServer(config, vscode, [], emptyChatHistory()),
+    /Download unavailable/,
+  )
   assert.equal(attempts, 1)
   assert.throws(() => vscode.create(directory, () => {}), /closed/)
 })

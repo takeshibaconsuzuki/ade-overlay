@@ -9,7 +9,12 @@ import WebSocket from 'ws'
 import { stringify } from 'yaml'
 import { startServer } from '../src/server/application'
 import { CodexChatProvider } from '../src/server/chat-providers/codex/provider'
-import type { ChatProvider, ChatReport } from '../src/server/chat-provider'
+import type {
+  ChatMessage,
+  ChatProvider,
+  ChatReport,
+  ChatSession,
+} from '../src/server/chat-provider'
 import { createCodexMetadata } from './fixtures/codex-metadata'
 import { ProcessVscodeServerFactory } from '../src/server/vscode-server'
 import type {
@@ -19,6 +24,11 @@ import type {
 } from '../src/shared/api'
 import { createRpcPeer } from '../src/shared/rpc'
 import { TestChatProvider } from './fixtures/chat-provider'
+import {
+  emptyChatHistory,
+  LocalChatHistoryIndexer,
+} from './fixtures/chat-history'
+import { ChatHistory } from '../src/server/chat-history'
 
 test('chat commands are isolated by provider and read from the latest configuration', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'ade-chat-commands-'))
@@ -41,16 +51,19 @@ test('chat commands are isolated by provider and read from the latest configurat
       },
     },
   )
-  const server = await startServer(config, vscode, [
-    new TestChatProvider('codex'),
-    new TestChatProvider('example'),
-  ])
+  const server = await startServer(
+    config,
+    vscode,
+    [new TestChatProvider('codex'), new TestChatProvider('example')],
+    emptyChatHistory(),
+  )
   t.after(() => server.close())
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/rpc`)
   t.after(() => socket.terminate())
   const rpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(socket, {
     getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
     chatsChanged() {},
+    chatHistoryChanged() {},
   })
   await once(socket, 'open')
   assert.deepEqual(await rpc.getChatProviders(), [
@@ -59,6 +72,13 @@ test('chat commands are isolated by provider and read from the latest configurat
   ])
   assert.equal(await rpc.getChatCommand('codex'), 'codex')
   assert.equal(await rpc.getChatCommand('example'), 'example')
+  const sessionId = '01a1b36c-52c9-7c83-81f4-4bd114417b85'
+  assert.equal(
+    await rpc.getChatCommand('codex', sessionId),
+    `codex --resume ${sessionId}`,
+  )
+  // Session IDs are restricted because they become part of a shell command line.
+  await assert.rejects(rpc.getChatCommand('codex', `${sessionId}; exit`))
   const commands = {
     codex: { command: 'codex --model custom-model' },
     example: { command: 'example --flag "two words"' },
@@ -130,9 +150,12 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
       'INSERT INTO threads (id, title, first_user_message, preview) VALUES (?, ?, ?, ?)',
     )
     .run('first', 'Saved Codex name', 'Original request', 'Stored preview')
-  const server = await startServer(config, vscode, [
-    new CodexChatProvider([process.execPath, entry], directory),
-  ])
+  const server = await startServer(
+    config,
+    vscode,
+    [new CodexChatProvider([process.execPath, entry], directory)],
+    emptyChatHistory(),
+  )
   t.after(() => server.close())
   const url = `ws://127.0.0.1:${server.port}/rpc`
   const endpoint = `http://127.0.0.1:${server.port}/chats/report/codex`
@@ -153,6 +176,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
     chatsChanged: (snapshot) => {
       snapshots.push(snapshot)
     },
+    chatHistoryChanged() {},
   })
   t.after(() => socket.terminate())
   await once(socket, 'open')
@@ -187,6 +211,7 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
       chatsChanged: (snapshot) => {
         secondSnapshots.push(snapshot)
       },
+      chatHistoryChanged() {},
     },
   )
   t.after(() => secondSocket.terminate())
@@ -284,6 +309,92 @@ test('startup installs hooks and accepts raw HTTP reports from any worktree', as
   await assert.rejects(post(event))
 })
 
+test('extensions search chat history and hear when updates finish', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ade-chat-history-rpc-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const config = join(directory, 'server.yaml')
+  await writeFile(
+    config,
+    stringify({
+      host: '127.0.0.1',
+      port: 0,
+      vscode: { settingsFile: join(directory, 'settings.json') },
+    }),
+  )
+  const vscode = new ProcessVscodeServerFactory(
+    {
+      dataDirectory: directory,
+      prepare: async () => ({ node: '', entrypoint: '' }),
+    },
+    {
+      launch: async () => {
+        throw new Error('Unexpected launch')
+      },
+    },
+  )
+  const provider = new TestChatProvider()
+  const server = await startServer(
+    config,
+    vscode,
+    [provider],
+    new ChatHistory(
+      join(directory, 'history.sqlite'),
+      new LocalChatHistoryIndexer(join(directory, 'history.sqlite'), [
+        provider,
+      ]),
+    ),
+  )
+  t.after(() => server.close())
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/rpc`)
+  t.after(() => socket.terminate())
+  let changes = 0
+  const rpc = createRpcPeer<ServerMethods, ExtensionClientMethods>(socket, {
+    getClientInfo: () => ({ kind: 'extension', name: 'test', version: '1' }),
+    chatsChanged() {},
+    chatHistoryChanged() {
+      changes++
+    },
+  })
+  await once(socket, 'open')
+  // The startup update finds no sessions.
+  const deadline = Date.now() + 5000
+  while ((await rpc.searchChatHistory('')).indexing) {
+    assert.ok(Date.now() < deadline, 'Expected the startup update to finish')
+    await delay(25)
+  }
+  provider.sessions = [
+    { sessionId: 'one', title: 'One', cwd: directory, modifiedAt: 1 },
+  ]
+  provider.messages.set('one', ['Find the bug'])
+  const now = Date.now()
+  // A search once the index is stale starts an update.
+  const clock = t.mock.method(Date, 'now', () => now + 10_000)
+  const before = changes
+  assert.deepEqual(await rpc.searchChatHistory('bug'), {
+    chats: [],
+    indexing: true,
+  })
+  clock.mock.restore()
+  await waitFor(() => changes > before)
+  const { chats } = await rpc.searchChatHistory('bug')
+  assert.deepEqual(
+    chats.map(({ providerId, sessionId, title, excerpt }) => ({
+      providerId,
+      sessionId,
+      title,
+      excerpt,
+    })),
+    [
+      {
+        providerId: 'test',
+        sessionId: 'one',
+        title: 'One',
+        excerpt: 'Find the bug',
+      },
+    ],
+  )
+})
+
 class FailingProvider implements ChatProvider {
   readonly id = 'failing'
   readonly name = 'Failing'
@@ -293,6 +404,13 @@ class FailingProvider implements ChatProvider {
   }
   async install(): Promise<void> {
     throw new Error('Hook installation failed')
+  }
+  async listSessions(): Promise<ChatSession[]> {
+    return []
+  }
+  async *readMessages(): AsyncGenerator<ChatMessage> {}
+  resumeCommand(command: string): string {
+    return command
   }
 }
 
@@ -321,7 +439,7 @@ test('hook installation failure rolls back server startup', async (t) => {
   )
   const hooks = new FailingProvider()
   await assert.rejects(
-    startServer(config, vscode, [hooks]),
+    startServer(config, vscode, [hooks], emptyChatHistory()),
     /Hook installation failed/,
   )
 })

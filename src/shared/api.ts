@@ -46,6 +46,26 @@ export interface ChatProviderInfo {
   name: string
 }
 
+// A session recorded in a provider transcript, whether or not it is live.
+export interface ChatHistoryEntry {
+  providerId: string
+  sessionId: string
+  title: string
+  // The agent's last recorded working directory, which may no longer exist.
+  cwd: string
+  // Unix milliseconds of the transcript's last modification seen by the index.
+  modifiedAt: number
+  // A bounded, single-line part of the latest matching message, or of the latest
+  // message when there is no query.
+  excerpt: string
+}
+
+export interface ChatHistoryResults {
+  chats: ChatHistoryEntry[]
+  // An index update is running; chatHistoryChanged follows when it finishes.
+  indexing: boolean
+}
+
 export interface Worktree extends WorktreeInfo {
   mainWorktreePath: string
   // Remains true through server termination and Git removal. Success removes the
@@ -74,7 +94,14 @@ export interface ServerMethods {
   getChats(): Record<string, Chat>
   getChatProviders(): ChatProviderInfo[]
   // Resolves the current configured command or provider default; unknown providers reject.
-  getChatCommand(providerId: string): string
+  // A session ID, which must be a UUID, extends the command to resume that session.
+  getChatCommand(providerId: string, resumeSessionId?: string): string
+  // Sessions the providers list for resumption, from every directory, most recently
+  // modified first and limited in number. Each whitespace-separated term of a
+  // non-empty query must appear, ignoring ASCII case, in one user prompt or agent message;
+  // in a term, % matches any run of characters and _ any one character. Searching a
+  // stale index also starts an update.
+  searchChatHistory(query: string): ChatHistoryResults
   getServerInfo(): { name: string }
   refreshWorktrees(): Promise<void>
   // Uncommitted changes, including untracked files, that deletion would discard, as Git
@@ -130,4 +157,6 @@ export interface ExtensionClientMethods extends ClientMethods {
   // Complete live registry, sent after identification on every connection and change.
   // Descriptions are truncated previews; other fields retain their reported values.
   chatsChanged(chats: Record<string, Chat>): void
+  // An index update finished; searches return current results again.
+  chatHistoryChanged(): void
 }

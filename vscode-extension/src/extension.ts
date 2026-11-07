@@ -3,6 +3,7 @@ import { relative } from 'node:path'
 import * as vscode from 'vscode'
 import type {
   Chat,
+  ChatHistoryResults,
   ChatProviderInfo,
   ExtensionClientMethods,
   ServerMethods,
@@ -10,7 +11,11 @@ import type {
 import { DEFAULT_SERVER_URL } from '../../src/shared/constants'
 import type { RunningWorktree } from '../../src/shared/editor-rpc'
 import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
-import type { ChatsMessage, WorktreesMessage } from '../shared/api'
+import type {
+  ChatsMessage,
+  HistoryMessage,
+  WorktreesMessage,
+} from '../shared/api'
 import { ChatTerminals } from './chat-terminals'
 import { connectDesktop } from './desktop'
 import { registerDownload } from './download'
@@ -68,10 +73,12 @@ export function activate(context: vscode.ExtensionContext) {
         version: context.extension.packageJSON.version,
       }),
       chatsChanged: (chats) => sidebar.setChats(chats),
+      chatHistoryChanged: () => sidebar.searchHistory(),
     },
     {
       onStateChange: (state) => {
         const request = ++providerRequest
+        sidebar.searchHistory()
         if (state !== 'connected') {
           sidebar.setChats(undefined)
           sidebar.setProviders([])
@@ -106,6 +113,9 @@ class SidebarViewProvider
   // Selection survives sidebar reloads and temporary disconnects, but not extension restarts.
   private selectedProviderId: string | undefined
   private worktrees: RunningWorktree[] | undefined
+  // The page's history query; undefined while its history tab is not shown.
+  private historyQuery: string | undefined
+  private historyRequest = 0
   private readonly terminalChanges: vscode.Disposable
   private readonly configurationChanges: vscode.Disposable
 
@@ -182,6 +192,26 @@ class SidebarViewProvider
     void this.view?.webview.postMessage(message)
   }
 
+  // Sends results for the current history query; a later search supersedes earlier ones.
+  searchHistory(): void {
+    const request = ++this.historyRequest
+    const query = this.historyQuery
+    if (query === undefined) return
+    const send = (results: ChatHistoryResults | undefined) => {
+      if (request !== this.historyRequest) return
+      const message: HistoryMessage = { type: 'history', query, results }
+      void this.view?.webview.postMessage(message)
+    }
+    if (client?.state !== 'connected') {
+      send(undefined)
+      return
+    }
+    client.rpc.searchChatHistory(query).then(send, (error: unknown) => {
+      console.error('Unable to search chat history', error)
+      send(undefined)
+    })
+  }
+
   dispose(): void {
     this.terminalChanges.dispose()
     this.configurationChanges.dispose()
@@ -192,6 +222,8 @@ class SidebarViewProvider
     // Each page load reports ready and receives the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'ready') {
+        // A new page starts without its history tab shown.
+        this.historyQuery = undefined
         this.sendSnapshot()
         this.sendWorktrees()
       }
@@ -202,6 +234,19 @@ class SidebarViewProvider
         void this.startChat(message.providerId)
       if (message?.type === 'openChat' && typeof message.id === 'string')
         void this.openChat(message.id)
+      if (
+        message?.type === 'resumeChat' &&
+        typeof message.providerId === 'string' &&
+        typeof message.sessionId === 'string'
+      )
+        void this.resumeChat(message.providerId, message.sessionId)
+      if (
+        message?.type === 'searchHistory' &&
+        (typeof message.query === 'string' || message.query === undefined)
+      ) {
+        this.historyQuery = message.query
+        this.searchHistory()
+      }
       if (message?.type === 'openTerminal') this.openTerminal()
       if (message?.type === 'openWorktree' && typeof message.path === 'string')
         void this.openWorktree(message.path)
@@ -255,6 +300,28 @@ class SidebarViewProvider
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Unable to start chat: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
+  private async resumeChat(
+    providerId: string,
+    sessionId: string,
+  ): Promise<void> {
+    const id = `${providerId}:${sessionId}`
+    // A live session continues in its terminal rather than in a second process.
+    if (this.chats?.[id]) return this.openChat(id)
+    try {
+      if (!client) throw new Error('ADE server is not connected')
+      const provider = this.providers.find(
+        (provider) => provider.id === providerId,
+      )
+      if (!provider) throw new Error('The chat provider is unavailable')
+      const command = await client.rpc.getChatCommand(provider.id, sessionId)
+      await this.terminals.start(provider.id, command)
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Unable to resume chat: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

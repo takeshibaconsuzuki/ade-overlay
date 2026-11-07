@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { after, test } from 'node:test'
 import { ClaudeChatProvider } from '../src/server/chat-providers/claude/provider'
 
@@ -26,6 +34,7 @@ const prompt = (content: string) => ({
   uuid: randomUUID(),
   timestamp: '2026-01-01T00:00:00.000Z',
   isSidechain: false,
+  promptSource: 'typed',
 })
 
 test('Claude Code titles prefer saved and generated titles over prompts', async () => {
@@ -178,4 +187,97 @@ test('Claude Code startup yields to a recent turn and compaction keeps the statu
   assert.deepEqual(late.transformChat?.(working), late.chat)
   const stop = await provider.readReport({ ...raw, hook_event_name: 'Stop' })
   assert.deepEqual(stop.transformChat?.(working), stop.chat)
+})
+
+test('Claude Code history lists interactive and headless sessions', async () => {
+  const provider = new ClaudeChatProvider(['unused'], directory)
+  const [interactive, headless] = [randomUUID(), randomUUID()]
+  await writeTranscript(interactive, [
+    { ...prompt('Find the bug'), cwd: '/work/repo', entrypoint: 'cli' },
+    { type: 'custom-title', customTitle: 'Bug hunt' },
+  ])
+  await writeTranscript(headless, [
+    {
+      ...prompt('Judge this change'),
+      cwd: '/work/repo',
+      entrypoint: 'sdk-cli',
+      promptSource: 'sdk',
+    },
+  ])
+  const modified = new Date('2026-02-03T04:05:06.000Z')
+  await utimes(join(projects, `${interactive}.jsonl`), modified, modified)
+  const sessions = await provider.listSessions()
+  assert.deepEqual(
+    sessions.find((session) => session.sessionId === interactive),
+    {
+      sessionId: interactive,
+      title: 'Bug hunt',
+      cwd: '/work/repo',
+      modifiedAt: modified.getTime(),
+    },
+  )
+  assert.ok(sessions.some((session) => session.sessionId === headless))
+  assert.deepEqual(
+    await Readable.from(provider.readMessages([headless])).toArray(),
+    [{ sessionId: headless, text: 'Judge this change' }],
+  )
+  assert.equal(
+    provider.resumeCommand('claude --model opus', interactive),
+    `claude --model opus --resume ${interactive}`,
+  )
+})
+
+test('Claude Code history reads prompts and replies but not generated records', async () => {
+  const provider = new ClaudeChatProvider(['unused'], directory)
+  const [first, second] = [randomUUID(), randomUUID()]
+  const user = (content: unknown, fields: object = {}) => ({
+    ...prompt(''),
+    message: { role: 'user', content },
+    ...fields,
+  })
+  const generated = { promptSource: undefined }
+  await writeTranscript(first, [
+    user('Plain prompt'),
+    // Prompts may start like generated text.
+    user('<div> is misaligned', { promptSource: 'queued' }),
+    user([
+      { type: 'text', text: 'Look at' },
+      { type: 'image', source: {} },
+      { type: 'text', text: 'this' },
+    ]),
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Hidden' },
+          { type: 'text', text: 'Reply' },
+          { type: 'tool_use', name: 'Bash', input: {} },
+        ],
+      },
+    },
+    user([{ type: 'tool_result', content: 'output' }], generated),
+    user('Caveat', { ...generated, isMeta: true }),
+    user('Summary of earlier turns', { ...generated, isCompactSummary: true }),
+    user('/compact', generated),
+    user('<bash-input>git status</bash-input>', generated),
+    user([{ type: 'text', text: '[Request interrupted by user]' }], generated),
+    user('<task-notification>\n<task-id>1</task-id>', {
+      promptSource: 'system',
+    }),
+    { type: 'ai-title', aiTitle: 'Title' },
+  ])
+  await writeTranscript(second, [user('Second session')])
+  assert.deepEqual(
+    await Readable.from(
+      provider.readMessages([first, randomUUID(), second]),
+    ).toArray(),
+    [
+      { sessionId: first, text: 'Plain prompt' },
+      { sessionId: first, text: '<div> is misaligned' },
+      { sessionId: first, text: 'Look at\nthis' },
+      { sessionId: first, text: 'Reply' },
+      { sessionId: second, text: 'Second session' },
+    ],
+  )
 })

@@ -15,6 +15,8 @@ import { NodeVscodeLauncher } from '../../src/server/vscode-process'
 import { DownloadedVscodeRuntime } from '../../src/server/vscode-runtime'
 import { FetchHttpClient } from '../../src/shared/http-client'
 import type { ChatProvider } from '../../src/server/chat-provider'
+import { ChatHistory } from '../../src/server/chat-history'
+import { LocalChatHistoryIndexer } from '../fixtures/chat-history'
 import type { ServerOptions } from '../../src/server/options'
 
 // Every case uses the pinned runtime with isolated host files and server state.
@@ -67,6 +69,13 @@ export async function startIntegrationServer(
       new NodeVscodeLauncher(),
     ),
     providers,
+    new ChatHistory(
+      join(directory, 'chat-history.sqlite'),
+      new LocalChatHistoryIndexer(
+        join(directory, 'chat-history.sqlite'),
+        providers,
+      ),
+    ),
   )
 }
 

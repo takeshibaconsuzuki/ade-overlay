@@ -1,5 +1,6 @@
 import { basename } from 'node:path'
 import type { BirpcReturn } from 'birpc'
+import { z } from 'zod'
 import type {
   Chat,
   ClientMethods,
@@ -22,6 +23,7 @@ import { readDisabledExtensions } from './extension-enablement'
 import { NodeProcessProbe } from './process-probe'
 import { UnknownChatProviderError, type ChatProvider } from './chat-provider'
 import { chatRoutes } from './chat-routes'
+import type { ChatHistory } from './chat-history'
 
 const log = logger.child({ component: 'server' })
 
@@ -35,6 +37,8 @@ export async function startServer(
   configPath: string,
   vscode: VscodeServerFactory,
   providers: ChatProvider[],
+  // Owned by the server from here on, including when startup fails.
+  history: ChatHistory,
 ): Promise<ServerApplication> {
   const config = await createConfigStore(configPath)
   const options = config.snapshot
@@ -122,6 +126,7 @@ export async function startServer(
       await Promise.all([
         config.close(),
         settings?.close(),
+        history.close(),
         worktrees.close(),
         vscode.close(),
         server?.close(),
@@ -130,6 +135,14 @@ export async function startServer(
     return closing
   }
   try {
+    history.setOnRefreshedListener(() => {
+      for (const client of extensions) {
+        void client.chatHistoryChanged.asEvent().catch((error: unknown) => {
+          if (!closing)
+            log.warn({ err: error }, 'Failed to send chat history change')
+        })
+      }
+    })
     settings = await VscodeSettingsStore.open(options.vscode.settingsFile)
     settings.setOnChangedListener((content) => {
       for (const client of desktops) sendSettings(client, content)
@@ -140,16 +153,20 @@ export async function startServer(
       {
         getChats: () => chats.snapshot,
         getChatProviders: () => providers.map(({ id, name }) => ({ id, name })),
-        getChatCommand: (providerId) => {
+        getChatCommand: (providerId, resumeSessionId) => {
           const provider = providers.find(
             (provider) => provider.id === providerId,
           )
           if (!provider) throw new UnknownChatProviderError(providerId)
-          return (
+          const command =
             config.snapshot.chatProviders[providerId]?.command ??
             provider.defaultCommand
-          )
+          // The session ID becomes part of a shell command line.
+          return resumeSessionId === undefined
+            ? command
+            : provider.resumeCommand(command, z.uuid().parse(resumeSessionId))
         },
+        searchChatHistory: (query) => history.search(query),
         getServerInfo: () => ({ name: APP_NAME }),
         getDisabledExtensions: async () => {
           try {
@@ -225,6 +242,7 @@ export async function startServer(
       { providerIds: providers.map((provider) => provider.id) },
       'Chat hooks installed',
     )
+    void history.refresh()
   } catch (error) {
     await close()
     throw error

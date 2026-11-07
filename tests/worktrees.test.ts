@@ -24,6 +24,7 @@ import type {
 } from '../src/shared/api'
 import { RPC_PATH } from '../src/shared/constants'
 import { connectRpc } from '../src/shared/rpc-client'
+import { emptyChatHistory } from './fixtures/chat-history'
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ade-worktrees-'))
@@ -134,6 +135,7 @@ test(
         },
       ),
       [],
+      emptyChatHistory(),
     )
     t.after(() => server.close())
     const connect = () => {

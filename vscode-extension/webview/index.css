@@ -172,3 +172,7 @@ body {
 .chat-description .chat-skeleton {
   width: 70%;
 }
+
+.chat-tabs {
+  padding-inline: var(--space-2);
+}
