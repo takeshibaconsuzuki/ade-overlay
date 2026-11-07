@@ -8,8 +8,9 @@ import type {
   ServerMethods,
 } from '../../src/shared/api'
 import { DEFAULT_SERVER_URL } from '../../src/shared/constants'
+import type { RunningWorktree } from '../../src/shared/editor-rpc'
 import { connectRpc, type RpcClient } from '../../src/shared/rpc-client'
-import type { ChatsMessage } from '../shared/api'
+import type { ChatsMessage, WorktreesMessage } from '../shared/api'
 import { ChatTerminals } from './chat-terminals'
 import { connectDesktop } from './desktop'
 import { registerDownload } from './download'
@@ -52,6 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
   desktop = connectDesktop({
     focusChatTerminal: (id) => terminals.focus(id),
     prepareChatPaste: (processId) => terminals.preparePaste(processId),
+    worktreesChanged: (worktrees) => sidebar.setWorktrees(worktrees),
   })
   let providerRequest = 0
   client = connectRpc<ServerMethods, ExtensionClientMethods>(
@@ -100,7 +102,9 @@ class SidebarViewProvider
   private providers: ChatProviderInfo[] = []
   // Selection survives sidebar reloads and temporary disconnects, but not extension restarts.
   private selectedProviderId: string | undefined
+  private worktrees: RunningWorktree[] | undefined
   private readonly terminalChanges: vscode.Disposable
+  private readonly configurationChanges: vscode.Disposable
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -109,6 +113,32 @@ class SidebarViewProvider
     this.terminalChanges = terminals.onDidChangeChatFocus(() =>
       this.sendSnapshot(),
     )
+    this.configurationChanges = vscode.workspace.onDidChangeConfiguration(
+      (event) => {
+        if (event.affectsConfiguration('ade.sidebar.worktreeCount'))
+          this.sendWorktrees()
+      },
+    )
+  }
+
+  setWorktrees(worktrees: RunningWorktree[]): void {
+    this.worktrees = worktrees
+    this.sendWorktrees()
+  }
+
+  private sendWorktrees(): void {
+    const count =
+      vscode.workspace
+        .getConfiguration('ade.sidebar')
+        .get<number>('worktreeCount') ?? 0
+    const message: WorktreesMessage = {
+      type: 'worktrees',
+      // The VS Code server identifies this window's worktree as the desktop does.
+      worktrees: this.worktrees
+        ?.filter((worktree) => worktree.path !== process.env.ADE_WORKTREE_PATH)
+        .slice(0, Math.max(0, count)),
+    }
+    void this.view?.webview.postMessage(message)
   }
 
   setChats(chats: Record<string, Chat> | undefined): void {
@@ -151,13 +181,17 @@ class SidebarViewProvider
 
   dispose(): void {
     this.terminalChanges.dispose()
+    this.configurationChanges.dispose()
   }
 
   resolveWebviewView(view: vscode.WebviewView) {
     this.view = view
     // Webview scripts restart after being hidden; each ready message gets the latest snapshot.
     const messages = view.webview.onDidReceiveMessage((message) => {
-      if (message?.type === 'ready') this.sendSnapshot()
+      if (message?.type === 'ready') {
+        this.sendSnapshot()
+        this.sendWorktrees()
+      }
       if (
         message?.type === 'startChat' &&
         typeof message.providerId === 'string'
@@ -166,6 +200,8 @@ class SidebarViewProvider
       if (message?.type === 'openChat' && typeof message.id === 'string')
         void this.openChat(message.id)
       if (message?.type === 'openTerminal') this.openTerminal()
+      if (message?.type === 'openWorktree' && typeof message.path === 'string')
+        void this.openWorktree(message.path)
     })
     view.onDidDispose(() => {
       messages.dispose()
@@ -237,6 +273,17 @@ class SidebarViewProvider
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Unable to open chat: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
+  private async openWorktree(path: string): Promise<void> {
+    try {
+      if (!desktop) throw new Error('ADE desktop is not connected')
+      await desktop.rpc.openWorktree(path)
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `Unable to open worktree: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

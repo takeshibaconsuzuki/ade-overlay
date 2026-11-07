@@ -1,4 +1,9 @@
-import type { ChatTerminalLaunch, ExtensionIdentifier } from './api'
+import type {
+  ChatTerminalLaunch,
+  ExtensionIdentifier,
+  VscodeServerStatus,
+  WorktreeInfo,
+} from './api'
 import type { ClipboardPart, TerminalPastePart } from './clipboard'
 
 export const DESKTOP_RPC_COMMAND = 'ade.desktopRpc'
@@ -19,14 +24,27 @@ export interface DesktopClipboardMethods {
   readClipboard(): Promise<ClipboardPart[]>
 }
 
+export interface DesktopWorktreeMethods {
+  // Selects the worktree in the editor window and ensures its server is running, like the picker.
+  openWorktree(path: string): Promise<void>
+}
+
 export interface DesktopExtensionMethods
-  extends DesktopChatMethods, DesktopClipboardMethods {}
+  extends DesktopChatMethods, DesktopClipboardMethods, DesktopWorktreeMethods {}
+
+// A worktree whose VS Code Server is not stopped.
+export interface RunningWorktree extends WorktreeInfo {
+  state: Exclude<VscodeServerStatus['state'], 'stopped'>
+  deleting: boolean
+}
 
 export interface ExtensionMethods {
   focusChatTerminal(id: string): boolean
   // Uses the chat terminal's provider to convert the desktop clipboard into separate, ordered pastes.
   // undefined means this process has no chat identity; retain native paste.
   prepareChatPaste(processId: number): Promise<TerminalPastePart[] | undefined>
+  // Complete list in picker order, sent on connection and whenever worktrees or their order change.
+  worktreesChanged(worktrees: RunningWorktree[]): void
 }
 
 export interface DesktopWorkbenchMethods {

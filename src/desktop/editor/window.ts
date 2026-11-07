@@ -3,7 +3,10 @@ import { join } from 'node:path'
 import { EDITOR_STATE_CHANGED, type EditorState } from './api'
 import type { EditorHost, EditorPage } from './manager'
 import type { ExtensionIdentifier } from '../../shared/api'
-import type { DesktopExtensionMethods } from '../../shared/editor-rpc'
+import type {
+  DesktopExtensionMethods,
+  RunningWorktree,
+} from '../../shared/editor-rpc'
 import { ElectronEditorPage } from './vscode/page'
 import type { VscodeSettingsServer } from './vscode/vscode-settings-sync'
 import { isVscodeSettingsDocument } from '../../shared/vscode-utils'
@@ -14,6 +17,7 @@ export class ElectronEditorWindow implements EditorHost {
   private current: ElectronEditorPage | undefined
   private state: EditorState = { title: 'VS Code', canRetry: false }
   private vscodeSettingsContent: string | null = null
+  private worktrees: RunningWorktree[] = []
 
   constructor(
     private readonly vscodeSettingsServer: VscodeSettingsServer,
@@ -27,6 +31,12 @@ export class ElectronEditorWindow implements EditorHost {
     if (content !== null && !isVscodeSettingsDocument(content)) return
     this.vscodeSettingsContent = content
     for (const page of this.pages) page.vscodeSettingsSync.receive(content)
+  }
+
+  // Shares the picker's running worktrees with every page's extension.
+  receiveWorktrees(worktrees: RunningWorktree[]): void {
+    this.worktrees = worktrees
+    for (const page of this.pages) page.receiveWorktrees(worktrees)
   }
 
   // Identifies IPC from the editor's own renderer, excluding embedded VS Code pages.
@@ -96,6 +106,7 @@ export class ElectronEditorWindow implements EditorHost {
       this.desktop,
     )
     page.vscodeSettingsSync.receive(this.vscodeSettingsContent)
+    page.receiveWorktrees(this.worktrees)
     this.pages.add(page)
     this.window!.contentView.addChildView(page.view)
     page.view.webContents.once('destroyed', () => {

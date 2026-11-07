@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { executePowerShell, powerShellPath } from 'powershell-utils'
 import * as vscode from 'vscode'
-import type { DesktopExtensionMethods } from '../../src/shared/editor-rpc'
+import type {
+  DesktopChatMethods,
+  DesktopClipboardMethods,
+} from '../../src/shared/editor-rpc'
 import type { TerminalPastePart } from '../../src/shared/clipboard'
 import type { TerminalChatProvider } from './terminal-chat-provider'
 import { TerminalIdentities } from './terminal-identities'
@@ -19,7 +22,7 @@ export class ChatTerminals {
 
   constructor(
     state: vscode.Memento,
-    private readonly desktop: DesktopExtensionMethods,
+    private readonly desktop: DesktopChatMethods & DesktopClipboardMethods,
     providers: readonly TerminalChatProvider[],
   ) {
     this.providers = new Map(

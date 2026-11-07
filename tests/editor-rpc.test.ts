@@ -10,13 +10,19 @@ import type {
   EditorMessage,
   ExtensionMethods,
   ExtensionMessage,
+  RunningWorktree,
   WorkbenchMethods,
 } from '../src/shared/editor-rpc'
 
-function fixture(t: TestContext, name: string) {
+function fixture(
+  t: TestContext,
+  name: string,
+  onExtensionConnected?: ConstructorParameters<typeof EditorConnection>[3],
+) {
   let receiveWorkbench: (message: string) => void = () => {}
   let receiveExtension: (call: ExtensionMessage) => void = () => {}
   const received: string[] = []
+  const listed: { session: string; worktrees: RunningWorktree[] }[] = []
   const connection = new EditorConnection(
     {
       post(call: EditorMessage) {
@@ -45,7 +51,11 @@ function fixture(t: TestContext, name: string) {
       readClipboard: async () => [
         { type: 'text', data: new TextEncoder().encode(name) },
       ],
+      openWorktree: async (path) => {
+        received.push(path)
+      },
     },
+    onExtensionConnected,
   )
   const workbench = createMessageRpc<DesktopWorkbenchMethods, WorkbenchMethods>(
     {
@@ -65,11 +75,8 @@ function fixture(t: TestContext, name: string) {
       persistSession: async () => {},
     },
   )
+  // The extension receives its own session's messages before it connects.
   function connectExtension(session: string) {
-    connection.receive({
-      target: 'extension',
-      call: { type: 'connect', session },
-    })
     const extension = createMessageRpc<
       DesktopExtensionMethods,
       ExtensionMethods
@@ -104,8 +111,15 @@ function fixture(t: TestContext, name: string) {
             },
           ]
         },
+        worktreesChanged: (worktrees) => {
+          listed.push({ session, worktrees })
+        },
       },
     )
+    connection.receive({
+      target: 'extension',
+      call: { type: 'connect', session },
+    })
     t.after(() => extension.$close())
     return extension
   }
@@ -113,8 +127,32 @@ function fixture(t: TestContext, name: string) {
     connection.close()
     workbench.$close()
   })
-  return { connection, workbench, connectExtension, received }
+  return { connection, workbench, connectExtension, received, listed }
 }
+
+test('each extension session receives what the desktop sends as it connects', async (t) => {
+  const worktrees: RunningWorktree[] = [
+    {
+      path: '/repo',
+      basename: 'repo',
+      branchName: 'main',
+      state: 'running',
+      deleting: false,
+    },
+  ]
+  const f = fixture(t, 'editor', (extension) => {
+    void extension.worktreesChanged.asEvent(worktrees)
+  })
+  f.connectExtension('first')
+  const second = f.connectExtension('second')
+  await setImmediate()
+  assert.deepEqual(f.listed, [
+    { session: 'first', worktrees },
+    { session: 'second', worktrees },
+  ])
+  await second.openWorktree('/repo')
+  assert.deepEqual(f.received, ['/repo'])
+})
 
 test('two editor connections route bidirectional calls and nested replies independently', async (t) => {
   const a = fixture(t, 'a')

@@ -11,6 +11,7 @@ import {
   EDITOR_RPC_MESSAGE,
   isEditorMessage,
   type DesktopExtensionMethods,
+  type RunningWorktree,
 } from '../../../shared/editor-rpc'
 import { EditorConnection } from './connection'
 import type { TerminalPastePart } from '../../../shared/clipboard'
@@ -26,6 +27,7 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
   private connection: EditorConnection | undefined
   private session: string | undefined
   private ready = false
+  private worktrees: RunningWorktree[] = []
 
   constructor(
     key: string,
@@ -107,6 +109,12 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
             },
           },
           desktop,
+          (extension) => {
+            // A replaced or closed extension receives the list when it reconnects.
+            void extension.worktreesChanged
+              .asEvent(this.worktrees)
+              .catch(() => {})
+          },
         )
         this.connection = connection
       },
@@ -180,6 +188,13 @@ export class ElectronEditorPage implements EditorPage, VscodeSettingsPage {
   async focusChatTerminal(id: string): Promise<boolean> {
     if (!this.ready || !this.connection?.extension) return false
     return this.connection.extension.focusChatTerminal(id)
+  }
+
+  receiveWorktrees(worktrees: RunningWorktree[]): void {
+    this.worktrees = worktrees
+    void this.connection?.extension?.worktreesChanged
+      .asEvent(worktrees)
+      .catch(() => {})
   }
 
   dispose(): void {

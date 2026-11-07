@@ -25,6 +25,10 @@ export class EditorConnection {
     private readonly transport: EditorTransport,
     workbenchMethods: DesktopWorkbenchMethods,
     private readonly extensionMethods: DesktopExtensionMethods,
+    // Receives each extension peer as its session connects.
+    private readonly onExtensionConnected: (
+      extension: BirpcReturn<ExtensionMethods, DesktopExtensionMethods>,
+    ) => void = () => {},
   ) {
     this.workbench = createMessageRpc<
       WorkbenchMethods,
@@ -71,6 +75,7 @@ export class EditorConnection {
           },
           this.extensionMethods,
         )
+        this.onExtensionConnected(this.extension)
       } else {
         if (message.session !== this.extensionSession)
           throw new Error('Extension RPC session expired')

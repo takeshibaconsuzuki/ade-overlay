@@ -19,6 +19,17 @@
     "workspace"
   ],
   "contributes": {
+    "configuration": {
+      "title": "ADE",
+      "properties": {
+        "ade.sidebar.worktreeCount": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "markdownDescription": "Number of other running worktrees listed in the ADE sidebar, in worktree picker order. `0` hides the list."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {

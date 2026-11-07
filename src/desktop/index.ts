@@ -115,6 +115,7 @@ async function main(): Promise<void> {
       WORKTREES_CHANGED,
       worktreeOrder.sort(worktrees),
     )
+    editorHost.receiveWorktrees(worktreeOrder.running(worktrees))
   }
   const clipboardResources = new UrlClipboardResourceReader(
     new FetchHttpClient(),
@@ -136,6 +137,7 @@ async function main(): Promise<void> {
       openChatTerminal: (options): Promise<void> =>
         chats.openChatTerminal(options),
       readClipboard: () => clipboard.readClipboard(),
+      openWorktree: (path): Promise<void> => openWorktree(path),
     },
   )
   const editor = new EditorWindowManager(

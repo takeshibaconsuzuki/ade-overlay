@@ -1,4 +1,5 @@
 import type { Worktree } from '../../shared/api'
+import type { RunningWorktree } from '../../shared/editor-rpc'
 
 // Open recency belongs to this desktop session and survives server reconnects.
 export class WorktreeOrder {
@@ -23,5 +24,15 @@ export class WorktreeOrder {
         a.path.localeCompare(b.path)
       )
     })
+  }
+
+  // The leading picker rows, without fields other views do not need.
+  running(worktrees: Worktree[]): RunningWorktree[] {
+    return this.sort(worktrees).flatMap(
+      ({ path, basename, branchName, deleting, vscode: { state } }) =>
+        state === 'stopped'
+          ? []
+          : [{ path, basename, branchName, state, deleting }],
+    )
   }
 }

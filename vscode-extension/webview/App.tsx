@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import { ChevronDownIcon } from '@radix-ui/react-icons'
 import { Box, Button, DropdownMenu, Flex, IconButton } from '@radix-ui/themes'
-import type { ChatsMessage, SidebarMessage } from '../shared/api'
+import type {
+  ChatsMessage,
+  SidebarMessage,
+  WorktreesMessage,
+} from '../shared/api'
 import { ChatList } from './ChatList'
+import { WorktreeList } from './WorktreeList'
 
 declare function acquireVsCodeApi(): {
   postMessage(message: SidebarMessage): void
@@ -31,9 +36,11 @@ function TerminalIcon() {
 
 export function App() {
   const [snapshot, setSnapshot] = useState<ChatsMessage>()
+  const [worktrees, setWorktrees] = useState<WorktreesMessage>()
   useEffect(() => {
-    const receive = (event: MessageEvent<ChatsMessage>) => {
+    const receive = (event: MessageEvent<ChatsMessage | WorktreesMessage>) => {
       if (event.data.type === 'chats') setSnapshot(event.data)
+      if (event.data.type === 'worktrees') setWorktrees(event.data)
     }
     window.addEventListener('message', receive)
     vscode.postMessage({ type: 'ready' })
@@ -54,6 +61,12 @@ export function App() {
           <TerminalIcon />
         </IconButton>
       </Flex>
+      <WorktreeList
+        worktrees={worktrees?.worktrees}
+        onOpenWorktree={(path) =>
+          vscode.postMessage({ type: 'openWorktree', path })
+        }
+      />
       <Box px="4" py="3">
         <Flex role="group" aria-label="Start chat">
           <Button

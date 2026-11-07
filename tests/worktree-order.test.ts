@@ -18,6 +18,43 @@ function worktree(
   }
 }
 
+test('running worktrees keep picker order and omit stopped worktrees and other details', () => {
+  const order = new WorktreeOrder()
+  const stopped = worktree('a')
+  const starting = worktree('z', 'starting')
+  const running = {
+    ...worktree('y', 'running'),
+    error: { id: '1', message: 'x' },
+  }
+  const deleting = { ...worktree('x', 'stopping'), deleting: true }
+  order.recordOpen(running.path)
+  order.recordOpen(starting.path)
+  assert.deepEqual(order.running([stopped, running, deleting, starting]), [
+    {
+      path: starting.path,
+      basename: 'z',
+      branchName: 'z',
+      state: 'starting',
+      deleting: false,
+    },
+    {
+      path: running.path,
+      basename: 'y',
+      branchName: 'y',
+      state: 'running',
+      deleting: false,
+    },
+    {
+      path: deleting.path,
+      basename: 'x',
+      branchName: 'x',
+      state: 'stopping',
+      deleting: true,
+    },
+  ])
+  assert.deepEqual(order.running([stopped]), [])
+})
+
 test('stopped worktrees sort by name and path regardless of open recency', () => {
   const order = new WorktreeOrder()
   const a = worktree('a')
